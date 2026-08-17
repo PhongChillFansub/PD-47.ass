@@ -315,11 +315,7 @@ async function scanGitHub(source) {
 
     // Tên hiển thị: repo/path (root repo thì chỉ tên repo), decode từng cấp
     // cho dễ đọc (VD: "Anime%20XYZ" -> "Anime XYZ").
-    const decodedPath = pathSegments
-      .map(segment => {
-        try { return decodeURIComponent(segment); } catch { return segment; }
-      })
-      .join('/');
+    const decodedPath = pathSegments.map(utils.decodeURISegment).join('/');
     source.name = decodedPath ? `${repo}/${decodedPath}` : repo;
 
     for (const item of items) {
