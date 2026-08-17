@@ -4,12 +4,17 @@
 //         fetchSubtitleFile (từ danh sách link thư mục nguồn đến danh sách link file sub)
 /** Nhận logger(message, type = 'info', extra = undefined) */
 import * as utils from './utils.js';
+
 /** Tối đa 60 giây kết nối và nhận dữ liệu. Dùng cho hàm fetchWithTimeout(). */
 const FETCH_TIMEOUT = 60000;
+
 /** Chỉ nhận file sub V4+ tạo bằng Aegisub? */
 const VALID_FILE_SIGNATURE = ["[Script Info]", "[V4+ Styles]", "[Events]"];
+
 /** [ChatGPT] kiểm tra dữ liệu hợp lệ. Trả về boolean */
-const validateSubtitleContent = text => !!text && VALID_FILE_SIGNATURE.some(sig => text.includes(sig));
+const validateSubtitleContent = text => 
+  !!text && VALID_FILE_SIGNATURE.some(sig => text.includes(sig));
+
 /** [ChatGPT] Fetch with timeout. */
 const fetchWithTimeout = async url => {
   // Tạo một AbortController để hủy fetch nếu quá thời gian
@@ -21,20 +26,30 @@ const fetchWithTimeout = async url => {
     clearTimeout(timeout);
   }
 };
+
 /** Fetch với log */
-const loggedFetch = async (url, id = "undefined", type = "undefined") => {
+const loggedFetch = async (
+  url,
+  id = "undefined",
+  type = "undefined"
+) => {
   utils.log(`fetcher: ${type}: ${id}.`, url);
   try {
     const response = await fetchWithTimeout(url);
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
     const text = await response.text();
-    if (type !== 'folder' && !validateSubtitleContent(text)) throw new Error("Invalid subtitle content");
+    if (type !== 'folder' && !validateSubtitleContent(text)) {
+      throw new Error("Invalid subtitle content");
+    }
     return text;
   } catch (err) {
     utils.error(`fetcher: Lỗi fetch ${type}: ${id}.`, err.message);
     return null;
   }
 };
+
 /** Hàm khớp tìm kiếm. Phân tách băng |, bỏ khoảng trắng, bỏ rỗng, phân biệt hoa thường nếu key bắt đầu bằng #.
  * @param {*} name tên tìm kiếm
  * @param {*} searchKey từ khóa tìm kiếm
@@ -43,38 +58,46 @@ const loggedFetch = async (url, id = "undefined", type = "undefined") => {
 const matchSubtitle = (name, searchKey) => {
   if (!searchKey) return true; // Không có từ khóa -> hiển thị tất cả
   if (!name) return false; // Tên file trống -> bỏ qua
+  
   const nameLower = name.toLowerCase();
-  return searchKey.split("|").map(k => k.trim()).filter(Boolean).some(key =>
-    key.startsWith("#")
-      ? name.includes(key.slice(1)) // Nếu key bắt đầu bằng # thì phân biệt hoa thường
-      : nameLower.includes(key.toLowerCase()) // Ngược lại thì không phân biệt hoa thường
-  );
+
+  return searchKey
+    .split("|")
+    .map(k => k.trim())
+    .filter(Boolean)
+    .some(key =>
+      key.startsWith("#")
+        ? name.includes(key.slice(1)) // Nếu key bắt đầu bằng # thì phân biệt hoa thường
+        : nameLower.includes(key.toLowerCase()) // Ngược lại thì không phân biệt hoa thường
+    );
 }
-/** [ChatGPT] Chuẩn hóa URL thư mục Google Drive.
+
+/** [arena.ai] Chuẩn hóa URL thư mục Google Drive.
  *
  * Hỗ trợ các dạng:
  * - `https://drive.google.com/drive/folders/{folderId}`
  * - `https://drive.google.com/drive/u/{number}/folders/{folderId}`
  *
- * Query, fragment và dấu gạch chéo sau ID không được đưa vào `folderid`.
+ * Query, fragment và dấu gạch chéo sau ID không được đưa vào `folderId`.
  *
  * @param {string} url - URL thư mục Google Drive cần chuẩn hóa.
- * @returns {{url: string, folderid: string}|null} Object chứa URL thư mục
+ * @returns {{url: string, folderId: string}|null} Object chứa URL thư mục
  * chuẩn hóa và ID thư mục; trả về `null` nếu URL không chứa ID hợp lệ.
  */
 const normalizeGDriveUrl = url => {
   const folderId = url?.match(
     /drive\.google\.com\/drive\/(?:u\/\d+\/)?folders\/([a-zA-Z0-9_-]+)/
-  )?.[1];
+  )?.[1]?.replace(/\/+$/, '');
+
   return folderId
-  ? {
-      url: `https://drive.google.com/drive/folders/${folderId}`,
-      folderid: folderId
-    }
-  : null;
+    ? {
+        url: `https://drive.google.com/drive/folders/${folderId}`,
+        folderId
+      }
+    : null;
 }
-/**
- * Quét các file phụ đề ASS trong một thư mục Google Drive công khai.
+
+/** [arena.ai] Quét các file phụ đề ASS trong một thư mục Google Drive công khai.
  *
  * Hàm nhận object nguồn đã được chuẩn hóa, sửa trực tiếp object đó rồi trả
  * lại cùng một tham chiếu. Trang `embeddedfolderview` được dùng để lấy tên
@@ -85,11 +108,11 @@ const normalizeGDriveUrl = url => {
  * vào `fileList`. Nếu fetch hoặc parse thất bại, `fileList` là mảng rỗng và
  * `name` giữ giá trị mặc định `undefined_GDrive`.
  *
- * @param {{url: string, folderid: string}} source - Object nguồn Google Drive
- * cần quét. `url` là URL thư mục đã chuẩn hóa và `folderid` là ID thư mục.
+ * @param {{url: string, folderId: string}} source - Object nguồn Google Drive
+ * cần quét. `url` là URL thư mục đã chuẩn hóa và `folderId` là ID thư mục.
  * @returns {Promise<{
  *   url: string,
- *   folderid: string,
+ *   folderId: string,
  *   sourceType: 'gdrive',
  *   name: string,
  *   savedAt: number,
@@ -109,14 +132,15 @@ async function scanGDrive(source) {
   source.name = 'undefined_GDrive';
   source.fileList = [];
 
-  const folderId = source.folderid?.replace(/\/+$/, '');
+  const { folderId } = source;
 
   if (!folderId) {
+    utils.error(
+      `fetcher: Lỗi scanGDrive: Cố tình chạy scanGDrive mà ko có folderId?`
+    );
     source.savedAt = Date.now();
     return source;
   }
-
-  source.folderid = folderId;
 
   try {
     const html = await loggedFetch(
@@ -124,16 +148,22 @@ async function scanGDrive(source) {
       folderId,
       'folder'
     );
+
     source.savedAt = Date.now();
 
     if (!html) return source;
 
+    // Lấy tên thư mục bằng phương pháp quét đa tầng (fallback).
     const ogTitleMatch = html.match(
       /<meta property="og:title" content="([^"]+)"/i
     );
-    const titleMatch = html.match(/<title>([\s\S]*?)<\/title>/i);
+
+    const titleMatch = html.match(
+      /<title>([\s\S]*?)<\/title>/i
+    );
 
     let extractedName = ogTitleMatch?.[1]?.trim() || '';
+
     if (!extractedName && titleMatch?.[1]) {
       extractedName = titleMatch[1]
         .trim()
@@ -142,8 +172,9 @@ async function scanGDrive(source) {
         .trim();
     }
 
-    source.name = utils.decodeHTML(extractedName).trim()
-      || 'undefined_GDrive';
+    source.name =
+      utils.decodeHTML(extractedName).trim() ||
+      'undefined_GDrive';
 
     const regex =
       /href="[^"]*\/file\/d\/([a-zA-Z0-9_-]+)[^"]*"[^>]*>(?:(?!<\/a>)[\s\S])*?<div class="flip-entry-title">([^<]+)<\/div>/g;
@@ -152,7 +183,9 @@ async function scanGDrive(source) {
       const [, id, name] = match;
       const fileName = utils.decodeHTML(name);
 
-      if (!fileName.toLowerCase().endsWith('.ass')) continue;
+      if (!fileName.toLowerCase().endsWith('.ass')) {
+        continue;
+      }
 
       source.fileList.push({
         id,
@@ -170,28 +203,32 @@ async function scanGDrive(source) {
     return source;
   }
 }
-/** [ChatGPT] Chuẩn hóa URL thư mục GitHub.
+
+/** [arena.ai] Chuẩn hóa URL thư mục GitHub.
  *
  * Chỉ hỗ trợ URL dạng:
  * `https://github.com/{owner}/{repo}/tree/{branch}/{path}`.
  *
- * `folderid` là định danh thư mục theo cấu trúc
+ * `folderId` là định danh thư mục theo cấu trúc
  * `{owner}/{repo}/{branch}/{path}` và không chứa dấu gạch chéo ở cuối.
  *
  * @param {string} url - URL thư mục GitHub cần chuẩn hóa.
- * @returns {{url: string, folderid: string}|null} Object chứa URL thư mục
+ * @returns {{url: string, folderId: string}|null} Object chứa URL thư mục
  * chuẩn hóa và định danh thư mục; trả về `null` nếu URL sai định dạng.
  */
 const normalizeGitHubUrl = url => {
   const match = url?.match(
     /github\.com\/([^/?#]+)\/([^/?#]+)\/tree\/([^/?#]+)\/?(.*)/
   );
+
   if (!match) return null;
+
   const [, owner, repo, branch, path] = match;
+
   return {
     url: `https://github.com/${owner}/${repo}/tree/${branch}/${path}`
       .replace(/\/+$/, ""),
-    folderid: `${owner}/${repo}/${branch}/${path}`.replace(/\/+$/, "")
+    folderId: `${owner}/${repo}/${branch}/${path}`
+      .replace(/\/+$/, "")
   };
 };
-
