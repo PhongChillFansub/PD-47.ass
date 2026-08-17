@@ -28,7 +28,7 @@ const loggedFetch = async (url, id = "undefined", type = "undefined") => {
     const response = await fetchWithTimeout(url);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const text = await response.text();
-    if (!validateSubtitleContent(text)) throw new Error("Invalid subtitle content");
+    if (type !== 'folder' && !validateSubtitleContent(text)) throw new Error("Invalid subtitle content");
     return text;
   } catch (err) {
     utils.error(`fetcher: Lỗi fetch ${type}: ${id}.`, err.message);
@@ -50,37 +50,137 @@ const matchSubtitle = (name, searchKey) => {
       : nameLower.includes(key.toLowerCase()) // Ngược lại thì không phân biệt hoa thường
   );
 }
-/** [ChatGPT] Chuẩn hóa link GDrive 
+/** [ChatGPT] Chuẩn hóa URL thư mục Google Drive.
+ *
  * Hỗ trợ các dạng:
- * - https://drive.google.com/drive/folders/{folderId}
- * - https://drive.google.com/drive/u/{number}/folders/{folderId}
+ * - `https://drive.google.com/drive/folders/{folderId}`
+ * - `https://drive.google.com/drive/u/{number}/folders/{folderId}`
+ *
+ * Query, fragment và dấu gạch chéo sau ID không được đưa vào `folderid`.
  *
  * @param {string} url - URL thư mục Google Drive cần chuẩn hóa.
- * @returns {[string, string]|null} Mảng gồm:
- * - URL thư mục Google Drive đã chuẩn hóa.
- * - ID của thư mục (`folderId`).
- * 
- * hoặc `null` nếu không tìm thấy `folderId`.
+ * @returns {{url: string, folderid: string}|null} Object chứa URL thư mục
+ * chuẩn hóa và ID thư mục; trả về `null` nếu URL không chứa ID hợp lệ.
  */
 const normalizeGDriveUrl = url => {
   const folderId = url?.match(
     /drive\.google\.com\/drive\/(?:u\/\d+\/)?folders\/([a-zA-Z0-9_-]+)/
   )?.[1];
   return folderId
-  ? [`https://drive.google.com/drive/folders/${folderId}`, folderId]
+  ? {
+      url: `https://drive.google.com/drive/folders/${folderId}`,
+      folderid: folderId
+    }
   : null;
 }
-/** [ChatGPT] Chuẩn hóa link GitHub 
+/**
+ * Quét các file phụ đề ASS trong một thư mục Google Drive công khai.
+ *
+ * Hàm nhận object nguồn đã được chuẩn hóa, sửa trực tiếp object đó rồi trả
+ * lại cùng một tham chiếu. Trang `embeddedfolderview` được dùng để lấy tên
+ * thư mục và danh sách file. Tên thư mục ưu tiên thẻ `og:title`, sau đó mới
+ * dùng thẻ `title`; các hậu tố/tiền tố "Google Drive" trong `title` sẽ bị bỏ.
+ *
+ * Chỉ các file có phần mở rộng `.ass` (không phân biệt hoa/thường) được thêm
+ * vào `fileList`. Nếu fetch hoặc parse thất bại, `fileList` là mảng rỗng và
+ * `name` giữ giá trị mặc định `undefined_GDrive`.
+ *
+ * @param {{url: string, folderid: string}} source - Object nguồn Google Drive
+ * cần quét. `url` là URL thư mục đã chuẩn hóa và `folderid` là ID thư mục.
+ * @returns {Promise<{
+ *   url: string,
+ *   folderid: string,
+ *   sourceType: 'gdrive',
+ *   name: string,
+ *   savedAt: number,
+ *   fileList: Array<{
+ *     id: string,
+ *     fileName: string,
+ *     fetchUrl: string,
+ *     folderUrl: string,
+ *     sourceType: 'gdrive',
+ *     groupName: string
+ *   }>
+ * }>} Chính object `source` đầu vào sau khi được bổ sung thông tin thư mục,
+ * thời điểm quét và danh sách file ASS.
+ */
+async function scanGDrive(source) {
+  source.sourceType = 'gdrive';
+  source.name = 'undefined_GDrive';
+  source.fileList = [];
+
+  const folderId = source.folderid?.replace(/\/+$/, '');
+
+  if (!folderId) {
+    source.savedAt = Date.now();
+    return source;
+  }
+
+  source.folderid = folderId;
+
+  try {
+    const html = await loggedFetch(
+      `https://drive.google.com/embeddedfolderview?id=${folderId}`,
+      folderId,
+      'folder'
+    );
+    source.savedAt = Date.now();
+
+    if (!html) return source;
+
+    const ogTitleMatch = html.match(
+      /<meta property="og:title" content="([^"]+)"/i
+    );
+    const titleMatch = html.match(/<title>([\s\S]*?)<\/title>/i);
+
+    let extractedName = ogTitleMatch?.[1]?.trim() || '';
+    if (!extractedName && titleMatch?.[1]) {
+      extractedName = titleMatch[1]
+        .trim()
+        .replace(/\s*-\s*Google\s+Drive/i, '')
+        .replace(/Google\s+Drive\s*-\s*/i, '')
+        .trim();
+    }
+
+    source.name = utils.decodeHTML(extractedName).trim()
+      || 'undefined_GDrive';
+
+    const regex =
+      /href="[^"]*\/file\/d\/([a-zA-Z0-9_-]+)[^"]*"[^>]*>(?:(?!<\/a>)[\s\S])*?<div class="flip-entry-title">([^<]+)<\/div>/g;
+
+    for (const match of html.matchAll(regex)) {
+      const [, id, name] = match;
+      const fileName = utils.decodeHTML(name);
+
+      if (!fileName.toLowerCase().endsWith('.ass')) continue;
+
+      source.fileList.push({
+        id,
+        fileName,
+        fetchUrl: `https://docs.google.com/uc?export=download&id=${id}`,
+        folderUrl: source.url,
+        sourceType: 'gdrive',
+        groupName: source.name
+      });
+    }
+
+    return source;
+  } catch (err) {
+    utils.error('Lỗi quét Google Drive', err);
+    return source;
+  }
+}
+/** [ChatGPT] Chuẩn hóa URL thư mục GitHub.
+ *
  * Chỉ hỗ trợ URL dạng:
- * https://github.com/{owner}/{repo}/tree/{branch}/{path}
+ * `https://github.com/{owner}/{repo}/tree/{branch}/{path}`.
+ *
+ * `folderid` là định danh thư mục theo cấu trúc
+ * `{owner}/{repo}/{branch}/{path}` và không chứa dấu gạch chéo ở cuối.
  *
  * @param {string} url - URL thư mục GitHub cần chuẩn hóa.
- * @returns {[string, string]|null} Mảng gồm:
- * - URL thư mục GitHub đã chuẩn hóa.
- * - Đường dẫn định danh theo cấu trúc
- *   `{owner}/{repo}/{branch}/{path}`.
- * 
- * nếu URL không đúng định dạng.
+ * @returns {{url: string, folderid: string}|null} Object chứa URL thư mục
+ * chuẩn hóa và định danh thư mục; trả về `null` nếu URL sai định dạng.
  */
 const normalizeGitHubUrl = url => {
   const match = url?.match(
@@ -88,9 +188,10 @@ const normalizeGitHubUrl = url => {
   );
   if (!match) return null;
   const [, owner, repo, branch, path] = match;
-  return [
-    `https://github.com/${owner}/${repo}/tree/${branch}/${path}`.replace(/\/+$/, ""), 
-    `${owner}/${repo}/${branch}/${path}`.replace(/\/+$/, "")
-  ];
+  return {
+    url: `https://github.com/${owner}/${repo}/tree/${branch}/${path}`
+      .replace(/\/+$/, ""),
+    folderid: `${owner}/${repo}/${branch}/${path}`.replace(/\/+$/, "")
+  };
 };
 
