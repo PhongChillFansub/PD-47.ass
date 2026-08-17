@@ -232,3 +232,113 @@ const normalizeGitHubUrl = url => {
       .replace(/\/+$/, "")
   };
 };
+
+/** [arena.ai] Quét các file phụ đề ASS trong một thư mục GitHub công khai.
+ *
+ * Hàm nhận object nguồn đã được chuẩn hóa bởi `normalizeGitHubUrl()`, sửa
+ * trực tiếp object đó rồi trả lại cùng một tham chiếu (giống `scanGDrive`).
+ * Danh sách file lấy qua GitHub Contents API; request không kèm token bị
+ * GitHub giới hạn 60 lần/giờ theo IP nên tránh gọi liên tục.
+ *
+ * `source.name` có dạng `{repo}/{path}` (VD: `PD-47.ass/subs/anime`); nếu
+ * URL trỏ vào root repo thì `name` chỉ là tên repo. Chỉ các file có phần
+ * mở rộng `.ass` (không phân biệt hoa/thường) được thêm vào `fileList`.
+ * Nếu fetch hoặc parse thất bại, `fileList` là mảng rỗng và `name` giữ
+ * giá trị mặc định `undefined_GitHub`.
+ *
+ * @param {{url: string, folderId: string}} source - Object nguồn GitHub cần
+ * quét. `url` là URL thư mục đã chuẩn hóa và `folderId` là định danh
+ * `{owner}/{repo}/{branch}/{path}`.
+ * @returns {Promise<{
+ *   url: string,
+ *   folderId: string,
+ *   sourceType: 'github',
+ *   name: string,
+ *   savedAt: number,
+ *   fileList: Array<{
+ *     id: string,
+ *     fileName: string,
+ *     fetchUrl: string,
+ *     folderUrl: string,
+ *     sourceType: 'github',
+ *     groupName: string
+ *   }>
+ * }>} Chính object `source` đầu vào sau khi được bổ sung thông tin thư mục,
+ * thời điểm quét và danh sách file ASS.
+ */
+async function scanGitHub(source) {
+  source.sourceType = 'github';
+  source.name = 'undefined_GitHub';
+  source.fileList = [];
+
+  const { folderId } = source;
+
+  if (!folderId) {
+    utils.error(
+      `fetcher: Lỗi scanGitHub: Cố tình chạy scanGitHub mà ko có folderId?`
+    );
+    source.savedAt = Date.now();
+    return source;
+  }
+
+  try {
+    // folderId = owner/repo/branch/path, path có thể chứa nhiều cấp con.
+    const [owner, repo, branch, ...pathSegments] = folderId.split('/');
+    // Encode từng cấp path (chứ không encode cả chuỗi) để giữ dấu / phân
+    // cách cấp. Decode trước khi encode lại để tránh double-encode vì
+    // folderId giữ nguyên path như trong URL gốc (VD: "Anime%20XYZ").
+    const encodePathSegment = segment => {
+      try { return encodeURIComponent(decodeURIComponent(segment)); }
+      catch { return encodeURIComponent(segment); }
+    };
+    const encodedPath = pathSegments.map(encodePathSegment).join('/');
+
+    const text = await loggedFetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`,
+      folderId,
+      'folder'
+    );
+
+    source.savedAt = Date.now();
+
+    if (!text) return source;
+
+    const items = JSON.parse(text);
+
+    if (!Array.isArray(items)) {
+      // GitHub API trả về object thay vì array (URL trỏ nhầm vào 1 file...).
+      utils.warn(
+        `fetcher: GitHub API ko trả về array (folder: ${folderId}).`
+      );
+      return source;
+    }
+
+    // Tên hiển thị: repo/path (root repo thì chỉ tên repo), decode từng cấp
+    // cho dễ đọc (VD: "Anime%20XYZ" -> "Anime XYZ").
+    const decodedPath = pathSegments
+      .map(segment => {
+        try { return decodeURIComponent(segment); } catch { return segment; }
+      })
+      .join('/');
+    source.name = decodedPath ? `${repo}/${decodedPath}` : repo;
+
+    for (const item of items) {
+      if (item.type !== 'file') continue; // Bỏ qua thư mục con và submodule
+      if (!item.name.toLowerCase().endsWith('.ass')) continue;
+
+      source.fileList.push({
+        id: item.sha,
+        fileName: item.name,
+        fetchUrl: item.download_url,
+        folderUrl: source.url,
+        sourceType: 'github',
+        groupName: source.name
+      });
+    }
+
+    return source;
+  } catch (err) {
+    utils.error('Lỗi quét GitHub', err);
+    return source;
+  }
+}
