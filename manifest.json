@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "PD-47.ass 15aug26",
+  "author": "PhongChillFansub",
+  "version": "0.1.0",
+  "description": "Hiển thị phụ đề Aegisub trên YouTube (ASS-CEE cũ).",
+  "permissions": ["storage", "activeTab", "scripting", "unlimitedStorage"],
+  "host_permissions": [
+    "https://drive.google.com/embeddedfolderview?id=*",
+    "https://docs.google.com/uc?export=download&id=*",
+    "https://drive.usercontent.google.com/download?id=*"
+  ],
+  "optional_host_permissions": [
+    "https://www.youtube.com/*",
+    "https://www.bilibili.tv/*",
+    "https://www.bilibili.com/*"
+  ],
+  "minimum_chrome_version": "131",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "background": {
+    "service_worker": "background/background.js",
+    "type": "module"
+  },
+  "options_page": "options.html",
+  "action": { 
+    "default_title": "[PhongChillFansub] PD-47.ass",
+    "default_popup": "popup.html"
+  }
+}

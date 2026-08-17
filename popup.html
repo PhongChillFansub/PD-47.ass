@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<!-- v0.1.0 16aug26 -->
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" id="popupTheme" href="popup-only-ui-theme/high-density-ai.css">
+  <!-- Chú ý: chỉ sử dụng file css trong folder popup-only-ui-theme -->
+</head>
+<body>
+  <div id="popupContainer">
+    <!-- Cột 1: 2 nút logo và icon chuyển sang tab cài đặt -->
+    <div id="masterControlButtonColumn">
+      <button id="reloadLogo" class="Button0 FxHover1" title="Logo. Bấm để tải lại trình render.">🅿️</button>
+      <button id="settingIcon" class="Button0 FxHover2" title="Mở trang cài đặt extension.">⚙️</button>
+    </div>
+    <!-- Cột 2: 3 ô thông số -->
+    <div id="statsPanelColumn">
+      <div class="StatBadge" title="FPS: dựa trên rVFC và giới hạn của người dùng">
+        <span class="StatLabel">FPS</span>
+        <span class="StatValue" id="valueFPS">--</span>
+      </div>
+      <div class="StatBadge" title="NPS: số lượng node phải render trong giây">
+        <span class="StatLabel">NPS</span>
+        <span class="StatValue" id="valueNPS">--</span>
+      </div>
+      <div class="StatBadge" title="DFPS: số frame mà extension đã chủ động bỏ qua trong giây (tổng: --)">
+        <span class="StatLabel">DFPS</span>
+        <span class="StatValue" id="valueDFPS">--</span>
+      </div>
+    </div>
+    <!-- Cột 3: Thông tin phụ đề (phần script info > title) -->
+    <div id="subTitleColumn" title="Thông tin phụ đề" class="noSubToLoad">Không có phụ đề.
+    </div>
+    <!-- Cột 4: Log -->
+    <div id="logColumn" title="Thông báo của extension (log)">
+      <div id="logContainer">
+        <!-- Log item được đưa vào sau -->
+      </div>
+      <button id="scrollButton" class="hidden" title="Cuộn xuống log mới nhất">👇 Mới nhất</button>
+    </div>
+  </div>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
