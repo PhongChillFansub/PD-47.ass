@@ -191,7 +191,6 @@ const editDistanceSubstring = (pattern, text, maxDist = Infinity) => {
  */
 const maxAllowedDistance = length => length < 3 ? 0 : Math.floor(length / 2);
 
-// to-do: xem từ dòng này xuống.
 /** [arena.ai] Điểm một token trên tên file — tên file là chuẩn, token có thể sai.
  * - Token `#...` (phân biệt hoa thường): khớp nguyên chuỗi con đúng case → `2n`,
  *   không → 0 (không fuzzy).
@@ -740,11 +739,11 @@ export async function fetchSubtitleText(candidate) {
   const byteSize = new TextEncoder().encode(text).length;
   if (byteSize > SUBTITLE_SIZE_WARN) {
     utils.warn(
-      `fetcher: fetchSubtitleText(): ${id}, ${fileName} > 10MB` +
+      `fetcher: fetchSubtitleText(): file ${id}, ${fileName} > 10MB` +
         ` (${(byteSize / (1024 * 1024)).toFixed(2)} MB).`
     );
   }
 
-  utils.log(`fetcher: fetchSubtitleText(): xong ${fileName}.`);
+  utils.log(`fetcher: fetchSubtitleText(): xong file ${fileName}.`);
   return text;
 }
