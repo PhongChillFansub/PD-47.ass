@@ -5,5 +5,20 @@ popup:
     popup-only-ui-theme/*.css
 
 fetcher.js
-- export 1: fetchSubtitleFile
-- export 2: fetchSubtitleText
+    - export 1: fetchSubtitleFile
+    - export 2: fetchSubtitleText
+    fetch tool: loggedFetch (core: fetchWithTimeout)
+    - cụm xử lí tìm kiếm:
+        parseSearchQuery: tách searchKey từ user thành obj {value, caseSensitive (boolean)}
+            mỗi cụm key ngăn cách bằng dấu cách ngoài ngoặc kép là 1 token.
+            mỗi cụm key ngăn cách bằng dấu "|" là 1 group.
+            * Hướng dẫn cho end-user thuật toán tìm kiếm:
+                mỗi cụm từ được ngăn cách bởi dấu cách (vd: `hello world` thì tìm "hello" và "world")
+                nếu cụm từ nằm trong ngoặc kép (`"nice shot sir"`) thì tìm cả cụm "nice shot sir".
+                sử dụng "#" thì sẽ có phân biệt hoa-thường (dùng cho tìm ID video)
+                sử dụng "|" thì cho phép gộp kết quả tìm kiếm nhiều cú pháp.
+        scoreSearchToken: thuật toán tính điểm với trường hợp đủ số kí tự của ít nhất 1 từ
+        
+
+    
+
