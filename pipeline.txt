@@ -21,8 +21,8 @@ fetcher.js
             (tính năng tìm kiếm cả tiếng Việt có dấu và không dấu)
         editDistanceSubstring: hàm tính điểm theo khoảng cách Levenshtein giữa pattern (token đã fold) và tên file (đã fold)
         maxAllowedDistance: hàm quy định khoảng cách Levenshtein tối đa cho phép (mức độ liên quan giữa cú pháp và tên tệp)
-        scoreSearchToken: thuật toán tính điểm với trường hợp khớp ít nhất 1 từ
-        scorePartialToken: thuật toán tính điểm với trường hợp không khớp từ nào
+        scoreSearchToken: thuật toán tính điểm và kiểm tra khớp chính xác/gần đúng cho từng token (trả về { score, exact })
+        scoreSearchGroup: thuật toán tính tổng điểm nhóm token theo 3 mức (không khớp = 0, khớp 1 phần / na ná = 1xxx-4xxx, khớp chính xác 100% = >= 1_000_000)
         
 
     
