@@ -1,4 +1,4 @@
-// v0.1.0 19aug26
+// v0.1.0 20aug26
 "use strict";
 const extensionName = "PD-47.ass";
 const HTML_ENTITIES = {

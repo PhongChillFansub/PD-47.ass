@@ -17,7 +17,12 @@ fetcher.js
                 nếu cụm từ nằm trong ngoặc kép (`"nice shot sir"`) thì tìm cả cụm "nice shot sir".
                 sử dụng "#" thì sẽ có phân biệt hoa-thường (dùng cho tìm ID video)
                 sử dụng "|" thì cho phép gộp kết quả tìm kiếm nhiều cú pháp.
-        scoreSearchToken: thuật toán tính điểm với trường hợp đủ số kí tự của ít nhất 1 từ
+        foldText: Hàm chuyển đổi tiếng Việt có dấu thành không dấu để tìm kiếm.
+            (tính năng tìm kiếm cả tiếng Việt có dấu và không dấu)
+        editDistanceSubstring: hàm tính điểm theo khoảng cách Levenshtein giữa pattern (token đã fold) và tên file (đã fold)
+        maxAllowedDistance: hàm quy định khoảng cách Levenshtein tối đa cho phép (mức độ liên quan giữa cú pháp và tên tệp)
+        scoreSearchToken: thuật toán tính điểm với trường hợp khớp ít nhất 1 từ
+        scorePartialToken: thuật toán tính điểm với trường hợp không khớp từ nào
         
 
     

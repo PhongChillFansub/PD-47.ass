@@ -1,2 +1,3 @@
-// v0.1.0 16aug26
+// v0.1.0 20aug26
+// alpha mode
 "use strict";
