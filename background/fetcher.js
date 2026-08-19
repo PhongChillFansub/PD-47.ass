@@ -644,9 +644,9 @@ async function scanGitHub(source) {
  *   score: number
  * }>>} candidates có `score > 0`, xếp điểm giảm dần, hòa thì `groupName` rồi `fileName`
  */
-export async function fetchSubtitleFile(sources, searchKey) {
+export async function searchSubtitleFile(sources, searchKey) {
   if (!Array.isArray(sources) || !sources.length) {
-    utils.log('fetcher: fetchSubtitleFile(): không có source nào.');
+    utils.log('fetcher: searchSubtitleFile(): không có source nào.');
     return [];
   }
 
@@ -680,7 +680,7 @@ export async function fetchSubtitleFile(sources, searchKey) {
   );
 
   utils.log(
-    `fetcher: fetchSubtitleFile(): ${candidates.length} file` +
+    `fetcher: searchSubtitleFile(): ${candidates.length} file` +
       ` (query = ${JSON.stringify(searchKey ?? '')}).`
   );
 

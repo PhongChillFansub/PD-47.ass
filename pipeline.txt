@@ -1,12 +1,13 @@
-16aug26
+20aug26
 popup:
     popup.html
     popup.js
     popup-only-ui-theme/*.css
 
 fetcher.js
-    - export 1: fetchSubtitleFile
-    - export 2: fetchSubtitleText
+    - export 1: fetchSubtitleFileList
+    - export 2: searchSubtitleFile
+    - export 3: fetchSubtitleText
     fetch tool: loggedFetch (core: fetchWithTimeout)
     - cụm xử lí tìm kiếm:
         parseSearchQuery: tách searchKey từ user thành obj {value, caseSensitive (boolean)}
@@ -16,13 +17,18 @@ fetcher.js
                 mỗi cụm từ được ngăn cách bởi dấu cách (vd: `hello world` thì tìm "hello" và "world")
                 nếu cụm từ nằm trong ngoặc kép (`"nice shot sir"`) thì tìm cả cụm "nice shot sir".
                 sử dụng "#" thì sẽ có phân biệt hoa-thường (dùng cho tìm ID video)
-                sử dụng "|" thì cho phép gộp kết quả tìm kiếm nhiều cú pháp.
+                sử dụng "|" thì cho phép gộp kết quả tìm kiếm nhiều lần.
         foldText: Hàm chuyển đổi tiếng Việt có dấu thành không dấu để tìm kiếm.
             (tính năng tìm kiếm cả tiếng Việt có dấu và không dấu)
         editDistanceSubstring: hàm tính điểm theo khoảng cách Levenshtein giữa pattern (token đã fold) và tên file (đã fold)
         maxAllowedDistance: hàm quy định khoảng cách Levenshtein tối đa cho phép (mức độ liên quan giữa cú pháp và tên tệp)
         scoreSearchToken: thuật toán tính điểm và kiểm tra khớp chính xác/gần đúng cho từng token (trả về { score, exact })
+        scorePhraseRuns: hàm tính điểm bonus (1000đ/từ gần đúng, có khoảng cách levenshtein cho phép)
         scoreSearchGroup: thuật toán tính tổng điểm nhóm token theo 3 mức (không khớp = 0, khớp 1 phần / na ná = 1xxx-4xxx, khớp chính xác 100% = >= 1_000_000)
+        matchSubtitle: hàm tổng hợp điểm theo 1 cụm (group) các nhóm token
+    - searchSubtitleFile: hàm trung tâm, lọc và sắp xếp tệp theo thuật toán của hàm matchSubtitle (scoreSearchGroup).
+        Chú ý: ở đây chỉ tìm kiếm chỉ mục đã có sau khi chạy fetchSubtitleFileList.
+    - fetchSubtitleText: hàm tải text của file sub từ fetchUrl
         
 
     
