@@ -8,13 +8,13 @@ import * as utils from './utils.js';
 /** Tối đa 60 giây kết nối và nhận dữ liệu. Dùng cho hàm fetchWithTimeout(). */
 const FETCH_TIMEOUT = 60000;
 
-/** Cảnh báo (không từ chối) khi file sub lớn hơn ngưỡng này. */
+/** Cảnh báo (không từ chối) khi file sub lớn hơn ngưỡng này. Ở đây là 10MB */
 const SUBTITLE_SIZE_WARN = 10 * 1024 * 1024;
 
 /** Chỉ nhận file sub V4+ tạo bằng Aegisub? */
 const VALID_FILE_SIGNATURE = ["[Script Info]", "[V4+ Styles]", "[Events]"];
 
-/** [ChatGPT] kiểm tra dữ liệu hợp lệ. Trả về boolean */
+/** kiểm tra dữ liệu hợp lệ. Trả về boolean */
 const validateSubtitleContent = text => 
   !!text && VALID_FILE_SIGNATURE.some(sig => text.includes(sig));
 
@@ -30,7 +30,7 @@ const fetchWithTimeout = async url => {
   }
 };
 
-/** Fetch với log */
+/** [arena.ai] Fetch với log */
 const loggedFetch = async (
   url,
   id = "undefined",
@@ -53,16 +53,33 @@ const loggedFetch = async (
   }
 };
 
-/**
- * Tách query thành các nhóm OR (`|`) và token (khoảng trắng).
+/** [arena.ai] Tách query thành các nhóm OR (`|`) và token (khoảng trắng).
  * Token không còn AND-chết: thiếu từ chỉ tụt điểm, không về 0.
  *
+ * Cấu trúc trả về: `groups` là mảng các nhóm; mỗi nhóm là mảng token.
+ * - Token: một đơn vị tìm kiếm. Mỗi token = `{ value, caseSensitive }`.
+ *   `value` là chuỗi cần tìm trong tên (một từ, hoặc cả cụm nếu bọc `"`).
+ *   `caseSensitive` = true khi token (hoặc cụm) bắt đầu bằng `#`.
+ * - Nhóm (group): các token nằm giữa hai dấu `|` (hoặc cả query nếu không có `|`).
+ *   Trong một nhóm, từng token được chấm riêng rồi cộng điểm (thiếu token
+ *   không hủy nhóm). Nhiều nhóm thì `matchSubtitle` lấy nhóm điểm cao nhất.
+ *
+ * Ví dụ `a b | #"One Piece" #ID` →
+ * ```
+ * [
+ *   [ { value: "a", caseSensitive: false },
+ *     { value: "b", caseSensitive: false } ],
+ *   [ { value: "One Piece", caseSensitive: true },
+ *     { value: "ID", caseSensitive: true } ]
+ * ]
+ * ```
+ *
  * Cú pháp:
- * - `hello world`     → hai token; đủ cả hai = đủ, chỉ một = chưa đủ
+ * - `hello world`     → một nhóm, hai token; đủ cả hai = đủ, chỉ một = chưa đủ
  * - `"one piece"`     → một token cụm từ (giữ dấu cách)
  * - `#Hello`          → phân biệt hoa thường
  * - `#"Hello World"`  → cụm từ phân biệt hoa thường
- * - `a b | c`         → lấy nhóm điểm cao hơn
+ * - `a b | c`         → hai nhóm; lấy nhóm điểm cao hơn
  *
  * @param {string} searchKey
  * @returns {Array<Array<{value: string, caseSensitive: boolean}>>}
@@ -92,8 +109,7 @@ const parseSearchQuery = searchKey => {
   return groups;
 };
 
-/**
- * Điểm một token trên tên file.
+/** [arena.ai] Điểm một token trên tên file.
  * - Không tìm thấy substring → 0
  * - Tìm thấy → `length + số ký tự trùng cả hoa/thường` ở cửa sổ khớp tốt nhất
  *   (vd. "hello" khớp "hello" = 10, khớp "hEllO" = 8, khớp "HELLO" = 5)
@@ -143,8 +159,7 @@ const SEARCH_TOKEN_BAND = 1000;
 /** Trần dải gần khớp (không có từ nào là substring nguyên). */
 const SEARCH_NEAR_MAX = 999;
 
-/**
- * Gần khớp một token: đoạn con dài nhất của token xuất hiện trong tên
+/** [arena.ai] Gần khớp một token: đoạn con dài nhất của token xuất hiện trong tên
  * (chưa đủ cả từ). Cần ≥ max(2, ceil(n/2)) ký tự — "hello" cần ≥ 3,
  * "my" (n=2) không có gần khớp (chỉ tính khi đủ cả từ).
  *
@@ -191,8 +206,7 @@ const scorePartialToken = (name, nameLower, token) => {
   return bestLen ? bestLen + bestExact : 0;
 };
 
-/**
- * Thưởng cụm liền mạch dài nhất (không cộng chồng cụm con).
+/** [arena.ai] Thưởng cụm liền mạch dài nhất (không cộng chồng cụm con).
  * Query `hello my world` trên "hello my" → +8; trên "hello my world" → +14.
  *
  * @param {string} name
@@ -232,8 +246,7 @@ const scorePhraseRuns = (name, nameLower, tokens, tokenScores) => {
   return bonus;
 };
 
-/**
- * Điểm một nhóm token.
+/** [arena.ai] Điểm một nhóm token.
  *
  * Không đủ 1 từ nguyên → `2 … 999`. Có từ nguyên →
  * `(đủ ? 1_000_000 : 0) + số_từ * 1000 + chất_lượng`.
@@ -268,8 +281,7 @@ const scoreSearchGroup = (name, nameLower, tokens) => {
     quality;
 };
 
-/**
- * Chấm điểm khớp tên file sub với từ khóa tìm kiếm.
+/** [arena.ai] Chấm điểm khớp tên file sub với từ khóa tìm kiếm.
  *
  * Trả về số ≥ 0 (dùng `if (!score)` để ẩn file không khớp):
  * - `0`           — không khớp từ nào
@@ -574,8 +586,7 @@ async function scanGitHub(source) {
   }
 }
 
-/**
- * Tìm file sub trong chỉ mục đã quét (`source.fileList`).
+/** [arena.ai] Tìm file sub trong chỉ mục đã quét (`source.fileList`).
  *
  * Không gọi `scanGDrive` / `scanGitHub`. Giả định mỗi source đã có `name`
  * và `fileList`. Điểm = `matchSubtitle(`${name} ${fileName}`, searchKey)`
@@ -646,8 +657,7 @@ export async function fetchSubtitleFile(sources, searchKey) {
   return candidates;
 }
 
-/**
- * Tải toàn bộ text một file sub từ candidate.fetchUrl.
+/** [arena.ai] Tải toàn bộ text một file sub từ candidate.fetchUrl.
  *
  * Dùng loggedFetch (timeout, HTTP, validate chữ ký ASS). Lỗi → null
  * + utils.warn, không throw. File > 10MB chỉ cảnh báo, vẫn trả text.

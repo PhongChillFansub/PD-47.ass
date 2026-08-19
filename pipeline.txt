@@ -3,3 +3,7 @@ popup:
     popup.html
     popup.js
     popup-only-ui-theme/*.css
+
+fetcher.js
+- export 1: fetchSubtitleFile
+- export 2: fetchSubtitleText
