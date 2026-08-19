@@ -213,7 +213,7 @@ const scoreSearchToken = (name, nameFolded, token) => {
   }
 
   const pattern = foldText(value);
-  const distance = editDistanceSubstring(pattern, nameFolded, maxAllowedDistance(token.length));
+  const distance = editDistanceSubstring(pattern, nameFolded, maxAllowedDistance(pattern.length));
   if (distance > maxAllowedDistance(pattern.length)) return 0;
 
   return 2 * n - 2 * distance;
@@ -244,7 +244,9 @@ const scorePartialToken = (name, nameFolded, token) => {
   if (n < 2 || caseSensitive) return 0;
 
   const pattern = foldText(value);
-  const distance = editDistanceSubstring(pattern, nameFolded, maxAllowedDistance(token.length));
+  // Cố ý không truyền maxDist (mặc định Infinity): nhánh này không chặn
+  // ngưỡng khớp, cần khoảng cách chính xác để tính điểm gần khớp.
+  const distance = editDistanceSubstring(pattern, nameFolded);
   const score = 2 * n - 2 * distance;
   return score > 0 ? score : 0;
 };
