@@ -1,6 +1,14 @@
-// v0.1.0 16aug26
+// v0.1.0 19aug26
 "use strict";
 const extensionName = "PD-47.ass";
+const HTML_ENTITIES = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: ' '
+};
 /** Logger chuẩn hóa cho background
  * @param {*} message 
  * @param {*} type 
@@ -24,15 +32,6 @@ export function warn(message, ...extra) {logger(message, 'warn', ...extra);}
  * @param  {...any} extra 
  */
 export function error(message, ...extra) {logger(message, 'error', ...extra);}
-
-const HTML_ENTITIES = {
-  amp: '&',
-  lt: '<',
-  gt: '>',
-  quot: '"',
-  apos: "'",
-  nbsp: ' '
-};
 /** [ChatGPT] Decodes common HTML entities and numeric character references.
  *
  * Supports:
