@@ -193,64 +193,45 @@ const editDistanceSubstring = (pattern, text, maxDist = Infinity) => {
 const maxAllowedDistance = length => length < 3 ? 0 : Math.floor(length / 2);
 
 /** [arena.ai] Điểm một token trên tên file — tên file là chuẩn, token có thể sai.
- * - Token `#...` (phân biệt hoa thường): khớp nguyên chuỗi con đúng case → `2n`,
- *   không → 0 (không fuzzy).
+ * - Token `#...` (phân biệt hoa thường): khớp nguyên chuỗi con đúng case → `{ score: 2n, exact: true }`,
+ *   không → `{ score: 0, exact: false }` (không fuzzy).
  * - Token thường: gấp chuẩn hóa rồi tìm khoảng cách Levenshtein nhỏ nhất tới
- *   một đoạn con của tên file. Vượt ngưỡng → 0; ngược lại `2n - 2·distance`
- *   (khớp nguyên = `2n`, mỗi lỗi trừ 2).
+ *   một đoạn con của tên file:
+ *   + Vượt ngưỡng (distance > maxAllowedDistance) → `{ score: 0, exact: false }`.
+ *   + Khớp chính xác (distance === 0) → `{ score: 2n, exact: true }`.
+ *   + Khớp gần đúng / na ná (0 < distance <= maxDist) → `{ score: 2n - 2·distance, exact: false }`.
  *
  * @param {string} name tên file gốc (cho token case-sensitive)
  * @param {string} nameFolded tên file đã gấp chuẩn hóa
  * @param {{value: string, caseSensitive: boolean}} token
- * @returns {number}
+ * @returns {{ score: number, exact: boolean }}
  */
 const scoreSearchToken = (name, nameFolded, token) => {
   const { value, caseSensitive } = token;
   const n = value.length;
-  if (!n) return 0;
+  if (!n) return { score: 0, exact: false };
 
   if (caseSensitive) {
-    return name.includes(value) ? 2 * n : 0;
+    const exact = name.includes(value);
+    return { score: exact ? 2 * n : 0, exact };
   }
 
   const pattern = foldText(value);
-  const distance = editDistanceSubstring(pattern, nameFolded, maxAllowedDistance(pattern.length));
-  if (distance > maxAllowedDistance(pattern.length)) return 0;
+  const maxDist = maxAllowedDistance(pattern.length);
+  const distance = editDistanceSubstring(pattern, nameFolded, maxDist);
+  if (distance > maxDist) return { score: 0, exact: false };
 
-  return 2 * n - 2 * distance;
+  return {
+    score: 2 * n - 2 * distance,
+    exact: distance === 0
+  };
 };
 
-/** Thưởng khi khớp đủ mọi token của nhóm. Lớn hơn mọi điểm chưa đủ. */
+/** Thưởng khi khớp CHÍNH XÁC 100% mọi token của nhóm. Lớn hơn mọi điểm chưa đủ hoặc khớp mờ. */
 const SEARCH_COMPLETE_BONUS = 1_000_000;
 
-/** Mỗi token khớp nguyên cộng 1000 — `Math.floor(score / 1000)` ≈ số từ khớp đủ. */
+/** Mỗi token khớp (chính xác hoặc gần đúng) cộng 1000 — `Math.floor(score / 1000)` ≈ số từ khớp. */
 const SEARCH_TOKEN_BAND = 1000;
-
-/** Trần dải gần khớp (không có từ nào là substring nguyên). */
-const SEARCH_NEAR_MAX = 999;
-
-/** [arena.ai] Điểm "gần khớp" cho nhánh không có token nào khớp (scoreSearchToken
- * đều về 0). Dùng lại khoảng cách Levenshtein nhưng không chặn ngưỡng khớp:
- * token còn trùng ký tự với tên file (distance < độ dài) vẫn nhận điểm nhỏ,
- * giúp file xuất hiện ở dải thấp (2…999) thay vì bị ẩn hẳn.
- *
- * @param {string} name
- * @param {string} nameFolded
- * @param {{value: string, caseSensitive: boolean}} token
- * @returns {number}
- */
-const scorePartialToken = (name, nameFolded, token) => {
-  const { value, caseSensitive } = token;
-  const n = value.length;
-  if (n < 2 || caseSensitive) return 0;
-
-  const pattern = foldText(value);
-  // Cố ý không truyền maxDist (mặc định Infinity): nhánh này không chặn
-  // ngưỡng khớp, cần khoảng cách chính xác để tính điểm gần khớp.
-  const distance = editDistanceSubstring(pattern, nameFolded);
-  const score = 2 * n - 2 * distance;
-  return score > 0 ? score : 0;
-};
 
 /** [arena.ai] Thưởng cụm liền mạch dài nhất (không cộng chồng cụm con).
  * Query `hello my world` trên "hello my" → +8; trên "hello my world" → +14.
@@ -294,9 +275,12 @@ const scorePhraseRuns = (name, nameFolded, tokens, tokenScores) => {
 
 /** [arena.ai] Điểm một nhóm token.
  *
- * Không có token nào khớp → `2 … 999` (gần khớp). Có token khớp →
- * `(đủ ? 1_000_000 : 0) + số_từ * 1000 + chất_lượng`. Token khớp lệch vẫn
- * tính là khớp (chỉ giảm chất_lượng), nên khớp chính xác luôn xếp trên khớp lệch.
+ * Không có token nào khớp → 0. Có token khớp:
+ * `(khớp chính xác 100% ? 1_000_000 : 0) + số_từ * 1000 + chất_lượng`.
+ * - Mức 1: Không có từ nào khớp (khoảng cách > maxDist) → trả về 0 (ẩn file).
+ * - Mức 2: Khớp 1 phần hoặc có từ na ná → điểm ở dải `1xxx`, `2xxx`...
+ * - Mức 2.5: Đủ số từ nhưng có từ na ná / sai chính tả → điểm ở dải `4xxx` (vd query 4 từ).
+ * - Mức 3: Khớp CHÍNH XÁC 100% mọi token (distance === 0) → +1_000_000 (dải >= 1_000_000).
  *
  * @param {string} name
  * @param {string} nameFolded
@@ -304,26 +288,22 @@ const scorePhraseRuns = (name, nameFolded, tokens, tokenScores) => {
  * @returns {number}
  */
 const scoreSearchGroup = (name, nameFolded, tokens) => {
-  const tokenScores = tokens.map(token =>
+  const tokenResults = tokens.map(token =>
     scoreSearchToken(name, nameFolded, token)
   );
+  const tokenScores = tokenResults.map(r => r.score);
   const matched = tokenScores.reduce((n, s) => n + (s ? 1 : 0), 0);
 
-  if (!matched) {
-    let near = 0;
-    for (const token of tokens) {
-      near += scorePartialToken(name, nameFolded, token);
-    }
-    if (!near) return 0;
-    return Math.min(SEARCH_NEAR_MAX, 1 + near);
-  }
+  if (!matched) return 0;
 
   const quality =
     tokenScores.reduce((a, b) => a + b, 0) +
     scorePhraseRuns(name, nameFolded, tokens, tokenScores);
 
-  const complete = matched === tokens.length;
-  return (complete ? SEARCH_COMPLETE_BONUS : 0) +
+  // Chỉ cộng SEARCH_COMPLETE_BONUS (1_000_000) khi 100% mọi token đều khớp chính xác (distance === 0)
+  const completeExact = tokenResults.every(r => r.exact);
+
+  return (completeExact ? SEARCH_COMPLETE_BONUS : 0) +
     matched * SEARCH_TOKEN_BAND +
     quality;
 };
@@ -333,16 +313,17 @@ const scoreSearchGroup = (name, nameFolded, tokens) => {
  * Trả về số ≥ 0 (dùng `if (!score)` để ẩn file không khớp):
  * - `0`           — không khớp từ nào
  * - `1`           — không có từ khóa (hiện tất cả, cùng hạng)
- * - `< 1_000_000` — đúng nhưng chưa đủ (thiếu token)
- * - `>= 1_000_000`— đủ mọi token; cộng thêm chất lượng để xếp hạng
+ * - `< 1_000_000` — khớp 1 phần hoặc có từ khớp gần đúng (na ná Levenshtein)
+ * - `>= 1_000_000`— khớp chính xác 100% mọi token; cộng thêm chất lượng để xếp hạng
  *
  * Tên file là chuẩn, token có thể gõ lệch: `pece`/`piec`/`piêc`/`piecce` đều
  * khớp `piece` (điểm giảm theo khoảng cách Levenshtein), `1` khớp `01`.
  * Query `hello my world`:
- * - `hello my world` → đủ, ~1_003_038
- * - `hello my` / `my world` → chưa đủ, 2 từ liền, 2022
- * - `hello world` → chưa đủ, 2 từ hổng giữa, 2020
- * - `hello` → chưa đủ, 1 từ, 1010
+ * - `hello my world` (khớp cả 3 từ chính xác) → đủ 100%, ~1_003_038
+ * - `hello my` / `my world` (khớp chính xác 2 từ) → 2 từ liền, 2022
+ * - `hello world` (khớp chính xác 2 từ) → 2 từ hổng giữa, 2020
+ * - `hello` (khớp 1 từ) → 1 từ, 1010
+ * - `helo my world` (1 từ gõ sai na ná, 2 từ đúng) → 3 từ, không bonus 1M, ~3030
  *
  * @param {string} name tên file sub
  * @param {string} searchKey từ khóa tìm kiếm hoặc ID video
