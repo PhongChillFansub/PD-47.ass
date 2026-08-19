@@ -1,8 +1,9 @@
 // v0.1.0 20aug26 
 // beta mode (đã viết xong, sửa lỗi khi chạy)
 // Chức năng: xử lí ban đầu, giai đoạn từ danh sách link thư mục nguồn đến giai đoạn có file sub thô (rawText)
-// export: fetchSubtitleText (từ link file sub tới rawText),
-//         fetchSubtitleFile (tìm trong chỉ mục source.fileList → candidates)
+// export: fetchSubtitleFileList (danh sách link thư mục nguồn → chỉ mục source.fileList),
+//         searchSubtitleFile (tìm trong chỉ mục source.fileList → candidates),
+//         fetchSubtitleText (từ link file sub tới rawText)
 /** Nhận logger(message, type = 'info', extra = undefined) */
 import * as utils from './utils.js';
 
@@ -730,4 +731,111 @@ export async function fetchSubtitleText(candidate) {
 
   utils.log(`fetcher: fetchSubtitleText(): xong file ${fileName}.`);
   return text;
+}
+
+/** [arena.ai] Lập chỉ mục danh sách thư mục nguồn (export 1 của fetcher.js).
+ *
+ * Nhận danh sách link thư mục nguồn (GitHub hoặc Google Drive), tự nhận
+ * diện loại nguồn theo link rồi gọi đúng MỘT lần `scanGitHub()` hoặc
+ * `scanGDrive()` cho từng link. Mỗi link chỉ được quét tối đa 1 lần trong
+ * một lần gọi: link trùng sau khi chuẩn hóa (VD: khác dạng `u/0/`, dư dấu
+ * `/` cuối, query khác nhau) sẽ tái sử dụng kết quả đã quét thay vì quét
+ * lại — tránh tốn request, nhất là giới hạn GitHub API 60 lần/giờ.
+ *
+ * Hàm KHÔNG tự lưu cache: kết quả trả về chính là đầu ra của các hàm scan
+ * (`{url, folderId, sourceType, name, savedAt, fileList}`) để nơi gọi (VD:
+ * background) tự quyết định lưu vào chrome.storage.local. Muốn quét lại từ
+ * đầu thì gọi lại hàm này.
+ *
+ * Link không hợp lệ (không phải GitHub/GDrive), hoặc scan trả về `fileList`
+ * rỗng (quét thất bại / thư mục không có file `.ass` nào) → bỏ qua + log
+ * warn, các link còn lại vẫn chạy tiếp. Hàm không throw.
+ *
+ * @param {Array<string|{url: string}>} [urls=[]] danh sách link thư mục
+ * nguồn. Mỗi phần tử là chuỗi URL, hoặc object có trường `url`.
+ * @returns {Promise<Array<{
+ *   url: string,
+ *   folderId: string,
+ *   sourceType: 'gdrive'|'github',
+ *   name: string,
+ *   savedAt: number,
+ *   fileList: Array<{
+ *     id: string,
+ *     fileName: string,
+ *     fetchUrl: string,
+ *     folderUrl: string,
+ *     sourceType: 'gdrive'|'github',
+ *     groupName: string
+ *   }>
+ * }>>} Mảng source đã lập chỉ mục (mỗi source có `fileList` không rỗng),
+ * sẵn sàng truyền thẳng vào `searchSubtitleFile(sources, searchKey)`.
+ */
+export async function fetchSubtitleFileList(urls = []) {
+  if (!Array.isArray(urls)) {
+    utils.warn(
+      'fetcher: fetchSubtitleFileList(): urls ko phải mảng, trả về [].'
+    );
+    return [];
+  }
+
+  const sources = [];
+  const scannedByUrl = new Map();
+
+  for (const item of urls) {
+    const rawUrl = typeof item === 'string' ? item : item?.url;
+    if (typeof rawUrl !== 'string' || !rawUrl.trim()) {
+      utils.warn('fetcher: fetchSubtitleFileList(): bỏ qua link rỗng.', item);
+      continue;
+    }
+
+    // Nhận diện loại nguồn theo link: ưu tiên thử GDrive, không khớp thì GitHub.
+    const gdrive = normalizeGDriveUrl(rawUrl);
+    const github = gdrive ? null : normalizeGitHubUrl(rawUrl);
+
+    if (!gdrive && !github) {
+      utils.warn(
+        `fetcher: fetchSubtitleFileList(): bỏ qua link ko hợp lệ (${rawUrl}).`
+      );
+      continue;
+    }
+
+    const normalizedUrl = gdrive ? gdrive.url : github.url;
+
+    // "Chỉ chạy 1 lần duy nhất": link đã quét (theo URL chuẩn hóa) thì tái
+    // sử dụng kết quả, không gọi scanGDrive/scanGitHub lần nữa.
+    if (scannedByUrl.has(normalizedUrl)) {
+      sources.push(scannedByUrl.get(normalizedUrl));
+      continue;
+    }
+
+    const source = gdrive
+      ? await scanGDrive(gdrive)
+      : await scanGitHub(github);
+
+    scannedByUrl.set(normalizedUrl, source);
+
+    // Scan thất bại hoặc thư mục không có file .ass nào → không có gì để
+    // lập chỉ mục, bỏ qua source này và chạy tiếp link sau.
+    if (!Array.isArray(source.fileList) || !source.fileList.length) {
+      utils.warn(
+        `fetcher: fetchSubtitleFileList(): bỏ qua ${source.sourceType} ` +
+          `${normalizedUrl} (quét thất bại hoặc ko có file .ass).`
+      );
+      continue;
+    }
+
+    sources.push(source);
+  }
+
+  const fileCount = sources.reduce(
+    (n, s) => n + (s.fileList?.length ?? 0),
+    0
+  );
+
+  utils.log(
+    `fetcher: fetchSubtitleFileList(): xong, ${sources.length} source ` +
+      `(${fileCount} file .ass).`
+  );
+
+  return sources;
 }
