@@ -59,7 +59,10 @@ const loggedFetch = async (
  * Cấu trúc trả về: `groups` là mảng các nhóm; mỗi nhóm là mảng token.
  * - Token: một đơn vị tìm kiếm. Mỗi token = `{ value, caseSensitive }`.
  *   `value` là chuỗi cần tìm trong tên (một từ, hoặc cả cụm nếu bọc `"`).
- *   `caseSensitive` = true khi token (hoặc cụm) bắt đầu bằng `#`.
+ *   `caseSensitive` = true chỉ ở bản "chính xác" sinh ra từ token `#`.
+ * - Token `#X` mở rộng thành 2 token liền kề trong cùng nhóm: `{value,false}`
+ *   (bản thường, có fuzzy) rồi `{value,true}` (khớp nguyên chuỗi con đúng
+ *   hoa/thường, không fuzzy). Xem `scoreSearchToken`.
  * - Nhóm (group): các token nằm giữa hai dấu `|` (hoặc cả query nếu không có `|`).
  *   Trong một nhóm, từng token được chấm riêng rồi cộng điểm (thiếu token
  *   không hủy nhóm). Nhiều nhóm thì `matchSubtitle` lấy nhóm điểm cao nhất.
@@ -69,7 +72,9 @@ const loggedFetch = async (
  * [
  *   [ { value: "a", caseSensitive: false },
  *     { value: "b", caseSensitive: false } ],
- *   [ { value: "One Piece", caseSensitive: true },
+ *   [ { value: "One Piece", caseSensitive: false },
+ *     { value: "One Piece", caseSensitive: true },
+ *     { value: "ID", caseSensitive: false },
  *     { value: "ID", caseSensitive: true } ]
  * ]
  * ```
@@ -77,8 +82,8 @@ const loggedFetch = async (
  * Cú pháp:
  * - `hello world`     → một nhóm, hai token; đủ cả hai = đủ, chỉ một = chưa đủ
  * - `"one piece"`     → một token cụm từ (giữ dấu cách)
- * - `#Hello`          → phân biệt hoa thường
- * - `#"Hello World"`  → cụm từ phân biệt hoa thường
+ * - `#Hello`          → `Hello` (thường) + `#Hello` (khớp nguyên đúng hoa thường)
+ * - `#"Hello World"`  → cụm từ, tương tự `#Hello`
  * - `a b | c`         → hai nhóm; lấy nhóm điểm cao hơn
  *
  * @param {string} searchKey
@@ -100,7 +105,18 @@ const parseSearchQuery = searchKey => {
         ? (m[1] ?? '')
         : body;
 
-      if (value) tokens.push({ value, caseSensitive });
+      if (!value) continue;
+
+      if (caseSensitive) {
+        // `#X` được coi như tìm cả `X #X`: bản thường (hoa/thường tự do, có
+        // fuzzy) để file vẫn xuất hiện khi không khớp đúng case, và bản `#`
+        // (khớp nguyên chuỗi con đúng hoa/thường, không fuzzy) để ưu tiên
+        // file khớp chính xác.
+        tokens.push({ value, caseSensitive: false });
+        tokens.push({ value, caseSensitive: true });
+      } else {
+        tokens.push({ value, caseSensitive: false });
+      }
     }
 
     if (tokens.length) groups.push(tokens);
@@ -109,45 +125,92 @@ const parseSearchQuery = searchKey => {
   return groups;
 };
 
-/** [arena.ai] Điểm một token trên tên file.
- * - Không tìm thấy substring → 0
- * - Tìm thấy → `length + số ký tự trùng cả hoa/thường` ở cửa sổ khớp tốt nhất
- *   (vd. "hello" khớp "hello" = 10, khớp "hEllO" = 8, khớp "HELLO" = 5)
+/** [arena.ai] Gấp chuẩn hóa chuỗi để so khớp "chịu lệch": chữ thường + bỏ dấu
+ * tiếng Việt (ê→e, đ→d, ơ→o, ...). Tên file là chuẩn, token của end-user có
+ * thể sai chính tả / thiếu dấu nên mọi so khớp mềm đều chạy trên bản gấp này.
  *
- * @param {string} name
- * @param {string} nameLower
+ * @param {string} text
+ * @returns {string}
+ */
+const foldText = text =>
+  String(text)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+/** [arena.ai] Khoảng cách Levenshtein giữa `pattern` và đoạn con tốt nhất của
+ * `text` (approximate string matching): token được phép khớp vào một đoạn bất
+ * kỳ của tên file, chịu thêm/xoá/đổi ký tự.
+ *
+ * @param {string} pattern token (đã gấp)
+ * @param {string} text tên file (đã gấp)
+ * @returns {number} số thao tác tối thiểu (0 = khớp nguyên một đoạn con)
+ */
+const editDistanceSubstring = (pattern, text) => {
+  const m = pattern.length;
+  const n = text.length;
+  if (!m) return 0;
+
+  // dp[i][j] = min dist giữa pattern[0..i) và đoạn con text kết thúc tại j.
+  // Hàng i=0 = 0 (pattern rỗng khớp mọi vị trí) → điểm bắt đầu tự do.
+  let prev = new Array(n + 1).fill(0);
+
+  for (let i = 1; i <= m; i++) {
+    const cur = new Array(n + 1);
+    cur[0] = i; // pattern[0..i) với text rỗng → i lần xoá
+    const pc = pattern[i - 1];
+
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(
+        prev[j - 1] + (pc === text[j - 1] ? 0 : 1), // khớp / đổi chữ
+        prev[j] + 1,                                // thừa ký tự trong token
+        cur[j - 1] + 1                              // thiếu ký tự trong token
+      );
+    }
+
+    prev = cur;
+  }
+
+  return Math.min(...prev); // điểm kết thúc tự do
+};
+
+/** [arena.ai] Số lỗi (khoảng cách Levenshtein) tối đa để token vẫn tính là
+ * "khớp". Token < 3 ký tự chỉ khớp nguyên (tránh khớp lung tung); 3 ký tự
+ * chấp nhận 1 lỗi; từ 4 ký tự trở lên chấp nhận tối đa 2 lỗi — đủ bắt các
+ * trường hợp gõ lệch như `pece`/`piec`/`piêc`/`piecce`/`pace` → `piece`.
+ *
+ * @param {number} length độ dài token đã gấp
+ * @returns {number}
+ */
+const maxAllowedDistance = length =>
+  length < 3 ? 0 : Math.min(2, Math.max(1, Math.floor(length / 2)));
+
+/** [arena.ai] Điểm một token trên tên file — tên file là chuẩn, token có thể sai.
+ * - Token `#...` (phân biệt hoa thường): khớp nguyên chuỗi con đúng case → `2n`,
+ *   không → 0 (không fuzzy).
+ * - Token thường: gấp chuẩn hóa rồi tìm khoảng cách Levenshtein nhỏ nhất tới
+ *   một đoạn con của tên file. Vượt ngưỡng → 0; ngược lại `2n - 2·distance`
+ *   (khớp nguyên = `2n`, mỗi lỗi trừ 2).
+ *
+ * @param {string} name tên file gốc (cho token case-sensitive)
+ * @param {string} nameFolded tên file đã gấp chuẩn hóa
  * @param {{value: string, caseSensitive: boolean}} token
  * @returns {number}
  */
-const scoreSearchToken = (name, nameLower, token) => {
+const scoreSearchToken = (name, nameFolded, token) => {
   const { value, caseSensitive } = token;
   const n = value.length;
   if (!n) return 0;
 
   if (caseSensitive) {
-    return name.includes(value) ? n + n : 0;
+    return name.includes(value) ? 2 * n : 0;
   }
 
-  const needle = value.toLowerCase();
-  let best = 0;
-  let from = 0;
+  const pattern = foldText(value);
+  const distance = editDistanceSubstring(pattern, nameFolded);
+  if (distance > maxAllowedDistance(pattern.length)) return 0;
 
-  while (from + n <= nameLower.length) {
-    const idx = nameLower.indexOf(needle, from);
-    if (idx < 0) break;
-
-    let exact = 0;
-    for (let i = 0; i < n; i++) {
-      if (name.charAt(idx + i) === value.charAt(i)) exact++;
-    }
-
-    const score = n + exact;
-    if (score > best) best = score;
-    if (exact === n) break;
-    from = idx + 1;
-  }
-
-  return best;
+  return 2 * n - 2 * distance;
 };
 
 /** Thưởng khi khớp đủ mọi token của nhóm. Lớn hơn mọi điểm chưa đủ. */
@@ -159,63 +222,37 @@ const SEARCH_TOKEN_BAND = 1000;
 /** Trần dải gần khớp (không có từ nào là substring nguyên). */
 const SEARCH_NEAR_MAX = 999;
 
-/** [arena.ai] Gần khớp một token: đoạn con dài nhất của token xuất hiện trong tên
- * (chưa đủ cả từ). Cần ≥ max(2, ceil(n/2)) ký tự — "hello" cần ≥ 3,
- * "my" (n=2) không có gần khớp (chỉ tính khi đủ cả từ).
- *
- * Điểm = độ dài đoạn + số ký tự đúng case. 0 nếu không đủ ngưỡng.
+/** [arena.ai] Điểm "gần khớp" cho nhánh không có token nào khớp (scoreSearchToken
+ * đều về 0). Dùng lại khoảng cách Levenshtein nhưng không chặn ngưỡng khớp:
+ * token còn trùng ký tự với tên file (distance < độ dài) vẫn nhận điểm nhỏ,
+ * giúp file xuất hiện ở dải thấp (2…999) thay vì bị ẩn hẳn.
  *
  * @param {string} name
- * @param {string} nameLower
+ * @param {string} nameFolded
  * @param {{value: string, caseSensitive: boolean}} token
  * @returns {number}
  */
-const scorePartialToken = (name, nameLower, token) => {
+const scorePartialToken = (name, nameFolded, token) => {
   const { value, caseSensitive } = token;
   const n = value.length;
-  if (n < 2) return 0;
+  if (n < 2 || caseSensitive) return 0;
 
-  const minKeep = Math.max(2, Math.ceil(n / 2));
-  const needle = caseSensitive ? value : value.toLowerCase();
-  const hay = caseSensitive ? name : nameLower;
-
-  let bestLen = 0;
-  let bestExact = 0;
-
-  for (let len = n - 1; len >= minKeep; len--) {
-    for (let start = 0; start + len <= n; start++) {
-      const idx = hay.indexOf(needle.slice(start, start + len));
-      if (idx < 0) continue;
-
-      let exact = len;
-      if (!caseSensitive) {
-        exact = 0;
-        for (let i = 0; i < len; i++) {
-          if (name.charAt(idx + i) === value.charAt(start + i)) exact++;
-        }
-      }
-
-      if (len > bestLen || (len === bestLen && exact > bestExact)) {
-        bestLen = len;
-        bestExact = exact;
-      }
-    }
-    if (bestLen === len) break;
-  }
-
-  return bestLen ? bestLen + bestExact : 0;
+  const pattern = foldText(value);
+  const distance = editDistanceSubstring(pattern, nameFolded);
+  const score = 2 * n - 2 * distance;
+  return score > 0 ? score : 0;
 };
 
 /** [arena.ai] Thưởng cụm liền mạch dài nhất (không cộng chồng cụm con).
  * Query `hello my world` trên "hello my" → +8; trên "hello my world" → +14.
  *
  * @param {string} name
- * @param {string} nameLower
+ * @param {string} nameFolded
  * @param {Array<{value: string, caseSensitive: boolean}>} tokens
  * @param {number[]} tokenScores
  * @returns {number}
  */
-const scorePhraseRuns = (name, nameLower, tokens, tokenScores) => {
+const scorePhraseRuns = (name, nameFolded, tokens, tokenScores) => {
   let bonus = 0;
   let i = 0;
 
@@ -232,7 +269,7 @@ const scorePhraseRuns = (name, nameLower, tokens, tokenScores) => {
       const sensitive = slice.every(t => t.caseSensitive);
       const hit = sensitive
         ? name.includes(phrase)
-        : nameLower.includes(phrase.toLowerCase());
+        : nameFolded.includes(foldText(phrase));
       if (!hit) break;
       j++;
     }
@@ -248,24 +285,25 @@ const scorePhraseRuns = (name, nameLower, tokens, tokenScores) => {
 
 /** [arena.ai] Điểm một nhóm token.
  *
- * Không đủ 1 từ nguyên → `2 … 999`. Có từ nguyên →
- * `(đủ ? 1_000_000 : 0) + số_từ * 1000 + chất_lượng`.
+ * Không có token nào khớp → `2 … 999` (gần khớp). Có token khớp →
+ * `(đủ ? 1_000_000 : 0) + số_từ * 1000 + chất_lượng`. Token khớp lệch vẫn
+ * tính là khớp (chỉ giảm chất_lượng), nên khớp chính xác luôn xếp trên khớp lệch.
  *
  * @param {string} name
- * @param {string} nameLower
+ * @param {string} nameFolded
  * @param {Array<{value: string, caseSensitive: boolean}>} tokens
  * @returns {number}
  */
-const scoreSearchGroup = (name, nameLower, tokens) => {
+const scoreSearchGroup = (name, nameFolded, tokens) => {
   const tokenScores = tokens.map(token =>
-    scoreSearchToken(name, nameLower, token)
+    scoreSearchToken(name, nameFolded, token)
   );
   const matched = tokenScores.reduce((n, s) => n + (s ? 1 : 0), 0);
 
   if (!matched) {
     let near = 0;
     for (const token of tokens) {
-      near += scorePartialToken(name, nameLower, token);
+      near += scorePartialToken(name, nameFolded, token);
     }
     if (!near) return 0;
     return Math.min(SEARCH_NEAR_MAX, 1 + near);
@@ -273,7 +311,7 @@ const scoreSearchGroup = (name, nameLower, tokens) => {
 
   const quality =
     tokenScores.reduce((a, b) => a + b, 0) +
-    scorePhraseRuns(name, nameLower, tokens, tokenScores);
+    scorePhraseRuns(name, nameFolded, tokens, tokenScores);
 
   const complete = matched === tokens.length;
   return (complete ? SEARCH_COMPLETE_BONUS : 0) +
@@ -289,7 +327,9 @@ const scoreSearchGroup = (name, nameLower, tokens) => {
  * - `< 1_000_000` — đúng nhưng chưa đủ (thiếu token)
  * - `>= 1_000_000`— đủ mọi token; cộng thêm chất lượng để xếp hạng
  *
- * Query `hello my world` (đúng case):
+ * Tên file là chuẩn, token có thể gõ lệch: `pece`/`piec`/`piêc`/`piecce` đều
+ * khớp `piece` (điểm giảm theo khoảng cách Levenshtein), `1` khớp `01`.
+ * Query `hello my world`:
  * - `hello my world` → đủ, ~1_003_038
  * - `hello my` / `my world` → chưa đủ, 2 từ liền, 2022
  * - `hello world` → chưa đủ, 2 từ hổng giữa, 2020
@@ -308,11 +348,11 @@ const matchSubtitle = (name, searchKey) => {
   const groups = parseSearchQuery(trimmed);
   if (!groups.length) return 1;
 
-  const nameLower = name.toLowerCase();
+  const nameFolded = foldText(name);
   let best = 0;
 
   for (const group of groups) {
-    const score = scoreSearchGroup(name, nameLower, group);
+    const score = scoreSearchGroup(name, nameFolded, group);
     if (score > best) best = score;
   }
 
