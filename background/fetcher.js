@@ -107,18 +107,16 @@ const parseSearchQuery = searchKey => {
 
       if (!value) continue;
 
-      if (caseSensitive) {
-        // `#X` được coi như tìm cả `X #X`: bản thường (hoa/thường tự do, có
-        // fuzzy) để file vẫn xuất hiện khi không khớp đúng case, và bản `#`
-        // (khớp nguyên chuỗi con đúng hoa/thường, không fuzzy) để ưu tiên
-        // file khớp chính xác.
-        tokens.push({ value, caseSensitive: false });
-        tokens.push({ value, caseSensitive: true });
-      } else {
-        tokens.push({ value, caseSensitive: false });
-      }
+      tokens.push({ value, caseSensitive: false });
+      // `#X` được coi như tìm cả `X #X`: bản thường (hoa/thường tự do, có
+      // fuzzy) để file vẫn xuất hiện khi không khớp đúng case, và bản `#`
+      // (khớp nguyên chuỗi con đúng hoa/thường, không fuzzy) để ưu tiên
+      // file khớp chính xác.
+      if (caseSensitive) tokens.push({ value, caseSensitive: true });
     }
 
+    // Chú ý: Chỉ push vào group khi tokens có phần tử => Bỏ qua nhóm rỗng (VD: `a | | b` → 2 nhóm, không có nhóm rỗng)
+    // Chạy hết while rồi mới đến dòng này, nên ko cần lo lắng về việc bỏ sót token nào.
     if (tokens.length) groups.push(tokens);
   }
 
@@ -135,7 +133,8 @@ const parseSearchQuery = searchKey => {
 const foldText = text =>
   String(text)
     .toLowerCase()
-    .normalize('NFD')
+    .replace(/đ/g, 'd')
+    .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '');
 
 /** [arena.ai] Khoảng cách Levenshtein giữa `pattern` và đoạn con tốt nhất của
@@ -144,47 +143,55 @@ const foldText = text =>
  *
  * @param {string} pattern token (đã gấp)
  * @param {string} text tên file (đã gấp)
+ * @param {number} [maxDist] trần lỗi; vượt thì trả maxDist+1 (không cần số đúng)
  * @returns {number} số thao tác tối thiểu (0 = khớp nguyên một đoạn con)
  */
-const editDistanceSubstring = (pattern, text) => {
+const editDistanceSubstring = (pattern, text, maxDist = Infinity) => {
   const m = pattern.length;
   const n = text.length;
   if (!m) return 0;
+  if (maxDist === 0) return text.includes(pattern) ? 0 : 1;
+  // pattern dài hơn text hơn k ký tự → dù khớp cả text vẫn thiếu
+  if (m - n > maxDist) return maxDist + 1;
 
-  // dp[i][j] = min dist giữa pattern[0..i) và đoạn con text kết thúc tại j.
-  // Hàng i=0 = 0 (pattern rỗng khớp mọi vị trí) → điểm bắt đầu tự do.
   let prev = new Array(n + 1).fill(0);
+  let cur = new Array(n + 1);
 
   for (let i = 1; i <= m; i++) {
-    const cur = new Array(n + 1);
-    cur[0] = i; // pattern[0..i) với text rỗng → i lần xoá
+    cur[0] = i;
     const pc = pattern[i - 1];
+    let rowMin = i;
 
     for (let j = 1; j <= n; j++) {
-      cur[j] = Math.min(
-        prev[j - 1] + (pc === text[j - 1] ? 0 : 1), // khớp / đổi chữ
-        prev[j] + 1,                                // thừa ký tự trong token
-        cur[j - 1] + 1                              // thiếu ký tự trong token
-      );
+      const sub = prev[j - 1] + (pc === text[j - 1] ? 0 : 1);
+      const del = prev[j] + 1;
+      const ins = cur[j - 1] + 1;
+      const v = sub < del ? (sub < ins ? sub : ins) : (del < ins ? del : ins);
+      cur[j] = v;
+      if (v < rowMin) rowMin = v;
     }
 
+    if (rowMin > maxDist) return maxDist + 1; // mọi đường đã chết
+    const tmp = prev;
     prev = cur;
+    cur = tmp;
   }
 
-  return Math.min(...prev); // điểm kết thúc tự do
+  let best = prev[0];
+  for (let j = 1; j <= n; j++) if (prev[j] < best) best = prev[j];
+  return best;
 };
 
 /** [arena.ai] Số lỗi (khoảng cách Levenshtein) tối đa để token vẫn tính là
- * "khớp". Token < 3 ký tự chỉ khớp nguyên (tránh khớp lung tung); 3 ký tự
- * chấp nhận 1 lỗi; từ 4 ký tự trở lên chấp nhận tối đa 2 lỗi — đủ bắt các
- * trường hợp gõ lệch như `pece`/`piec`/`piêc`/`piecce`/`pace` → `piece`.
+ * "khớp": không quá 50% độ dài token đã gấp. Token < 3 ký tự giữ 0 lỗi
+ * (floor(1/2)=floor(2/2) sẽ cho 0 và 1 — 1 lỗi trên 2 ký tự quá lỏng).
  *
  * @param {number} length độ dài token đã gấp
  * @returns {number}
  */
-const maxAllowedDistance = length =>
-  length < 3 ? 0 : Math.min(2, Math.max(1, Math.floor(length / 2)));
+const maxAllowedDistance = length => length < 3 ? 0 : Math.floor(length / 2);
 
+// to-do: xem từ dòng này xuống.
 /** [arena.ai] Điểm một token trên tên file — tên file là chuẩn, token có thể sai.
  * - Token `#...` (phân biệt hoa thường): khớp nguyên chuỗi con đúng case → `2n`,
  *   không → 0 (không fuzzy).
@@ -207,7 +214,7 @@ const scoreSearchToken = (name, nameFolded, token) => {
   }
 
   const pattern = foldText(value);
-  const distance = editDistanceSubstring(pattern, nameFolded);
+  const distance = editDistanceSubstring(pattern, nameFolded, maxAllowedDistance(token.length));
   if (distance > maxAllowedDistance(pattern.length)) return 0;
 
   return 2 * n - 2 * distance;
@@ -238,7 +245,7 @@ const scorePartialToken = (name, nameFolded, token) => {
   if (n < 2 || caseSensitive) return 0;
 
   const pattern = foldText(value);
-  const distance = editDistanceSubstring(pattern, nameFolded);
+  const distance = editDistanceSubstring(pattern, nameFolded, maxAllowedDistance(token.length));
   const score = 2 * n - 2 * distance;
   return score > 0 ? score : 0;
 };
