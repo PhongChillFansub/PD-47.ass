@@ -9,6 +9,7 @@ fetcher.js
     - export 2: searchSubtitleFile
     - export 3: fetchSubtitleText
     fetch tool: loggedFetch (core: fetchWithTimeout)
+
     - cụm xử lí tìm kiếm:
         parseSearchQuery: tách searchKey từ user thành obj {value, caseSensitive (boolean)}
             mỗi cụm key ngăn cách bằng dấu cách ngoài ngoặc kép là 1 token.
@@ -26,10 +27,13 @@ fetcher.js
         scorePhraseRuns: hàm tính điểm bonus (1000đ/từ gần đúng, có khoảng cách levenshtein cho phép)
         scoreSearchGroup: thuật toán tính tổng điểm nhóm token theo 3 mức (không khớp = 0, khớp 1 phần / na ná = 1xxx-4xxx, khớp chính xác 100% = >= 1_000_000)
         matchSubtitle: hàm tổng hợp điểm theo 1 cụm (group) các nhóm token
-    - searchSubtitleFile: hàm trung tâm, lọc và sắp xếp tệp theo thuật toán của hàm matchSubtitle (scoreSearchGroup).
+    - searchSubtitleFile: hàm lọc và sắp xếp tệp theo thuật toán của hàm matchSubtitle (scoreSearchGroup).
         Chú ý: ở đây chỉ tìm kiếm chỉ mục đã có sau khi chạy fetchSubtitleFileList.
     - fetchSubtitleText: hàm tải text của file sub từ fetchUrl
-        
-
-    
+    - cụm tạo lập chỉ mục
+        normalizeGDriveUrl: tiền xử lí link gdrive
+        scanGDrive: xử lí quét và lấy dữ liệu thư mục gdrive
+        normalizeGitHubUrl: tiền xử lí link github
+        scanGitHub: xử lí quét và lấy dữ liệu thư mục github
+    - fetchSubtitleFileList: hàm điều hướng chung
 

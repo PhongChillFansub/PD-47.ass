@@ -350,6 +350,122 @@ const matchSubtitle = (name, searchKey) => {
   return best;
 };
 
+/** [arena.ai] Tìm file sub trong chỉ mục đã quét (`source.fileList`).
+ *
+ * Không gọi `scanGDrive` / `scanGitHub`. Giả định mỗi source đã có `name`
+ * và `fileList`. Điểm = `matchSubtitle(`${name} ${fileName}`, searchKey)`
+ * — token có thể nằm ở tên folder, tên file, hoặc cả hai.
+ *
+ * @param {Array<{
+ *   name?: string,
+ *   fileList?: Array<{
+ *     id: string,
+ *     fileName: string,
+ *     fetchUrl: string,
+ *     folderUrl: string,
+ *     sourceType: string,
+ *     groupName: string
+ *   }>
+ * }>} sources danh sách thư mục nguồn đã lập chỉ mục
+ * @param {string} [searchKey] từ khóa hoặc ID video; rỗng / bỏ qua → mọi file (score = 1)
+ * @returns {Promise<Array<{
+ *   id: string,
+ *   fileName: string,
+ *   fetchUrl: string,
+ *   folderUrl: string,
+ *   sourceType: string,
+ *   groupName: string,
+ *   score: number
+ * }>>} candidates có `score > 0`, xếp điểm giảm dần, hòa thì `groupName` rồi `fileName`
+ */
+export async function searchSubtitleFile(sources, searchKey) {
+  if (!Array.isArray(sources) || !sources.length) {
+    utils.log('fetcher: searchSubtitleFile(): không có source nào.');
+    return [];
+  }
+
+  const candidates = [];
+
+  for (const source of sources) {
+    const files = source?.fileList;
+    if (!Array.isArray(files) || !files.length) continue;
+
+    const groupName = source.name || '';
+
+    for (const file of files) {
+      const fileName = file?.fileName || '';
+      const folderName = groupName || file.groupName || '';
+      const score = matchSubtitle(`${folderName} ${fileName}`.trim(), searchKey);
+
+      if (!score) continue;
+
+      candidates.push({
+        ...file,
+        groupName: folderName || file.groupName,
+        score
+      });
+    }
+  }
+
+  candidates.sort((a, b) =>
+    b.score - a.score ||
+    String(a.groupName || '').localeCompare(String(b.groupName || '')) ||
+    String(a.fileName || '').localeCompare(String(b.fileName || ''))
+  );
+
+  utils.log(
+    `fetcher: searchSubtitleFile(): ${candidates.length} file` +
+      ` (query = ${JSON.stringify(searchKey ?? '')}).`
+  );
+
+  return candidates;
+}
+
+/** [arena.ai] Tải toàn bộ text một file sub từ candidate.fetchUrl.
+ *
+ * Dùng loggedFetch (timeout, HTTP, validate chữ ký ASS). Lỗi → null
+ * + utils.warn, không throw. File > 10MB chỉ cảnh báo, vẫn trả text.
+ * Dung lượng đo bằng UTF-8 của text đã tải (không phụ thuộc Content-Length).
+ *
+ * @param {{
+ *   id?: string,
+ *   fileName?: string,
+ *   fetchUrl?: string
+ * }} candidate file trong chỉ mục / kết quả fetchSubtitleFile
+ * @returns {Promise<string|null>} text file .ass, hoặc null nếu thất bại
+ */
+export async function fetchSubtitleText(candidate) {
+  const id = candidate?.id ?? 'undefined';
+  const fileName = candidate?.fileName ?? 'undefined';
+
+  if (!candidate?.fetchUrl) {
+    utils.warn(
+      `fetcher: fetchSubtitleText(): thiếu fetchUrl (${id}, ${fileName}).`
+    );
+    return null;
+  }
+
+  const text = await loggedFetch(candidate.fetchUrl, id, 'file');
+
+  if (!text) {
+    utils.warn(
+      `fetcher: fetchSubtitleText(): không tải được ${id}, ${fileName}.`
+    );
+    return null;
+  }
+
+  const byteSize = new TextEncoder().encode(text).length;
+  if (byteSize > SUBTITLE_SIZE_WARN) {
+    utils.warn(
+      `fetcher: fetchSubtitleText(): file ${id}, ${fileName} > 10MB` +
+        ` (${(byteSize / (1024 * 1024)).toFixed(2)} MB).`
+    );
+  }
+
+  utils.log(`fetcher: fetchSubtitleText(): xong file ${fileName}.`);
+  return text;
+}
+
 /** [arena.ai] Chuẩn hóa URL thư mục Google Drive.
  *
  * Hỗ trợ các dạng:
@@ -617,123 +733,7 @@ async function scanGitHub(source) {
   }
 }
 
-/** [arena.ai] Tìm file sub trong chỉ mục đã quét (`source.fileList`).
- *
- * Không gọi `scanGDrive` / `scanGitHub`. Giả định mỗi source đã có `name`
- * và `fileList`. Điểm = `matchSubtitle(`${name} ${fileName}`, searchKey)`
- * — token có thể nằm ở tên folder, tên file, hoặc cả hai.
- *
- * @param {Array<{
- *   name?: string,
- *   fileList?: Array<{
- *     id: string,
- *     fileName: string,
- *     fetchUrl: string,
- *     folderUrl: string,
- *     sourceType: string,
- *     groupName: string
- *   }>
- * }>} sources danh sách thư mục nguồn đã lập chỉ mục
- * @param {string} [searchKey] từ khóa hoặc ID video; rỗng / bỏ qua → mọi file (score = 1)
- * @returns {Promise<Array<{
- *   id: string,
- *   fileName: string,
- *   fetchUrl: string,
- *   folderUrl: string,
- *   sourceType: string,
- *   groupName: string,
- *   score: number
- * }>>} candidates có `score > 0`, xếp điểm giảm dần, hòa thì `groupName` rồi `fileName`
- */
-export async function searchSubtitleFile(sources, searchKey) {
-  if (!Array.isArray(sources) || !sources.length) {
-    utils.log('fetcher: searchSubtitleFile(): không có source nào.');
-    return [];
-  }
-
-  const candidates = [];
-
-  for (const source of sources) {
-    const files = source?.fileList;
-    if (!Array.isArray(files) || !files.length) continue;
-
-    const groupName = source.name || '';
-
-    for (const file of files) {
-      const fileName = file?.fileName || '';
-      const folderName = groupName || file.groupName || '';
-      const score = matchSubtitle(`${folderName} ${fileName}`.trim(), searchKey);
-
-      if (!score) continue;
-
-      candidates.push({
-        ...file,
-        groupName: folderName || file.groupName,
-        score
-      });
-    }
-  }
-
-  candidates.sort((a, b) =>
-    b.score - a.score ||
-    String(a.groupName || '').localeCompare(String(b.groupName || '')) ||
-    String(a.fileName || '').localeCompare(String(b.fileName || ''))
-  );
-
-  utils.log(
-    `fetcher: searchSubtitleFile(): ${candidates.length} file` +
-      ` (query = ${JSON.stringify(searchKey ?? '')}).`
-  );
-
-  return candidates;
-}
-
-/** [arena.ai] Tải toàn bộ text một file sub từ candidate.fetchUrl.
- *
- * Dùng loggedFetch (timeout, HTTP, validate chữ ký ASS). Lỗi → null
- * + utils.warn, không throw. File > 10MB chỉ cảnh báo, vẫn trả text.
- * Dung lượng đo bằng UTF-8 của text đã tải (không phụ thuộc Content-Length).
- *
- * @param {{
- *   id?: string,
- *   fileName?: string,
- *   fetchUrl?: string
- * }} candidate file trong chỉ mục / kết quả fetchSubtitleFile
- * @returns {Promise<string|null>} text file .ass, hoặc null nếu thất bại
- */
-export async function fetchSubtitleText(candidate) {
-  const id = candidate?.id ?? 'undefined';
-  const fileName = candidate?.fileName ?? 'undefined';
-
-  if (!candidate?.fetchUrl) {
-    utils.warn(
-      `fetcher: fetchSubtitleText(): thiếu fetchUrl (${id}, ${fileName}).`
-    );
-    return null;
-  }
-
-  const text = await loggedFetch(candidate.fetchUrl, id, 'file');
-
-  if (!text) {
-    utils.warn(
-      `fetcher: fetchSubtitleText(): không tải được ${id}, ${fileName}.`
-    );
-    return null;
-  }
-
-  const byteSize = new TextEncoder().encode(text).length;
-  if (byteSize > SUBTITLE_SIZE_WARN) {
-    utils.warn(
-      `fetcher: fetchSubtitleText(): file ${id}, ${fileName} > 10MB` +
-        ` (${(byteSize / (1024 * 1024)).toFixed(2)} MB).`
-    );
-  }
-
-  utils.log(`fetcher: fetchSubtitleText(): xong file ${fileName}.`);
-  return text;
-}
-
-/** [arena.ai] Lập chỉ mục danh sách thư mục nguồn (export 1 của fetcher.js).
+/** [arena.ai] Tải và lập chỉ mục danh sách thư mục nguồn 
  *
  * Nhận danh sách link thư mục nguồn (GitHub hoặc Google Drive), tự nhận
  * diện loại nguồn theo link rồi gọi đúng MỘT lần `scanGitHub()` hoặc
