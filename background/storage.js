@@ -61,7 +61,7 @@ function normalizeSourceUrl(url) {
   const match = trimmed.match(/^([a-z][a-z0-9+.-]*:\/\/[^/?#]*)([\s\S]*)$/i);
   return match ? match[1].toLowerCase() + match[2] : trimmed;
 }
-/**  Hàm kiểm tra URL 
+/** Hàm kiểm tra URL (fallback sau công đoạn fetch.)
  * @param {string} url
  * @returns {boolean} test
 */
