@@ -93,13 +93,13 @@ test("addSource: không mutate object của caller (không gán id/savedAt lên 
   assert.equal("savedAt" in src, false);
 });
 
-test("addSource: chặn trùng khi host/scheme khác case hoặc URL bị thừa khoảng trắng", async () => {
+test("addSource: chặn trùng chính xác URL (storage KHÔNG tự normalize)", async () => {
+  // Hợp đồng mới: fetcher đã chuẩn hóa URL trước khi gọi addSource, nên
+  // storage so sánh nguyên URL, không trim/lowercase lại để bắt "gần trùng".
   const first = await storage.addSource({ url: GITHUB_URL });
   assert.equal(first.success, true);
-  const hostCase = await storage.addSource({ url: "HTTPS://GITHUB.COM/owner/repo/tree/main" });
-  assert.equal(hostCase.success, false);
-  const padded = await storage.addSource({ url: `   ${GITHUB_URL}   ` });
-  assert.equal(padded.success, false);
+  const dup = await storage.addSource({ url: GITHUB_URL });
+  assert.equal(dup.success, false);
   assert.equal((await storage.getSourceList()).length, 1);
 });
 

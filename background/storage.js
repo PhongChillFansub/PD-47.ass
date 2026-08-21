@@ -49,19 +49,12 @@ function enqueueWrite(task) {
   return run;
 }
 
-/** Chuẩn hóa URL nguồn để so sánh trùng lặp: trim + lowercase phần scheme://host,
- * GIỮ NGUYÊN path/query (path phân biệt hoa-thường). Không dùng cho việc lưu — chỉ để so sánh.
- * @param {string} url
- * @returns {string} URL đã chuẩn hóa (chuỗi rỗng nếu không phải string)
- */
-function normalizeSourceUrl(url) {
-  if (typeof url !== "string") return "";
-  const trimmed = url.trim();
-  // Tách phần "scheme://host" khỏi phần còn lại (path/query/hash) rồi chỉ lowercase phần đầu.
-  const match = trimmed.match(/^([a-z][a-z0-9+.-]*:\/\/[^/?#]*)([\s\S]*)$/i);
-  return match ? match[1].toLowerCase() + match[2] : trimmed;
-}
 /** Hàm kiểm tra URL (fallback sau công đoạn fetch.)
+ *
+ * Lưu ý: storage KHÔNG chuẩn hóa URL — trách nhiệm đó nằm ở fetcher
+ * (`fetchSubtitleFileList` luôn ghim `source.url` bằng URL đã chuẩn hóa
+ * trước khi truyền vào `addSource`). So sánh trùng lặp vì vậy dùng nguyên
+ * `source.url` (URL đã được chuẩn hóa sẵn), không trim/lowercase lại.
  * @param {string} url
  * @returns {boolean} test
 */
@@ -78,7 +71,9 @@ function validateSourceUrl(url) {
 }
 /** Hàm thêm nguồn (URL của folder GitHub/GDrive) vào bộ nhớ extension.
  * (do bộ nhớ theo dạng array, nên ở đây cập nhật dưới dạng spread, thay vì pop/push)
- * @param {*} source thô: { url, type, folderName, folderId }
+ * @param {{url: string, [key: string]: any}} source nguồn cần thêm; `url` phải
+ *   ĐÃ được chuẩn hóa bởi fetcher (xem `fetchSubtitleFileList`) — storage
+ *   không normalize lại, chỉ validate và so khớp trùng nguyên URL.
  * @returns {Promise<Object>} { success: true, data } khi thành công (data = nguồn đã thêm,
  *   gồm id ổn định + savedAt); { success: false, error, url } khi input sai / trùng lặp
  */
@@ -89,8 +84,9 @@ export async function addSource(source = {}) {
     utils.warn(`storage: Nguồn ko hợp lệ: ${source?.url}`);
     return { success: false, error: "Dữ liệu nguồn không hợp lệ hoặc URL trống", url: source?.url };
   }
-  const normalizedUrl = normalizeSourceUrl(source.url);
-  if (!validateSourceUrl(normalizedUrl)) {
+  // URL đến đây phải đã được chuẩn hóa bởi fetcher (fetchSubtitleFileList
+  // ghim sẵn source.url = URL chuẩn hóa). Storage không normalize lại.
+  if (!validateSourceUrl(source.url)) {
     utils.warn(`storage: URL không được hỗ trợ: ${source.url}`);
     return {
       success: false,
@@ -111,8 +107,9 @@ export async function addSource(source = {}) {
       }
       return item;
     });
-    // Kiểm tra trùng lặp bằng URL ĐÃ CHUẨN HÓA (trim + lowercase scheme/host, path giữ nguyên)
-    if (withIds.some(item => normalizeSourceUrl(item?.url) === normalizedUrl)) {
+    // Kiểm tra trùng lặp bằng nguyên URL đã được chuẩn hóa sẵn bởi fetcher
+    // (storage không normalize lại — xem chú thích ở validateSourceUrl).
+    if (withIds.some(item => item?.url === source.url)) {
       // Vẫn lưu id vừa gán cho nguồn cũ dù không thêm nguồn mới.
       if (migrated) await chrome.storage.local.set({ [SUBTITLE_SOURCES_KEY]: withIds });
       utils.warn(`storage: Nguồn đã tồn tại: ${source.url}`);
