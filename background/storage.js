@@ -15,7 +15,7 @@ const SUBTITLE_DATA_KEY_BASE = "ASSCEE_subData";
 const USER_CONFIG_KEY = "ASSCEE_config";
 /** Lưu các dữ liệu render (fps, nps, dfps, subTitle) để popup hiển thị */
 const RENDERER_STAT_KEY = "ASSCEE_renderData"; 
-/**  Hàm kiểm tra URL 
+/** Hàm kiểm tra URL (fallback sau công đoạn fetch.)
  * @param {string} url
  * @returns {boolean} test
 */
