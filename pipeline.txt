@@ -37,3 +37,158 @@ fetcher.js
         scanGitHub: xử lí quét và lấy dữ liệu thư mục github
     - fetchSubtitleFileList: hàm điều hướng chung
 
+
+------------------------------------------------------------
+CẤU TRÚC DỮ LIỆU CHI TIẾT TRONG fetcher.js (21aug26 - bổ sung)
+------------------------------------------------------------
+
+1. Hằng số cấu hình:
+   FETCH_TIMEOUT = 60000 (ms) - timeout cho fetchWithTimeout()
+   SUBTITLE_SIZE_WARN = 10 * 1024 * 1024 (10MB) - cảnh báo file lớn
+   VALID_FILE_SIGNATURE = ["[Script Info]", "[V4+ Styles]", "[Events]"] - chữ ký file .ass hợp lệ
+   SEARCH_COMPLETE_BONUS = 1_000_000 - thưởng khi khớp chính xác 100% mọi token
+   SEARCH_TOKEN_BAND = 1000 - mỗi token khớp cộng 1000 điểm
+
+2. Input của fetchSubtitleFileList(urls):
+   urls: Array<string | {url: string}>
+     - string: URL thô (vd: "https://drive.google.com/drive/folders/xxx")
+     - {url: string}: object bọc URL
+     => Nếu không phải mảng -> return []
+
+3. Source trung gian sau normalize:
+   normalizeGDriveUrl(url) -> {url, folderId} | null
+     url: string - URL chuẩn hóa "https://drive.google.com/drive/folders/{folderId}"
+     folderId: string - ID thư mục GDrive ([a-zA-Z0-9_-]+)
+
+   normalizeGitHubUrl(url) -> {url, folderId} | null
+     url: string - URL chuẩn hóa "https://github.com/{owner}/{repo}/tree/{branch}/{path}"
+     folderId: string - "{owner}/{repo}/{branch}/{path}" (không có / cuối)
+
+4. Source sau scan (output của scanGDrive / scanGitHub, cũng là output của fetchSubtitleFileList):
+   Source: {
+     url: string,                // URL chuẩn hóa thư mục nguồn
+     folderId: string,            // ID định danh (GDrive ID hoặc owner/repo/branch/path)
+     sourceType: 'gdrive'|'github', // loại nguồn
+     name: string,                // tên hiển thị thư mục (GDrive: og:title hoặc title, GitHub: repo/path, fallback: undefined_GDrive / undefined_GitHub)
+     savedAt: number,             // Date.now() lúc quét xong
+     fileList: Array<FileEntry>   // danh sách file .ass (rỗng nếu lỗi)
+   }
+
+5. FileEntry (phần tử trong source.fileList):
+   FileEntry: {
+     id: string,          // GDrive: fileId, GitHub: sha
+     fileName: string,     // tên file gốc (đã decode HTML)
+     fetchUrl: string,     // URL tải trực tiếp: GDrive = "https://docs.google.com/uc?export=download&id={id}", GitHub = item.download_url
+     folderUrl: string,    // = source.url (để truy ngược thư mục cha)
+     sourceType: 'gdrive'|'github',
+     groupName: string     // = source.name (tên nhóm để hiển thị)
+   }
+   - Chỉ file có fileName.toLowerCase().endsWith('.ass') mới được giữ
+
+6. Tập Sources (input của searchSubtitleFile):
+   sources: Array<Source>  // mảng các Source đã có fileList không rỗng
+
+7. Cấu trúc query tìm kiếm (parseSearchQuery):
+   Input: searchKey: string | null | undefined
+     - null/undefined/rỗng/"   " -> return 1 (hiện tất cả)
+     - Ví dụ: 'a b | #"One Piece" #ID' 
+
+   Output: groups: Array<Array<Token>>
+     groups: mảng các nhóm, ngăn cách bởi dấu "|"
+       - bỏ qua nhóm rỗng (vd "a | | b" => 2 nhóm)
+       - mỗi group là mảng Token
+
+   Token: {
+     value: string,          // giá trị cần tìm (đã bỏ # và bỏ ngoặc kép ngoài, vd: One Piece, ID, a)
+     caseSensitive: boolean   // false = thường (có fold + fuzzy), true = bản # (khớp nguyên chuỗi con đúng hoa/thường, không fuzzy)
+   }
+   Quy tắc #:
+     - "#X" mở rộng thành 2 token liền kề trong cùng group: {value:X, caseSensitive:false} + {value:X, caseSensitive:true}
+     - Token thường: foldText rồi so Levenshtein
+     - Token # : name.includes(value) chính xác case
+
+8. Cấu trúc hỗ trợ scoring:
+   foldText(text: string) -> string
+     - toLowerCase + replace đ->d + NFKD + bỏ dấu \u0300-\u036f
+     - dùng để so sánh không dấu
+
+   editDistanceSubstring(pattern: string (đã fold), text: string (đã fold), maxDist) -> number
+     - khoảng cách Levenshtein nhỏ nhất giữa pattern và 1 đoạn con bất kỳ của text
+     - vượt maxDist -> trả maxDist+1 để cắt sớm
+
+   maxAllowedDistance(length: number) -> number
+     - length < 3 => 0
+     - length >=3 => floor(length/2) (50% độ dài)
+
+   scoreSearchToken(name: string gốc, nameFolded: string, token: Token) -> {score: number, exact: boolean}
+     - caseSensitive=true: name.includes(value) ? {score: 2*n, exact:true} : {0,false}
+     - caseSensitive=false: 
+         pattern = foldText(value)
+         distance = editDistanceSubstring(pattern, nameFolded, maxDist)
+         distance > maxDist => {0,false}
+         distance ==0 => {2*n, true}
+         0<distance<=maxDist => {2*n -2*distance, false}
+
+   scorePhraseRuns(name, nameFolded, tokens, tokenScores: number[]) -> number (bonus)
+     - tìm chuỗi token liên tiếp đều khớp và phrase liền mạch xuất hiện trong tên
+     - cộng dồn độ dài phrase (tokens.slice(i,j+1).join(' ').length)
+     - ví dụ query "hello my world" trên "hello my world" => +14, trên "hello my" => +8
+
+   scoreSearchGroup(name, nameFolded, tokens: Token[]) -> number
+     - tokenResults = tokens.map(scoreSearchToken)
+     - tokenScores = results.map(r=>r.score)
+     - matched = số token có score>0
+     - nếu matched==0 => 0 (ẩn file)
+     - quality = sum(tokenScores) + scorePhraseRuns(...)
+     - completeExact = mọi token đều exact==true
+     - return (completeExact?1_000_000:0) + matched*1000 + quality
+     => 3 mức: 0 = không khớp, 1xxx-4xxx = khớp 1 phần/na ná, >=1_000_000 = khớp chính xác 100%
+
+   matchSubtitle(name: string (groupName + fileName), searchKey) -> number (score)
+     - searchKey null/rỗng -> 1
+     - name rỗng -> 0
+     - groups = parseSearchQuery(searchKey)
+     - groups rỗng -> 1
+     - best = max(scoreSearchGroup cho mỗi group)
+     - return best
+
+9. Candidate (output của searchSubtitleFile):
+   searchSubtitleFile(sources: Array<Source>, searchKey?: string) -> Promise<Array<Candidate>>
+
+   Candidate: FileEntry mở rộng + score
+   {
+     id: string,
+     fileName: string,
+     fetchUrl: string,
+     folderUrl: string,
+     sourceType: 'gdrive'|'github',
+     groupName: string,      // từ source.name
+     score: number           // từ matchSubtitle(`${groupName} ${fileName}`, searchKey), >0 mới giữ
+   }
+   - Sắp xếp: score giảm dần, hòa thì groupName localeCompare, rồi fileName localeCompare
+
+10. Input/Output của fetchSubtitleText:
+    Input: candidate: {id?: string, fileName?: string, fetchUrl?: string}
+      - thiếu fetchUrl => warn + return null
+    Output: Promise<string|null>
+      - string = rawText (nội dung file .ass)
+      - null = thất bại (fetch lỗi, HTTP != ok, không có chữ ký VALID_FILE_SIGNATURE)
+      - đo byteSize = new TextEncoder().encode(text).length, nếu >10MB chỉ warn, vẫn trả text
+      - core: loggedFetch(url, id, type) -> fetchWithTimeout(url) + validate
+
+11. Luồng pipeline tổng quát:
+    urls: Array<string|{url}> 
+      -> fetchSubtitleFileList (normalize + scanGDrive/scanGitHub + dedup theo normalizedUrl via Map scannedByUrl, bỏ qua fileList rỗng)
+      -> sources: Array<Source> (đã có fileList)
+      -> searchSubtitleFile(sources, searchKey) (dùng matchSubtitle để chấm điểm trên `${groupName} ${fileName}`)
+      -> candidates: Array<Candidate> (có score>0, đã sort)
+      -> fetchSubtitleText(candidate) (candidate.fetchUrl -> rawText)
+      -> rawText: string|null (đầu vào cho giai đoạn parser ASS tiếp theo)
+
+12. Xử lý lỗi & log:
+    - utils.log / utils.warn / utils.error
+    - loggedFetch: log trước fetch, error nếu HTTP fail, return null
+    - scanGDrive/scanGitHub: try/catch, lỗi -> fileList=[], name=undefined_*, savedAt=Date.now(), vẫn return source
+    - fetchSubtitleFileList: không throw, link không hợp lệ/fileList rỗng -> warn + bỏ qua
+    - searchSubtitleFile: sources rỗng/không mảng -> log + return []
+    - fetchSubtitleText: thiếu fetchUrl/text null -> warn + return null
