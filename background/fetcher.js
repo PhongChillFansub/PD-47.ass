@@ -810,6 +810,12 @@ export async function fetchSubtitleFileList(urls = []) {
       ? await scanGDrive(gdrive)
       : await scanGitHub(github);
 
+    // Ghim URL ĐÃ CHUẨN HÓA vào source (thay vì URL thô end-user nhập) để
+    // nơi gọi (storage) không phải normalize lại. scanGDrive/scanGitHub đã
+    // nhận object chuẩn hóa sẵn, gán lại ở đây để chắc chắn source.url luôn
+    // là normalizedUrl kể cả khi hàm scan sau này đổi cách khởi tạo source.
+    source.url = normalizedUrl;
+
     scannedByUrl.set(normalizedUrl, source);
 
     // Scan thất bại hoặc thư mục không có file .ass nào → không có gì để
