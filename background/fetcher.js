@@ -390,18 +390,16 @@ export async function searchSubtitleFile(sources, searchKey) {
     const files = source?.fileList;
     if (!Array.isArray(files) || !files.length) continue;
 
-    const groupName = source.name || '';
-
     for (const file of files) {
       const fileName = file?.fileName || '';
-      const folderName = groupName || file.groupName || '';
+      const folderName = source.name || file.groupName || '';
       const score = matchSubtitle(`${folderName} ${fileName}`.trim(), searchKey);
 
       if (!score) continue;
 
       candidates.push({
         ...file,
-        groupName: folderName || file.groupName,
+        groupName: folderName,
         score
       });
     }
