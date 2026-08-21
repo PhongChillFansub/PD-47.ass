@@ -87,3 +87,40 @@ fetcher.js * (pipeline)
     2. Khi end-user tìm kiếm thì đưa sources vào searchSubtitleFile, lấy candidates
     3. Khi end-user chọn tệp (candidate) thì gửi candidate cho fetchSubtitleText, lấy text đi xử lí tiếp
 
+storage.js
+    - export 1: addSource          — thêm nguồn folder (GitHub/GDrive) vào danh sách
+    - export 2: getSourceList      — lấy danh sách nguồn (thuần đọc)
+    - export 3: removeSource       — xóa nguồn theo id (UUID)
+    - export 4: addSubData         — lưu cache sub (obj) theo videoId + cập nhật chỉ mục
+    - export 5: getSubDataList     — lấy danh sách cache sub (phần nhẹ, đọc từ chỉ mục)
+    - export 6: useSubData         — lấy toàn bộ subObj đã lưu (gồm parsedData)
+    - export 7: removeSubData      — xóa cache sub theo videoId (+ xóa khỏi chỉ mục)
+    - export 8: getConfig          — lấy config (toàn bộ dạng bản sao nông / 1 key)
+    - export 9: setConfig          — cập nhật config 1 key
+    - export 10: getRendererStat   — lấy dữ liệu render (fps, nps, dfps, subTitle)
+    - export 11: setRendererStat   — cập nhật dữ liệu render (throttle ~4 lần/giây)
+
+    * key trong chrome.storage.local:
+        ASSCEE_sourceList           — array các nguồn: { url, folderName, ..., id (UUID), savedAt }
+            (id là định danh ổn định dùng để xóa/so sánh trùng; savedAt chỉ là metadata.
+             Nguồn cũ chưa có id được gán id tự động khi thêm nguồn mới)
+        ASSCEE_subData_<videoId>    — subObj ĐẦY ĐỦ của 1 video (fileObj + parsedData + cachedAt),
+            tách key riêng vì parsedData có thể nặng ~7MB
+        ASSCEE_subIndex             — chỉ mục NHẸ của cache sub:
+            { [videoId]: { ...fileObj, videoId, cachedId, cachedAt } }
+            KHÔNG chứa parsedData → getSubDataList chỉ đọc key này, không tải key sub.
+            Tự migrate 1 lần từ các key ASSCEE_subData_* khi key này chưa tồn tại.
+        ASSCEE_config               — thiết đặt người dùng (chỉ string/number/boolean)
+        ASSCEE_renderData           — dữ liệu render (fps, nps, dfps, subTitle)
+
+    * quy ước chung:
+        - storage.js là nơi DUY NHẤT ghi chrome.storage.local; module khác ghi qua các hàm export.
+        - Lỗi do input/nghiệp vụ → result-object { success, data | error }; lỗi lập trình → throw.
+        - Mọi read→modify→write chạy qua hàng đợi ghi PRIVATE trong storage.js (không export)
+            để 2 lời gọi chồng nhau không ghi đè mất cập nhật.
+        - setRendererStat giữ giá trị mới nhất trong bộ nhớ, chỉ flush tối đa ~4 lần/giây
+            (queue đảm bảo không mất cập nhật, throttle đảm bảo ít lần ghi).
+
+tests/
+    storage.test.mjs — bộ test storage.js (mock chrome.storage.local), chạy: npm test (node --test)
+

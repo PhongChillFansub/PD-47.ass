@@ -1,0 +1,10 @@
+{
+  "name": "pd-47-ass",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PD-47.ass — hiển thị phụ đề Aegisub trên YouTube. Bộ test storage.js chạy bằng node --test (mock chrome.storage.local).",
+  "scripts": {
+    "test": "node --test"
+  }
+}
