@@ -98,28 +98,29 @@ storage.js
     - export 8: getConfig          — lấy config (toàn bộ dạng bản sao nông / 1 key)
     - export 9: setConfig          — cập nhật config 1 key
     - export 10: getRendererStat   — lấy dữ liệu render (fps, nps, dfps, subTitle)
-    - export 11: setRendererStat   — cập nhật dữ liệu render (throttle ~4 lần/giây)
+    - export 11: setRendererStat   — cập nhật dữ liệu render (cooldown fallback 500ms)
 
     * key trong chrome.storage.local:
         ASSCEE_sourceList           — array các nguồn: { url, folderName, ..., id (UUID), savedAt }
-            (id là định danh ổn định dùng để xóa/so sánh trùng; savedAt chỉ là metadata.
-             Nguồn cũ chưa có id được gán id tự động khi thêm nguồn mới)
+            (id là định danh ổn định dùng để xóa/so sánh trùng; savedAt chỉ là metadata)
         ASSCEE_subData_<videoId>    — subObj ĐẦY ĐỦ của 1 video (fileObj + parsedData + cachedAt),
             tách key riêng vì parsedData có thể nặng ~7MB
         ASSCEE_subIndex             — chỉ mục NHẸ của cache sub:
             { [videoId]: { ...fileObj, videoId, cachedId, cachedAt } }
             KHÔNG chứa parsedData → getSubDataList chỉ đọc key này, không tải key sub.
-            Tự migrate 1 lần từ các key ASSCEE_subData_* khi key này chưa tồn tại.
+            Thiếu key → coi như {} (không quét / không migrate).
         ASSCEE_config               — thiết đặt người dùng (chỉ string/number/boolean)
-        ASSCEE_renderData           — dữ liệu render (fps, nps, dfps, subTitle)
+        ASSCEE_renderData           — dữ liệu render (fps, nps, dfps, subTitle) + lastTimeSet
+            (lastTimeSet là mốc cooldown nội bộ; getRendererStat lọc khỏi bản trả về)
 
     * quy ước chung:
         - storage.js là nơi DUY NHẤT ghi chrome.storage.local; module khác ghi qua các hàm export.
-        - Lỗi do input/nghiệp vụ → result-object { success, data | error }; lỗi lập trình → throw.
+        - add/set/remove: thành công → "" (falsy); thất bại input/nghiệp vụ → chuỗi lỗi (truthy).
+          Lỗi lập trình → throw.
         - Mọi read→modify→write chạy qua hàng đợi ghi PRIVATE trong storage.js (không export)
             để 2 lời gọi chồng nhau không ghi đè mất cập nhật.
-        - setRendererStat giữ giá trị mới nhất trong bộ nhớ, chỉ flush tối đa ~4 lần/giây
-            (queue đảm bảo không mất cập nhật, throttle đảm bảo ít lần ghi).
+        - setRendererStat ghi ngay nếu đã hết cooldown 500ms (fallback; renderer tự gọi ~1 lần/giây).
+            Gọi sớm hơn → bỏ data, trả chuỗi lỗi. lastTimeSet nằm trong ASSCEE_renderData.
 
 tests/
     storage.test.mjs — bộ test storage.js (mock chrome.storage.local), chạy: npm test (node --test)
