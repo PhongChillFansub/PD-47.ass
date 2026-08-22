@@ -1,9 +1,6 @@
 // Bộ test cho background/storage.js — chạy bằng `node --test tests/` (hoặc `npm test`).
 // Mock chrome.storage.local bằng Map trong bộ nhớ (xem createMockChrome bên dưới).
-// Phủ các case của mục 1–7 trong kế hoạch cải tiến storage.js (21aug26):
-//   1. chỉ mục nhẹ ASSCEE_subIndex   2. throttle setRendererStat   3. id ổn định cho source
-//   4. hàng đợi ghi chống race      5. không mutate object caller   6. chiến lược lỗi nhất quán
-//   7. getConfig trả bản sao
+// add/set/remove trả "" khi thành công, chuỗi lỗi (truthy) khi thất bại.
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import * as storage from "../background/storage.js";
@@ -18,6 +15,7 @@ const DRIVE_URL = "https://drive.google.com/drive/folders/abcDEF";
 const SUBTITLE_DATA_KEY_BASE = "ASSCEE_subData";
 const SUBTITLE_INDEX_KEY = "ASSCEE_subIndex";
 const SUBTITLE_SOURCES_KEY = "ASSCEE_sourceList";
+const RENDERER_STAT_KEY = "ASSCEE_renderData";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -73,17 +71,16 @@ beforeEach(() => {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// ==================== Mục 3: id ổn định cho source ====================
+// ==================== id ổn định cho source ====================
 
-test("addSource: thêm nguồn hợp lệ → success, có id UUID + savedAt", async () => {
+test("addSource: thêm nguồn hợp lệ → \"\", có id UUID + savedAt", async () => {
   const res = await storage.addSource({ url: GITHUB_URL, folderName: "Repo" });
-  assert.equal(res.success, true);
-  assert.equal(res.data.url, GITHUB_URL);
-  assert.match(res.data.id, UUID_RE);
-  assert.equal(typeof res.data.savedAt, "number");
+  assert.equal(res, "");
   const sources = mock.store.get(SUBTITLE_SOURCES_KEY);
   assert.equal(sources.length, 1);
-  assert.equal(sources[0].id, res.data.id);
+  assert.equal(sources[0].url, GITHUB_URL);
+  assert.match(sources[0].id, UUID_RE);
+  assert.equal(typeof sources[0].savedAt, "number");
 });
 
 test("addSource: không mutate object của caller (không gán id/savedAt lên object gốc)", async () => {
@@ -94,23 +91,23 @@ test("addSource: không mutate object của caller (không gán id/savedAt lên 
 });
 
 test("addSource: chặn trùng chính xác URL (storage KHÔNG tự normalize)", async () => {
-  // Hợp đồng mới: fetcher đã chuẩn hóa URL trước khi gọi addSource, nên
+  // Hợp đồng: fetcher đã chuẩn hóa URL trước khi gọi addSource, nên
   // storage so sánh nguyên URL, không trim/lowercase lại để bắt "gần trùng".
   const first = await storage.addSource({ url: GITHUB_URL });
-  assert.equal(first.success, true);
+  assert.equal(first, "");
   const dup = await storage.addSource({ url: GITHUB_URL });
-  assert.equal(dup.success, false);
+  assert.equal(dup, "Nguồn này đã tồn tại trong danh sách");
   assert.equal((await storage.getSourceList()).length, 1);
 });
 
 test("addSource: path phân biệt hoa-thường → 2 nguồn khác nhau", async () => {
   await storage.addSource({ url: GITHUB_URL });
   const res = await storage.addSource({ url: "https://github.com/owner/repo/tree/MAIN" });
-  assert.equal(res.success, true);
+  assert.equal(res, "");
   assert.equal((await storage.getSourceList()).length, 2);
 });
 
-test("addSource: input sai (url không phải string/trống/không hỗ trợ) → {success:false}, không throw", async () => {
+test("addSource: input sai (url không phải string/trống/không hỗ trợ) → chuỗi lỗi, không throw", async () => {
   const badInputs = [
     undefined,
     {},
@@ -121,7 +118,7 @@ test("addSource: input sai (url không phải string/trống/không hỗ trợ) 
   ];
   for (const bad of badInputs) {
     const res = await storage.addSource(bad);
-    assert.equal(res.success, false);
+    assert.equal(res, "URL không chuẩn");
   }
   assert.equal((await storage.getSourceList()).length, 0);
 });
@@ -131,8 +128,8 @@ test("addSource: 2 lời gọi đồng thời khác URL → không mất cập n
     storage.addSource({ url: GITHUB_URL }),
     storage.addSource({ url: GITHUB_URL_2 }),
   ]);
-  assert.equal(r1.success, true);
-  assert.equal(r2.success, true);
+  assert.equal(r1, "");
+  assert.equal(r2, "");
   assert.equal((await storage.getSourceList()).length, 2);
 });
 
@@ -147,45 +144,28 @@ test("removeSource: xóa theo id — 2 nguồn cùng savedAt không bị xóa nh
   mock.store.set(SUBTITLE_SOURCES_KEY, sources);
 
   const res = await storage.removeSource(sources[0].id);
-  assert.equal(res.success, true);
-  assert.equal(res.data.length, 1);
-  assert.equal(res.data[0].id, sources[1].id);
-
+  assert.equal(res, "");
   const remaining = mock.store.get(SUBTITLE_SOURCES_KEY);
   assert.equal(remaining.length, 1);
+  assert.equal(remaining[0].id, sources[1].id);
   assert.equal(remaining[0].savedAt, 12345); // nguồn còn lại không bị đụng tới
 });
 
-test("removeSource: id sai/không tìm thấy → {success:false}, không throw", async () => {
+test("removeSource: id sai/không tìm thấy → chuỗi lỗi, không throw", async () => {
   for (const bad of [undefined, null, 123, "", "   "]) {
     const res = await storage.removeSource(bad);
-    assert.equal(res.success, false);
+    assert.equal(res, "id nguồn không hợp lệ hoặc trống");
   }
   const unknown = await storage.removeSource("no-such-id");
-  assert.equal(unknown.success, false);
+  assert.equal(unknown, "Không tìm thấy nguồn có id: no-such-id");
 });
 
-test("removeSource: dữ liệu cũ chưa có id được gán id khi thêm nguồn mới → vẫn xóa được", async () => {
-  // Mô phỏng nguồn lưu từ trước khi có tính năng id.
-  mock.store.set(SUBTITLE_SOURCES_KEY, [{ url: GITHUB_URL, folderName: "Legacy", savedAt: 1 }]);
-  const res = await storage.addSource({ url: GITHUB_URL_2, folderName: "New" });
-  assert.equal(res.success, true);
-  const sources = mock.store.get(SUBTITLE_SOURCES_KEY);
-  assert.equal(sources.length, 2);
-  const legacy = sources.find((s) => s.folderName === "Legacy");
-  assert.match(legacy.id, UUID_RE);
-  const rem = await storage.removeSource(legacy.id);
-  assert.equal(rem.success, true);
-  assert.equal(rem.data.length, 1);
-});
-
-// ==================== Mục 5 + 1: addSubData clone input + chỉ mục nhẹ ====================
+// ==================== addSubData clone input + chỉ mục nhẹ ====================
 
 test("addSubData: lưu thành công, KHÔNG mutate object của caller, cập nhật chỉ mục nhẹ", async () => {
   const subObj = { fileObj: { fileName: "x.ass" }, parsedData: [[1, 2]] };
   const res = await storage.addSubData("abc", subObj);
-  assert.equal(res.success, true);
-  assert.equal(res.data, "abc");
+  assert.equal(res, "");
   assert.equal("cachedAt" in subObj, false); // không gán cachedAt lên object người gọi
 
   const saved = mock.store.get(`${SUBTITLE_DATA_KEY_BASE}_abc`);
@@ -209,7 +189,7 @@ test("addSubData: cachedId giữ id gốc lúc cache, videoId là id hiện tạ
   assert.equal(index.newid.cachedId, "orig");
 });
 
-test("addSubData: input không hợp lệ → {success:false}, không throw (mục 6)", async () => {
+test("addSubData: input không hợp lệ → chuỗi lỗi, không throw", async () => {
   const badInputs = [
     [undefined, { parsedData: [] }],
     [null, { parsedData: [] }],
@@ -222,7 +202,8 @@ test("addSubData: input không hợp lệ → {success:false}, không throw (m�
   ];
   for (const [vid, obj] of badInputs) {
     const res = await storage.addSubData(vid, obj);
-    assert.equal(res.success, false);
+    assert.ok(res);
+    assert.notEqual(res, "");
   }
   assert.equal(mock.store.has(`${SUBTITLE_DATA_KEY_BASE}_x`), false);
 });
@@ -242,7 +223,7 @@ test("getSubDataList: đọc từ chỉ mục — đúng shape, không chứa pa
   // Chỉ đọc key chỉ mục (get(1 key)), không đọc get(null) hay các key sub nặng.
   const newGetKeys = mock.counts.getKeys.slice(beforeGetKeys);
   assert.deepEqual(newGetKeys, [SUBTITLE_INDEX_KEY]);
-  assert.equal(mock.counts.getNull, 1); // chỉ 1 lần migrate (khi add sub đầu tiên), không quét lại
+  assert.equal(mock.counts.getNull, 0);
 });
 
 test("getSubDataList(searchId): lọc đúng 1 video, chấp nhận prefix '#', trả [] nếu không có", async () => {
@@ -256,8 +237,7 @@ test("getSubDataList(searchId): lọc đúng 1 video, chấp nhận prefix '#', 
   assert.deepEqual(missing, []);
 });
 
-test("getSubDataList: migrate dữ liệu cũ (cache chưa có chỉ mục) đúng 1 lần", async () => {
-  // Seed trực tiếp: dữ liệu cache kiểu cũ + 1 key không liên quan (phải bị bỏ qua).
+test("getSubDataList: thiếu chỉ mục → [] (không quét key sub cũ)", async () => {
   mock.store.set(`${SUBTITLE_DATA_KEY_BASE}_old1`, {
     fileObj: { fileName: "f1.ass" },
     videoId: "orig1",
@@ -267,33 +247,24 @@ test("getSubDataList: migrate dữ liệu cũ (cache chưa có chỉ mục) đú
   mock.store.set("OTHER_IRRELEVANT_KEY", { whatever: true });
 
   const list = await storage.getSubDataList();
-  assert.equal(list.length, 1);
-  const entry = list[0];
-  assert.equal(entry.videoId, "old1");
-  assert.equal(entry.cachedId, "orig1");
-  assert.equal(entry.cachedAt, 111);
-  assert.equal(entry.fileName, "f1.ass");
-  assert.equal("parsedData" in entry, false);
-
-  assert.ok(mock.store.has(SUBTITLE_INDEX_KEY));
-  assert.equal(mock.counts.getNull, 1);
-  await storage.getSubDataList(); // lần sau không quét lại nữa
-  assert.equal(mock.counts.getNull, 1);
+  assert.deepEqual(list, []);
+  assert.equal(mock.store.has(SUBTITLE_INDEX_KEY), false);
+  assert.equal(mock.counts.getNull, 0);
 });
 
 test("removeSubData: xóa cả key sub lẫn mục trong chỉ mục", async () => {
   await storage.addSubData("vid1", { fileObj: { fileName: "a.ass" }, parsedData: [] });
   const res = await storage.removeSubData("vid1");
-  assert.equal(res.success, true);
-  assert.equal(res.data, "vid1");
+  assert.equal(res, "");
   assert.equal(mock.store.has(`${SUBTITLE_DATA_KEY_BASE}_vid1`), false);
   const index = mock.store.get(SUBTITLE_INDEX_KEY);
   assert.ok(index && !("vid1" in index));
 
   const again = await storage.removeSubData("vid1");
-  assert.equal(again.success, false);
-  assert.equal((await storage.removeSubData("")).success, false);
-  assert.equal((await storage.removeSubData(123)).success, false);
+  assert.ok(again);
+  assert.notEqual(again, "");
+  assert.equal(await storage.removeSubData(""), "videoId không hợp lệ hoặc trống");
+  assert.equal(await storage.removeSubData(123), "videoId không hợp lệ hoặc trống");
 });
 
 test("useSubData: trả toàn bộ subObj (gồm parsedData), null nếu không có", async () => {
@@ -305,12 +276,12 @@ test("useSubData: trả toàn bộ subObj (gồm parsedData), null nếu không 
   assert.equal(await storage.useSubData("nope"), null);
 });
 
-// ==================== Mục 7 + 4: getConfig bản sao + setConfig queue ====================
+// ==================== getConfig bản sao + setConfig queue ====================
 
 test("getConfig: trả bản sao — sửa object trả về không ảnh hưởng storage", async () => {
   mock = createMockChrome({ cloneOnGet: false }); // get trả tham chiếu → test thật sự "bắt" code quên clone
   globalThis.chrome = mock;
-  await storage.setConfig("theme", "dark");
+  assert.equal(await storage.setConfig("theme", "dark"), "");
 
   const cfg = await storage.getConfig();
   assert.deepEqual(cfg, { theme: "dark" });
@@ -333,10 +304,10 @@ test("getConfig: đọc từng key, trả null cho key vắng mặt", async () =
   assert.equal(await storage.getConfig("theme"), "dark");
 });
 
-test("setConfig: ghi key hợp lệ, chặn key/value không hợp lệ bằng {success:false}", async () => {
+test("setConfig: ghi key hợp lệ, chặn key/value không hợp lệ bằng chuỗi lỗi", async () => {
   const ok = await storage.setConfig("theme", "dark");
-  assert.equal(ok.success, true);
-  assert.equal(ok.data.theme, "dark");
+  assert.equal(ok, "");
+  assert.equal(await storage.getConfig("theme"), "dark");
 
   await storage.setConfig("n", 42);
   await storage.setConfig("b", true);
@@ -344,74 +315,85 @@ test("setConfig: ghi key hợp lệ, chặn key/value không hợp lệ bằng {
 
   for (const badValue of [undefined, null, {}, [], () => {}]) {
     const res = await storage.setConfig("k", badValue);
-    assert.equal(res.success, false);
+    assert.equal(res, "value config không hợp lệ (chỉ chấp nhận string/number/boolean)");
   }
   for (const badKey of [undefined, null, 123, "", "   "]) {
     const res = await storage.setConfig(badKey, 1);
-    assert.equal(res.success, false);
+    assert.equal(res, "key config không hợp lệ hoặc trống");
   }
   assert.deepEqual(await storage.getConfig(), { theme: "dark", n: 42, b: true });
 });
 
 test("setConfig: 2 lời gọi đồng thời → không mất cập nhật (queue)", async () => {
   const [a, b] = await Promise.all([storage.setConfig("a", 1), storage.setConfig("b", 2)]);
-  assert.equal(a.success, true);
-  assert.equal(b.success, true);
+  assert.equal(a, "");
+  assert.equal(b, "");
   assert.deepEqual(await storage.getConfig(), { a: 1, b: 2 });
 });
 
-// ==================== Mục 2 + 4: throttle + queue cho rendererStat ====================
+// ==================== cooldown lastTimeSet cho rendererStat ====================
 
 test("getRendererStat: storage trống → {}", async () => {
   assert.deepEqual(await storage.getRendererStat(), {});
 });
 
-test("setRendererStat: input không phải object → {success:false} (undefined → mặc định {})", async () => {
+test("setRendererStat: input không phải object → chuỗi lỗi (undefined → mặc định {})", async () => {
   for (const bad of [null, "x", 123, []]) {
     const res = await storage.setRendererStat(bad);
-    assert.equal(res.success, false);
+    assert.equal(res, "newData không hợp lệ (cần object)");
   }
   // undefined dùng giá trị mặc định {} (giữ API cũ) → hợp lệ
-  assert.equal((await storage.setRendererStat(undefined)).success, true);
+  assert.equal(await storage.setRendererStat(undefined), "");
   assert.deepEqual(await storage.getRendererStat(), {});
 });
 
-test("setRendererStat: gộp (merge) thay vì ghi đè, trả ngay giá trị mới nhất", async () => {
+test("setRendererStat: gộp (merge) khi hết cooldown; gọi sớm → bỏ data", async () => {
   const r1 = await storage.setRendererStat({ fps: 60 });
-  assert.equal(r1.success, true);
-  assert.equal(r1.data.fps, 60);
+  assert.equal(r1, "");
   const r2 = await storage.setRendererStat({ nps: 2 });
-  assert.equal(r2.data.fps, 60); // giữ cập nhật trước đó dù chưa flush
-  assert.equal(r2.data.nps, 2);
-  await sleep(400); // chờ flush
+  assert.equal(r2, "Chưa hết thời gian chờ");
+  const mid = await storage.getRendererStat();
+  assert.equal(mid.fps, 60);
+  assert.equal(mid.nps, undefined);
+  assert.equal("lastTimeSet" in mid, false);
+
+  await sleep(550);
+  const r3 = await storage.setRendererStat({ nps: 2 });
+  assert.equal(r3, "");
   const stat = await storage.getRendererStat();
   assert.equal(stat.fps, 60);
   assert.equal(stat.nps, 2);
-  assert.equal(mock.counts.set, 1); // chỉ 1 lần ghi cho 2 lời gọi liên tiếp
+  assert.equal("lastTimeSet" in stat, false);
+  assert.equal(typeof mock.store.get(RENDERER_STAT_KEY).lastTimeSet, "number");
 });
 
-test("setRendererStat: gọi N lần liên tiếp → flush gộp 1 lần, giá trị cuối cùng đúng", async () => {
+test("setRendererStat: gọi N lần liên tiếp → chỉ ghi lần đầu, các lần sau bị cooldown", async () => {
   const before = mock.counts.set;
   const calls = [];
   for (let i = 0; i < 20; i++) calls.push(storage.setRendererStat({ [`f${i}`]: i }));
-  await Promise.all(calls);
-  await sleep(400);
-  assert.equal(mock.counts.set - before, 1); // 20 lời gọi → chỉ 1 lần ghi storage
+  const results = await Promise.all(calls);
+  assert.equal(results[0], "");
+  assert.ok(results.slice(1).every((r) => r === "Chưa hết thời gian chờ"));
+  assert.equal(mock.counts.set - before, 1);
   const stat = await storage.getRendererStat();
-  for (let i = 0; i < 20; i++) assert.equal(stat[`f${i}`], i);
+  assert.equal(stat.f0, 0);
+  assert.equal(stat.f1, undefined);
 });
 
-test("setRendererStat: flush giới hạn ~4 lần/giây khi gọi trải dài", async () => {
-  for (let i = 0; i < 10; i++) {
-    await storage.setRendererStat({ [`k${i}`]: i });
-    await sleep(100);
-  }
-  await sleep(600); // chờ flush cuối cùng
-  const writes = mock.counts.set;
-  assert.ok(writes >= 2, `flush quá ít: ${writes}`);
-  assert.ok(writes <= 6, `flush vượt giới hạn lần/giây: ${writes}`);
+test("setRendererStat: caller không ghi đè được lastTimeSet để né cooldown", async () => {
+  assert.equal(await storage.setRendererStat({ fps: 1 }), "");
+  const bypass = await storage.setRendererStat({ fps: 99, lastTimeSet: 0 });
+  assert.equal(bypass, "Chưa hết thời gian chờ");
+  assert.equal((await storage.getRendererStat()).fps, 1);
+});
+
+test("setRendererStat: sau cooldown ghi lại được, lastTimeSet không lộ ra getRendererStat", async () => {
+  assert.equal(await storage.setRendererStat({ fps: 10 }), "");
+  await sleep(550);
+  assert.equal(await storage.setRendererStat({ fps: 20 }), "");
   const stat = await storage.getRendererStat();
-  for (let i = 0; i < 10; i++) assert.equal(stat[`k${i}`], i);
+  assert.equal(stat.fps, 20);
+  assert.equal("lastTimeSet" in stat, false);
 });
 
 // ==================== Khác ====================

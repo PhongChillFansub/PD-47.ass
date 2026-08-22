@@ -3,12 +3,12 @@
 // Chức năng: chuyên xử lí lưu trữ trên chrome.storage.local.
 // Quy ước chung (xem pipeline.txt):
 // - storage.js là nơi DUY NHẤT ghi chrome.storage.local; module khác cần lưu thì gọi qua đây.
-// - Lỗi do input / nghiệp vụ → trả result-object { success, data | error } (KHÔNG throw);
-//   lỗi lập trình / trạng thái không hợp lệ → throw.
+// - add/set/remove: thành công → "" (falsy); thất bại nghiệp vụ/input → chuỗi lỗi (truthy).
+//   Lỗi lập trình / trạng thái không hợp lệ → throw.
 // - Mọi thao tác read→modify→write đều chạy qua hàng đợi ghi private (enqueueWrite) để tránh
 //   race: 2 lời gọi chồng nhau đọc cùng 1 giá trị cũ rồi ghi đè mất cập nhật của nhau.
-// - Thuần đọc (getSourceList, getConfig, useSubData...) chạy ngoài queue; riêng getSubDataList
-//   phải đi qua queue 1 lần duy nhất để migrate chỉ mục cache (xem ensureSubIndexRaw).
+// - Thuần đọc (getSourceList, getSubDataList, getConfig, useSubData, getRendererStat)
+//   chạy ngoài queue.
 /** Nhận logger(message, type = 'info', extra = undefined) */
 import * as utils from './utils.js'; 
 /** Dùng trong 3 hàm export với link folder: addSource, getSourceList, removeSource
@@ -23,14 +23,14 @@ const SUBTITLE_SOURCES_KEY = "ASSCEE_sourceList";
 const SUBTITLE_DATA_KEY_BASE = "ASSCEE_subData"; 
 /** Chỉ mục NHẸ của cache sub: { [videoId]: { ...fileObj, videoId, cachedId, cachedAt } }.
  * Không chứa parsedData (~7MB/file) → getSubDataList chỉ đọc key này, không đụng key sub.
- * Tự migrate 1 lần từ dữ liệu cũ khi key này chưa tồn tại (xem ensureSubIndexRaw). */
+ * addSubData / removeSubData tạo và cập nhật key này; thiếu key → coi như {}. */
 const SUBTITLE_INDEX_KEY = "ASSCEE_subIndex";
 /** Lưu các thiết đặt/dữ liệu điều khiển của người dùng */
 const USER_CONFIG_KEY = "ASSCEE_config";
-/** Lưu các dữ liệu render (fps, nps, dfps, subTitle) để popup hiển thị */
+/** Lưu các dữ liệu render (fps, nps, dfps, subTitle) + lastTimeSet (mốc cooldown, không trả ra ngoài) */
 const RENDERER_STAT_KEY = "ASSCEE_renderData"; 
-/** Khoảng cách tối thiểu giữa 2 lần flush rendererStat xuống storage (~4 lần/giây). */
-const RENDERER_STAT_FLUSH_INTERVAL_MS = 250;
+/** Fallback: khoảng cách tối thiểu giữa 2 lần ghi rendererStat (renderer tự gọi ~1 lần/giây). */
+const RENDERER_STAT_COOLDOWN_MS = 500;
 
 // ==================== Hàng đợi ghi (chống race read→modify→write) ====================
 // Queue để PRIVATE trong storage.js, KHÔNG export: utils.js là module tiện ích thuần/stateless,
@@ -74,45 +74,31 @@ function validateSourceUrl(url) {
  * @param {{url: string, [key: string]: any}} source nguồn cần thêm; `url` phải
  *   ĐÃ được chuẩn hóa bởi fetcher (xem `fetchSubtitleFileList`) — storage
  *   không normalize lại, chỉ validate và so khớp trùng nguyên URL.
- * @returns {Promise<Object>} { success: true, data } khi thành công (data = nguồn đã thêm,
- *   gồm id ổn định + savedAt); { success: false, error, url } khi input sai / trùng lặp
+ * @returns {Promise<string>} "" khi thành công; chuỗi lỗi khi input sai / trùng lặp
  */
 export async function addSource(source = {}) {
   // validate fallback.
-  if (!validateSourceUrl(source.url)) {
-    utils.warn(`storage: addSource(): URL không chuẩn: ${source.url}`);
+  if (!validateSourceUrl(source?.url)) {
+    utils.warn(`storage: addSource(): URL không chuẩn: ${source?.url}`);
     return "URL không chuẩn";
   }
   // read→modify→write: chạy trong queue để 2 lời gọi chồng nhau không đọc chung 1 bản cũ.
   return enqueueWrite(async () => {
     const sources = await getSourceList(); // hàm getSourceList đã fallback array trống
-    // Migrate nhẹ dữ liệu cũ: nguồn lưu trước khi có `id` được gán id 1 lần
-    // để vẫn xóa được bằng removeSource(id), không bị "mắc kẹt" trong danh sách.
-    let migrated = false;
-    const withIds = sources.map(item => {
-      if (item && typeof item === "object" && (typeof item.id !== "string" || !item.id)) {
-        migrated = true;
-        return { ...item, id: crypto.randomUUID() };
-      }
-      return item;
-    });
     // Kiểm tra trùng lặp bằng nguyên URL đã được chuẩn hóa sẵn bởi fetcher
     // (storage không normalize lại — xem chú thích ở validateSourceUrl).
-    if (withIds.some(item => item?.url === source.url)) {
-      // Vẫn lưu id vừa gán cho nguồn cũ dù không thêm nguồn mới.
-      if (migrated) await chrome.storage.local.set({ [SUBTITLE_SOURCES_KEY]: withIds });
+    if (sources.some(item => item?.url === source.url)) {
       utils.warn(`storage: Nguồn đã tồn tại: ${source.url}`);
-      return { success: false, error: "Nguồn này đã tồn tại trong danh sách", url: source.url };
-    }  
+      return "Nguồn này đã tồn tại trong danh sách";
+    }
     const createdSource = {
       ...source,
       id: crypto.randomUUID(), // định danh ổn định — savedAt chỉ là metadata
       savedAt: Date.now()
     };
-    const updated = [...withIds, createdSource];
-    await chrome.storage.local.set({ [SUBTITLE_SOURCES_KEY]: updated });
+    await chrome.storage.local.set({ [SUBTITLE_SOURCES_KEY]: [...sources, createdSource] });
     utils.log(`storage: Đã thêm nguồn: ${source.folderName}`);
-    return { success: true, data: createdSource };
+    return "";
   });
 }
 /** Hàm lấy danh sách nguồn (thuần đọc, chạy ngoài queue)
@@ -125,16 +111,15 @@ export async function getSourceList() {
   return Array.isArray(sources) ? sources : [];
 }
 /** Hàm loại bỏ nguồn dựa trên `id` (định danh ổn định gán lúc addSource).
- * KHÔNG còn xóa theo savedAt — 2 nguồn thêm cùng 1 ms (cùng savedAt) vẫn là 2 nguồn riêng biệt.
+ * KHÔNG xóa theo savedAt — 2 nguồn thêm cùng 1 ms (cùng savedAt) vẫn là 2 nguồn riêng biệt.
  * (cũng spread thay vì pop/push do bộ nhớ là array thay vì obj)
  * @param {string} id id của nguồn cần xóa
- * @returns {Promise<Object>} { success: true, data } khi xóa được (data = danh sách nguồn còn lại);
- *   { success: false, error } khi id sai hoặc không tìm thấy nguồn
+ * @returns {Promise<string>} "" khi xóa được; chuỗi lỗi khi id sai hoặc không tìm thấy nguồn
  */
 export async function removeSource(id) {
   if (typeof id !== "string" || !id.trim()) {
     utils.warn(`storage: id nguồn ko hợp lệ: ${id}`);
-    return { success: false, error: "id nguồn không hợp lệ hoặc trống" };
+    return "id nguồn không hợp lệ hoặc trống";
   }
   return enqueueWrite(async () => {
     const sources = await getSourceList();
@@ -142,29 +127,28 @@ export async function removeSource(id) {
     const deleted = sources.filter(item => item?.id === id);
     if (deleted.length === 0) {
       utils.warn(`storage: Không tìm thấy nguồn có id: ${id}`);
-      return { success: false, error: `Không tìm thấy nguồn có id: ${id}` };
+      return `Không tìm thấy nguồn có id: ${id}`;
     }
     await chrome.storage.local.set({ [SUBTITLE_SOURCES_KEY]: updated });
     utils.log(`storage: Đã xóa ${deleted.length} nguồn:\n   ${deleted.map(item => item?.url).join('\n   ')}`);
-    return { success: true, data: updated };
+    return "";
   });
 }
 /** Hàm lưu dữ liệu file sub (obj) dựa trên videoId. Đồng thời cập nhật chỉ mục nhẹ
  * ASSCEE_subIndex (chỉ fileObj + id + thời gian, KHÔNG chứa parsedData) để getSubDataList đọc nhanh.
  * @param {string} videoId đầu vào
  * @param {*} subtitleObj đầu vào dạng subObj (quy định trong file background.js, xem pipeline.txt)
- * @returns {Promise<Object>} { success: true, data: videoId } khi lưu xong;
- *   { success: false, error } khi input không hợp lệ (KHÔNG throw — theo quy ước lỗi chung)
+ * @returns {Promise<string>} "" khi lưu xong; chuỗi lỗi khi input không hợp lệ
  */
 export async function addSubData(videoId, subtitleObj = {}) {
     if (typeof videoId !== "string" || !videoId) {
-      return { success: false, error: "videoId không hợp lệ hoặc trống" };
+      return "videoId không hợp lệ hoặc trống";
     }
     // Chỉ lưu dữ liệu subtitleObj chứa parsedData (xem pipeline.txt)
     // Lưu ý: typeof null === "object" nên phải check thêm null, nếu ko sẽ lưu cache rỗng.
     if (!subtitleObj || typeof subtitleObj !== "object" || Array.isArray(subtitleObj) ||
         subtitleObj.parsedData === null || typeof subtitleObj.parsedData !== "object") { 
-        return { success: false, error: "Dữ liệu file sub lưu cache không hợp lệ" }; 
+        return "Dữ liệu file sub lưu cache không hợp lệ"; 
     }
     // Clone nông trước khi lưu: không mutate object của caller (không gán cachedAt lên object gốc).
     // parsedData giữ tham chiếu chung (chỉ ghi, không sửa) — clone sâu tốn ~7MB, không khuyến nghị.
@@ -176,12 +160,12 @@ export async function addSubData(videoId, subtitleObj = {}) {
     // khi xảy ra và reader qua getSubDataList luôn thấy trạng thái nhất quán (trước/sau task).
     await enqueueWrite(async () => {
       await chrome.storage.local.set({ [subKey]: toSave }); // Luôn luôn ghi đè
-      const index = await ensureSubIndexRaw();
+      const index = await readSubIndex();
       index[videoId] = buildCacheEntry(toSave, videoId);
       await chrome.storage.local.set({ [SUBTITLE_INDEX_KEY]: index });
     });
     utils.log(`storage: Đã lưu cache sub obj cho vid: ${videoId}.`);
-    return { success: true, data: videoId };
+    return "";
 }
 /** Hàm lấy toàn bộ danh sách dữ liệu sub đang được lưu cache.
  * CHỈ đọc phần nhẹ (fileObj + id + thời gian) từ chỉ mục ASSCEE_subIndex,
@@ -191,9 +175,7 @@ export async function addSubData(videoId, subtitleObj = {}) {
  * @returns {Promise<Array>} Mảng chứa các obj { videoId, cachedId, cachedAt, ...fileObj }
  */
 export async function getSubDataList(searchId = "") {
-  // Thuần đọc TRỪ lần migrate đầu tiên: index chưa tồn tại → ensureSubIndexRaw quét 1 lần
-  // build lại rồi lưu (qua queue vì là read→modify→write trên key chung).
-  const index = await enqueueWrite(ensureSubIndexRaw);
+  const index = await readSubIndex();
   // Dựng lại videoId từ KEY của index (chính xác hơn tin trường videoId bên trong entry).
   const cacheList = [];
   for (const [indexVideoId, entry] of Object.entries(index)) {
@@ -208,28 +190,14 @@ export async function getSubDataList(searchId = "") {
   utils.log(`storage: Kết quả tìm kiếm cache cho ${searchId}:`, result);
   return result; // Trả về mảng dạng: [ { videoId, cachedId, cachedAt, ...fileObj }, ... ]
 }
-/** Đọc chỉ mục ASSCEE_subIndex; nếu key CHƯA tồn tại (cache từ trước khi có chỉ mục)
- * thì quét storage 1 lần build lại rồi lưu — migrate nhẹ, chỉ tốn 1 lần duy nhất.
- * CHỈ được gọi bên trong queue (read→modify→write trên key chung).
+/** Đọc chỉ mục ASSCEE_subIndex. Thiếu key / sai kiểu → {} (không quét storage, không migrate).
  * @returns {Promise<Object>} index: { [videoId]: { ...fileObj, videoId, cachedId, cachedAt } }
  */
-async function ensureSubIndexRaw() {
+async function readSubIndex() {
   const data = await chrome.storage.local.get(SUBTITLE_INDEX_KEY);
   const raw = data?.[SUBTITLE_INDEX_KEY];
-  // Index đã tồn tại (kể cả {} hợp lệ sau khi người dùng xóa hết cache) → dùng luôn.
   if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw;
-  // Index chưa có: quét các key ASSCEE_subData_* để build lại.
-  // Lưu ý: get(null) đọc cả parsedData (~7MB/file) — chấp nhận vì chỉ xảy ra 1 lần.
-  const allData = await chrome.storage.local.get(null);
-  const index = {};
-  for (const [key, value] of Object.entries(allData)) {
-    if (!key.startsWith(`${SUBTITLE_DATA_KEY_BASE}_`)) continue;
-    if (!value || typeof value !== "object" || Array.isArray(value)) continue; // guard data hỏng
-    const videoId = key.slice(SUBTITLE_DATA_KEY_BASE.length + 1); // Lấy videoId gốc từ key (chính xác hơn replace)
-    index[videoId] = buildCacheEntry(value, videoId);
-  }
-  await chrome.storage.local.set({ [SUBTITLE_INDEX_KEY]: index });
-  return index;
+  return {};
 }
 /** Gom 1 entry cache thành obj nhẹ để lưu chỉ mục / trả về (chỉ fileObj, ko parsedData).
  * @param {Object} value obj sub đã lưu trong storage
@@ -263,13 +231,12 @@ export async function useSubData(videoId) {
 /** Hàm loại bỏ dữ liệu sub của một videoId cụ thể khỏi cache
  * (xóa cả key ASSCEE_subData_<videoId> lẫn mục tương ứng trong chỉ mục ASSCEE_subIndex).
  * @param {string} videoId 
- * @returns {Promise<Object>} { success: true, data: videoId } khi xóa xong;
- *   { success: false, error } khi videoId sai hoặc không có dữ liệu để xóa
+ * @returns {Promise<string>} "" khi xóa xong; chuỗi lỗi khi videoId sai hoặc không có dữ liệu để xóa
  */
 export async function removeSubData(videoId) {
   if (typeof videoId !== "string" || !videoId) {
     utils.warn(`storage: videoId trống, ko có obj để xóa.`);
-    return { success: false, error: "videoId không hợp lệ hoặc trống" };
+    return "videoId không hợp lệ hoặc trống";
   }
   // Xác định đúng key dựa trên videoId tương tự như hàm useSubData
   const subKey = `${SUBTITLE_DATA_KEY_BASE}_${videoId}`;
@@ -280,15 +247,15 @@ export async function removeSubData(videoId) {
     const data = await chrome.storage.local.get(subKey);
     if (!data[subKey]) {
       utils.warn(`storage: obj ${videoId} ko có dữ liệu để xóa.`);
-      return { success: false, error: `Không có dữ liệu cache cho vid: ${videoId}` };
+      return `Không có dữ liệu cache cho vid: ${videoId}`;
     }
     // Tiến hành xóa key cụ thể này khỏi chrome.storage.local
     await chrome.storage.local.remove(subKey);
-    const index = await ensureSubIndexRaw();
+    const index = await readSubIndex();
     delete index[videoId];
     await chrome.storage.local.set({ [SUBTITLE_INDEX_KEY]: index });
     utils.log(`storage: Đã xóa cache sub obj của vid: ${videoId}.`);
-    return { success: true, data: videoId };
+    return "";
   });
 }
 /** Hàm kiểm tra xem nếu giá trị config có hợp lệ. Chỉ chấp nhận string/number/boolean.
@@ -326,40 +293,29 @@ export async function getConfig(key = null) {
  * không đọc chung 1 bản config cũ rồi ghi đè mất cập nhật của nhau.
  * @param {string} key nếu config ko có key đó đặt mới. Nếu key ko phải string thì ko ghi gì.
  * @param {string|number|boolean} value lọc theo isValidConfigValue
- * @returns {Promise<Object>} { success: true, data } khi ghi xong (data = bản sao config mới);
- *   { success: false, error } khi key/value không hợp lệ
+ * @returns {Promise<string>} "" khi ghi xong; chuỗi lỗi khi key/value không hợp lệ
  */
 export async function setConfig(key, value) {
   if (typeof key !== "string" || !key.trim()) {
     utils.warn(`storage (setConfig): key ko hợp lệ: `, key);
-    return { success: false, error: "key config không hợp lệ hoặc trống" };
+    return "key config không hợp lệ hoặc trống";
   }
   if (!isValidConfigValue(value)) {
     utils.warn(`storage (setConfig): value ko hợp lệ: `, value);
-    return { success: false, error: "value config không hợp lệ (chỉ chấp nhận string/number/boolean)" };
+    return "value config không hợp lệ (chỉ chấp nhận string/number/boolean)";
   }
   return enqueueWrite(async () => {
     const config = await getConfig(); // getConfig trả bản sao nông → sửa thoải mái
     config[key] = value;
     await chrome.storage.local.set({ [USER_CONFIG_KEY]: config });
     utils.log(`storage: Đã cập nhật. config[${key}] = ${value}`);
-    return { success: true, data: { ...config } };
+    return "";
   });
 }
 
-// ==================== renderer stat: throttle + queue ====================
-// Renderer (fps/nps/dfps/subTitle) có thể gọi 30–60 lần/giây; chrome.storage.local.set mỗi
-// frame = serialize JSON + I/O liên tục, tốn và dễ race. Chiến lược: giữ giá trị mới nhất
-// trong bộ nhớ (pending), flush qua queue tối đa ~4 lần/giây (setTimeout + khoảng cách tối
-// thiểu). Queue đảm bảo KHÔNG MẤT cập nhật, throttle đảm bảo ÍT lần ghi.
-// (Cân nhắc sau này, nếu stat tốc độ cao không cần persist: chuyển sang chrome.runtime
-// message + onChanged — nhưng throttle trước là đủ.)
-// Lưu ý: pending nằm trong bộ nhớ service worker — SW bị kill trước khi flush thì mất phần
-// chưa ghi. Chấp nhận được vì đây chỉ là dữ liệu hiển thị tức thời.
-let rendererStatView = null;    // bản xem mới nhất (stored + pending) để trả ngay, ko cần đọc lại storage
-let rendererStatPending = null; // phần cập nhật chưa flush xuống storage
-let rendererStatTimer = null;   // setTimeout đang chờ flush (null = chưa có lịch)
-let rendererStatLastFlush = 0;  // thời điểm flush gần nhất (ms)
+// ==================== renderer stat: cooldown trong chính object lưu ====================
+// Renderer tự gọi ~1 lần/giây; storage giữ fallback 500ms. Gọi sớm hơn → không ghi, trả chuỗi lỗi.
+// lastTimeSet nằm trong ASSCEE_renderData; getRendererStat lọc field này khỏi bản trả về.
 /** Hàm lấy dữ liệu render (fps, nps, dfps, subTitle) để popup hiển thị (cho renderer làm)
  * @returns {Promise<Object>} Bản sao nông của object chứa các thuộc tính fps, nps, dfps, subTitle
  */
@@ -367,56 +323,35 @@ export async function getRendererStat() {
   const data = await chrome.storage.local.get(RENDERER_STAT_KEY);
   const raw = data?.[RENDERER_STAT_KEY];
   const stored = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-  // Gộp thêm phần pending chưa flush để bản xem trong bộ nhớ luôn là mới nhất.
-  rendererStatView = rendererStatPending ? { ...stored, ...rendererStatPending } : stored;
-  const snapshot = { ...rendererStatView };
+  const { lastTimeSet, ...snapshot } = stored; // lastTimeSet chỉ dùng nội bộ
   utils.log(`storage: Lấy rendererData:`, snapshot);
   return snapshot;
 }
 /** Hàm cập nhật dữ liệu render (fps, nps, dfps, subTitle) để popup hiển thị (cho renderer làm).
- * Gộp ngay vào bộ nhớ và hẹn flush (≤ ~4 lần/giây) — KHÔNG ghi storage mỗi lần gọi.
+ * Ghi ngay xuống storage nếu đã hết cooldown (500ms); nếu chưa → bỏ data, trả chuỗi lỗi.
  * @param {*} newData dạng object, chứa các thuộc tính fps, nps, dfps, subTitle
- * @returns {Promise<Object>} { success: true, data } khi nhận xong (data = bản xem mới nhất
- *   gồm cả phần chưa flush); { success: false, error } khi newData không phải object
+ * @returns {Promise<string>} "" khi ghi xong; chuỗi lỗi khi input sai hoặc đang cooldown
  */
 export async function setRendererStat(newData = {}) {
   // typeof null === "object" nên phải check thêm null
   if (typeof newData !== "object" || newData === null || Array.isArray(newData)) {
     utils.warn(`storage (setRendererStat): newData ko hợp lệ: `, newData);
-    return { success: false, error: "newData không hợp lệ (cần object)" };
+    return "newData không hợp lệ (cần object)";
   }
-  if (rendererStatView === null) await getRendererStat(); // khởi tạo bản xem 1 lần duy nhất
-  rendererStatPending = { ...rendererStatPending, ...newData };
-  rendererStatView = { ...rendererStatView, ...newData };
-  scheduleRendererStatFlush();
-  const snapshot = { ...rendererStatView };
-  utils.log(`storage: Đã nhận rendererData (sẽ flush):`, snapshot);
-  return { success: true, data: snapshot };
-}
-/** Hẹn 1 lần flush; nếu đã có lịch thì bỏ qua (pending sẽ được gộp hết vào lần flush đó). */
-function scheduleRendererStatFlush() {
-  if (rendererStatTimer !== null) return;
-  const delay = Math.max(0, rendererStatLastFlush + RENDERER_STAT_FLUSH_INTERVAL_MS - Date.now());
-  rendererStatTimer = setTimeout(() => {
-    rendererStatTimer = null;
-    rendererStatLastFlush = Date.now();
-    flushRendererStat().catch(err => utils.warn(`storage: flush rendererStat thất bại:`, err));
-  }, delay);
-}
-/** Flush pending xuống storage qua queue: đọc bản lưu MỚI NHẤT trong task rồi gộp phần chốt
- * (snapshot) — phần pending đến sau khi chốt vẫn được giữ lại cho lần flush kế tiếp. */
-function flushRendererStat() {
-  if (!rendererStatPending) return Promise.resolve();
-  const snapshot = rendererStatPending;
-  rendererStatPending = null;
   return enqueueWrite(async () => {
     const data = await chrome.storage.local.get(RENDERER_STAT_KEY);
     const raw = data?.[RENDERER_STAT_KEY];
     const stored = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-    const updated = { ...stored, ...snapshot };
+    const last = typeof stored.lastTimeSet === "number" ? stored.lastTimeSet : 0;
+    if (Date.now() - last < RENDERER_STAT_COOLDOWN_MS) {
+      utils.warn(`storage (setRendererStat): chưa hết thời gian chờ`);
+      return "Chưa hết thời gian chờ";
+    }
+    // Bỏ lastTimeSet từ caller (nếu có) — mốc cooldown do storage tự ghi.
+    const { lastTimeSet: _ignored, ...incoming } = newData;
+    const updated = { ...stored, ...incoming, lastTimeSet: Date.now() };
     await chrome.storage.local.set({ [RENDERER_STAT_KEY]: updated });
-    // Gộp thêm phần pending mới đến trong lúc flush vào bản xem (nó sẽ được flush lần sau).
-    rendererStatView = { ...updated, ...rendererStatPending };
-    utils.log(`storage: Đã flush rendererData:`, updated);
+    utils.log(`storage: Đã ghi rendererData:`, updated);
+    return "";
   });
 }
