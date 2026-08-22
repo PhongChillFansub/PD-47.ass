@@ -1,4 +1,4 @@
-// v0.1.0 21aug26
+// v0.1.0 23aug26
 // alpha mode
 // Chức năng: chuyên xử lí lưu trữ trên chrome.storage.local.
 // Quy ước chung (xem pipeline.txt):
@@ -53,13 +53,12 @@ function enqueueWrite(task) {
  *
  * Lưu ý: storage KHÔNG chuẩn hóa URL — trách nhiệm đó nằm ở fetcher
  * (`fetchSubtitleFileList` luôn ghim `source.url` bằng URL đã chuẩn hóa
- * trước khi truyền vào `addSource`). So sánh trùng lặp vì vậy dùng nguyên
- * `source.url` (URL đã được chuẩn hóa sẵn), không trim/lowercase lại.
+ * trước khi truyền vào `addSource`). So sánh, ko normalize.
  * @param {string} url
  * @returns {boolean} test
 */
 function validateSourceUrl(url) {
-  if (typeof url !== "string") return false;
+  if (typeof url !== "string" || !url.trim()) return false;
   url = url.trim();
   // GitHub folder
   const githubRegex =
@@ -69,6 +68,7 @@ function validateSourceUrl(url) {
     /^https:\/\/drive\.google\.com\/drive\/folders\/[A-Za-z0-9_-]+(?:\?.*)?$/i;
   return githubRegex.test(url) || driveRegex.test(url);
 }
+
 /** Hàm thêm nguồn (URL của folder GitHub/GDrive) vào bộ nhớ extension.
  * (do bộ nhớ theo dạng array, nên ở đây cập nhật dưới dạng spread, thay vì pop/push)
  * @param {{url: string, [key: string]: any}} source nguồn cần thêm; `url` phải
@@ -78,21 +78,10 @@ function validateSourceUrl(url) {
  *   gồm id ổn định + savedAt); { success: false, error, url } khi input sai / trùng lặp
  */
 export async function addSource(source = {}) {
-  // Check typeof trước rồi mới .trim(): optional chaining chỉ chặn null/undefined,
-  // ko chặn number/object nên `source?.url?.trim()` cũ có thể throw TypeError.
-  if (typeof source?.url !== "string" || !source.url.trim()) {
-    utils.warn(`storage: Nguồn ko hợp lệ: ${source?.url}`);
-    return { success: false, error: "Dữ liệu nguồn không hợp lệ hoặc URL trống", url: source?.url };
-  }
-  // URL đến đây phải đã được chuẩn hóa bởi fetcher (fetchSubtitleFileList
-  // ghim sẵn source.url = URL chuẩn hóa). Storage không normalize lại.
+  // validate fallback.
   if (!validateSourceUrl(source.url)) {
-    utils.warn(`storage: URL không được hỗ trợ: ${source.url}`);
-    return {
-      success: false,
-      error: "Chỉ hỗ trợ thư mục GitHub hoặc Google Drive",
-      url: source.url
-    };
+    utils.warn(`storage: addSource(): URL không chuẩn: ${source.url}`);
+    return "URL không chuẩn";
   }
   // read→modify→write: chạy trong queue để 2 lời gọi chồng nhau không đọc chung 1 bản cũ.
   return enqueueWrite(async () => {

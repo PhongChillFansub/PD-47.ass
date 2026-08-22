@@ -1,4 +1,4 @@
-// v0.1.0 21aug26 
+// v0.1.0 22aug26 
 // beta mode (đã viết xong, sửa lỗi khi chạy)
 // Chức năng: xử lí ban đầu, giai đoạn từ danh sách link thư mục nguồn đến giai đoạn có file sub thô (rawText)
 // export: fetchSubtitleFileList (danh sách link thư mục nguồn → chỉ mục source.fileList),
@@ -42,10 +42,10 @@ const loggedFetch = async (
   try {
     const response = await fetchWithTimeout(url);
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw new Error(`HTTP error! status: ${response.status}`);  // throw trong try nên đi ra catch
     }
     const text = await response.text();
-    if (type !== 'folder' && !validateSubtitleContent(text)) {
+    if (type !== 'folder' && !validateSubtitleContent(text)) {  // throw trong try nên đi ra catch
       throw new Error("Invalid subtitle content");
     }
     return text;
@@ -148,50 +148,59 @@ const foldText = text =>
  * @param {number} [maxDist] trần lỗi; vượt thì trả maxDist+1 (không cần số đúng)
  * @returns {number} số thao tác tối thiểu (0 = khớp nguyên một đoạn con)
  */
-const editDistanceSubstring = (pattern, text, maxDist = Infinity) => {
+const editDistanceSubstring = (pattern, name, maxDist = Infinity) => {
   const m = pattern.length;
-  const n = text.length;
+  const n = name.length;
   if (!m) return 0;
-  if (maxDist === 0) return text.includes(pattern) ? 0 : 1;
+  if (maxDist === 0) return name.includes(pattern) ? 0 : 1;
   // pattern dài hơn text hơn k ký tự → dù khớp cả text vẫn thiếu
   if (m - n > maxDist) return maxDist + 1;
+  if (!n) return m;
 
-  let prev = new Array(n + 1).fill(0);
-  let cur = new Array(n + 1);
+  // Chỉ dùng một hàng DP thay vì hai hàng prev/cur.
+  // Uint32Array tự khởi tạo toàn bộ phần tử bằng 0.
+  const row = new Uint32Array(n + 1);
+  let best = m;
 
   for (let i = 1; i <= m; i++) {
-    cur[0] = i;
-    const pc = pattern[i - 1];
-    let rowMin = i;
+    let diagonal = row[0];
+    row[0] = i;
+    best = i;
+
+    const patternChar = pattern[i - 1];
 
     for (let j = 1; j <= n; j++) {
-      const sub = prev[j - 1] + (pc === text[j - 1] ? 0 : 1);
-      const del = prev[j] + 1;
-      const ins = cur[j - 1] + 1;
-      const v = sub < del ? (sub < ins ? sub : ins) : (del < ins ? del : ins);
-      cur[j] = v;
-      if (v < rowMin) rowMin = v;
+      const above = row[j];
+
+      const replace =
+        diagonal + (patternChar === name[j - 1] ? 0 : 1);
+      const remove = above + 1;
+      const insert = row[j - 1] + 1;
+
+      const value =
+        replace < remove
+          ? (replace < insert ? replace : insert)
+          : (remove < insert ? remove : insert);
+
+      row[j] = value;
+      diagonal = above;
+
+      if (value < best) best = value;
     }
 
-    if (rowMin > maxDist) return maxDist + 1; // mọi đường đã chết
-    const tmp = prev;
-    prev = cur;
-    cur = tmp;
+    // Không còn khả năng nằm trong ngưỡng cho phép.
+    if (best > maxDist) return maxDist + 1;
   }
 
-  let best = prev[0];
-  for (let j = 1; j <= n; j++) if (prev[j] < best) best = prev[j];
   return best;
 };
-
 /** [arena.ai] Số lỗi (khoảng cách Levenshtein) tối đa để token vẫn tính là
- * "khớp": không quá 50% độ dài token đã gấp. Token < 3 ký tự giữ 0 lỗi
- * (floor(1/2)=floor(2/2) sẽ cho 0 và 1 — 1 lỗi trên 2 ký tự quá lỏng).
+ * "khớp": không quá 33% độ dài token đã gấp, hoặc 0 nếu token quá ngắn (dưới 3 ký tự).
  *
  * @param {number} length độ dài token đã gấp
  * @returns {number}
  */
-const maxAllowedDistance = length => length < 3 ? 0 : Math.floor(length / 2);
+const maxAllowedDistance = length => length < 3 ? 0 : Math.floor(length / 3);
 
 /** [arena.ai] Điểm một token trên tên file — tên file là chuẩn, token có thể sai.
  * - Token `#...` (phân biệt hoa thường): khớp nguyên chuỗi con đúng case → `{ score: 2n, exact: true }`,
@@ -788,6 +797,7 @@ export async function fetchSubtitleFileList(urls = []) {
 
     const gdrive = normalizeGDriveUrl(rawUrl);
     const source = gdrive ?? normalizeGitHubUrl(rawUrl);
+    // Sau dòng này source là object {url đã chuẩn hóa, folderId} hoặc null nếu link ko hợp lệ.
 
     if (!source) {
       utils.warn(
