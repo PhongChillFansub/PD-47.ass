@@ -735,10 +735,10 @@ async function scanGitHub(source) {
  *
  * Nhận danh sách link thư mục nguồn (GitHub hoặc Google Drive), tự nhận
  * diện loại nguồn theo link rồi gọi đúng MỘT lần `scanGitHub()` hoặc
- * `scanGDrive()` cho từng link. Mỗi link chỉ được quét tối đa 1 lần trong
- * một lần gọi: link trùng sau khi chuẩn hóa (VD: khác dạng `u/0/`, dư dấu
- * `/` cuối, query khác nhau) sẽ tái sử dụng kết quả đã quét thay vì quét
- * lại — tránh tốn request, nhất là giới hạn GitHub API 60 lần/giờ.
+ * `scanGDrive()` cho từng link. Các nguồn hợp lệ được quét song song để tổng
+ * thời gian không bị cộng dồn theo từng request. Link trùng sau khi chuẩn hóa
+ * (VD: khác dạng `u/0/`, dư dấu `/` cuối, query khác nhau) được bỏ qua để mỗi
+ * nguồn chỉ tạo một request — tránh tốn giới hạn GitHub API 60 lần/giờ.
  *
  * Hàm KHÔNG tự lưu cache: kết quả trả về chính là đầu ra của các hàm scan
  * (`{url, folderId, sourceType, name, savedAt, fileList}`) để nơi gọi (VD:
@@ -776,8 +776,8 @@ export async function fetchSubtitleFileList(urls = []) {
     return [];
   }
 
-  const sources = [];
-  const scannedByUrl = new Map();
+  const seenUrls = new Set();
+  const scanTasks = [];
 
   for (const item of urls) {
     const rawUrl = typeof item === 'string' ? item : item?.url;
@@ -786,50 +786,34 @@ export async function fetchSubtitleFileList(urls = []) {
       continue;
     }
 
-    // Nhận diện loại nguồn theo link: ưu tiên thử GDrive, không khớp thì GitHub.
     const gdrive = normalizeGDriveUrl(rawUrl);
-    const github = gdrive ? null : normalizeGitHubUrl(rawUrl);
+    const source = gdrive ?? normalizeGitHubUrl(rawUrl);
 
-    if (!gdrive && !github) {
+    if (!source) {
       utils.warn(
         `fetcher: fetchSubtitleFileList(): bỏ qua link ko hợp lệ (${rawUrl}).`
       );
       continue;
     }
 
-    const normalizedUrl = gdrive ? gdrive.url : github.url;
+    // Không quét lại cùng một URL đã chuẩn hóa.
+    if (seenUrls.has(source.url)) continue;
+    seenUrls.add(source.url);
 
-    // "Chỉ chạy 1 lần duy nhất": link đã quét (theo URL chuẩn hóa) thì tái
-    // sử dụng kết quả, không gọi scanGDrive/scanGitHub lần nữa.
-    if (scannedByUrl.has(normalizedUrl)) {
-      sources.push(scannedByUrl.get(normalizedUrl));
-      continue;
-    }
-
-    const source = gdrive
-      ? await scanGDrive(gdrive)
-      : await scanGitHub(github);
-
-    // Ghim URL ĐÃ CHUẨN HÓA vào source (thay vì URL thô end-user nhập) để
-    // nơi gọi (storage) không phải normalize lại. scanGDrive/scanGitHub đã
-    // nhận object chuẩn hóa sẵn, gán lại ở đây để chắc chắn source.url luôn
-    // là normalizedUrl kể cả khi hàm scan sau này đổi cách khởi tạo source.
-    source.url = normalizedUrl;
-
-    scannedByUrl.set(normalizedUrl, source);
-
-    // Scan thất bại hoặc thư mục không có file .ass nào → không có gì để
-    // lập chỉ mục, bỏ qua source này và chạy tiếp link sau.
-    if (!Array.isArray(source.fileList) || !source.fileList.length) {
-      utils.warn(
-        `fetcher: fetchSubtitleFileList(): bỏ qua ${source.sourceType} ` +
-          `${normalizedUrl} (quét thất bại hoặc ko có file .ass).`
-      );
-      continue;
-    }
-
-    sources.push(source);
+    scanTasks.push(gdrive ? scanGDrive(source) : scanGitHub(source));
   }
+
+  // Các hàm scan tự bắt lỗi và trả source có fileList rỗng khi thất bại.
+  const scannedSources = await Promise.all(scanTasks);
+  const sources = scannedSources.filter(source => {
+    if (Array.isArray(source.fileList) && source.fileList.length) return true;
+
+    utils.warn(
+      `fetcher: fetchSubtitleFileList(): bỏ qua ${source.sourceType} ` +
+        `${source.url} (quét thất bại hoặc ko có file .ass).`
+    );
+    return false;
+  });
 
   const fileCount = sources.reduce(
     (n, s) => n + (s.fileList?.length ?? 0),
