@@ -1,14 +1,16 @@
 // v0.1.0 23aug26
 // alpha mode
 // Chức năng: chuyên xử lí lưu trữ trên chrome.storage.local.
-// Quy ước chung (xem pipeline.txt):
-// - storage.js là nơi DUY NHẤT ghi chrome.storage.local; module khác cần lưu thì gọi qua đây.
-// - add/set/remove: thành công → "" (falsy); thất bại nghiệp vụ/input → chuỗi lỗi (truthy).
-//   Lỗi lập trình / trạng thái không hợp lệ → throw.
-// - Mọi thao tác read→modify→write đều chạy qua hàng đợi ghi private (enqueueWrite) để tránh
-//   race: 2 lời gọi chồng nhau đọc cùng 1 giá trị cũ rồi ghi đè mất cập nhật của nhau.
-// - Thuần đọc (getSourceList, getSubDataList, getConfig, useSubData, getRendererStat)
-//   chạy ngoài queue.
+/** 
+ * Quy ước chung (xem pipeline.txt):
+ * - storage.js là nơi DUY NHẤT ghi chrome.storage.local; module khác cần lưu thì gọi qua đây.
+ * - add/set/remove: thành công → "" (falsy); thất bại nghiệp vụ/input → chuỗi lỗi (truthy).
+ *   Lỗi lập trình / trạng thái không hợp lệ → throw.
+ * - Mọi thao tác read→modify→write đều chạy qua hàng đợi ghi private (enqueueWrite) để tránh
+ *   race: 2 lời gọi chồng nhau đọc cùng 1 giá trị cũ rồi ghi đè mất cập nhật của nhau.
+ * - Thuần đọc (getSourceList, getSubDataList, getConfig, useSubData, getRendererStat)
+ *   chạy ngoài queue.
+ */
 /** Nhận logger(message, type = 'info', extra = undefined) */
 import * as utils from './utils.js'; 
 /** Dùng trong 3 hàm export với link folder: addSource, getSourceList, removeSource
@@ -19,9 +21,10 @@ import * as utils from './utils.js';
 const SUBTITLE_SOURCES_KEY = "ASSCEE_sourceList"; 
 /** 4 hàm với file sub: addSubData, getSubDataList, useSubData, removeSubData
  * 
- * Lưu các file sub trong key riêng biệt (do 1 file sub, thuần text đã có thể nặng đến 7MB) */
+ * Lưu các file sub trong key riêng biệt (do 1 file sub, thuần text đã có thể nặng đến 7MB) 
+ * Tuy nhiên chỉ lưu parsedData riêng ở đây, các dữ liệu khác lưu trong key subIndex */
 const SUBTITLE_DATA_KEY_BASE = "ASSCEE_subData"; 
-/** Chỉ mục NHẸ của cache sub: { [videoId]: { ...fileObj, videoId, cachedId, cachedAt } }.
+/** Thuộc tính file sub, không tính parsedData: { [videoId]: { ...fileObj (ko chứa parsedData), videoId, cachedId, cachedAt } }.
  * Không chứa parsedData (~7MB/file) → getSubDataList chỉ đọc key này, không đụng key sub.
  * addSubData / removeSubData tạo và cập nhật key này; thiếu key → coi như {}. */
 const SUBTITLE_INDEX_KEY = "ASSCEE_subIndex";
@@ -80,7 +83,7 @@ export async function addSource(source = {}) {
   // validate fallback.
   if (!validateSourceUrl(source?.url)) {
     utils.warn(`storage: addSource(): URL không chuẩn: ${source?.url}`);
-    return "URL không chuẩn";
+    return "storage: addSource(): URL không chuẩn";
   }
   // read→modify→write: chạy trong queue để 2 lời gọi chồng nhau không đọc chung 1 bản cũ.
   return enqueueWrite(async () => {
@@ -88,16 +91,12 @@ export async function addSource(source = {}) {
     // Kiểm tra trùng lặp bằng nguyên URL đã được chuẩn hóa sẵn bởi fetcher
     // (storage không normalize lại — xem chú thích ở validateSourceUrl).
     if (sources.some(item => item?.url === source.url)) {
-      utils.warn(`storage: Nguồn đã tồn tại: ${source.url}`);
-      return "Nguồn này đã tồn tại trong danh sách";
+      utils.warn(`storage: addSource(): Nguồn đã tồn tại: ${source.url}`);
+      return "storage: addSource(): Nguồn này đã tồn tại trong danh sách";
     }
-    const createdSource = {
-      ...source,
-      id: crypto.randomUUID(), // định danh ổn định — savedAt chỉ là metadata
-      savedAt: Date.now()
-    };
-    await chrome.storage.local.set({ [SUBTITLE_SOURCES_KEY]: [...sources, createdSource] });
-    utils.log(`storage: Đã thêm nguồn: ${source.folderName}`);
+    source.storageId = crypto.randomUUID();
+    await chrome.storage.local.set({ [SUBTITLE_SOURCES_KEY]: [...sources, source] });
+    utils.log(`storage: addSource(): Đã thêm nguồn: ${source.folderName}`);
     return "";
   });
 }
@@ -108,7 +107,13 @@ export async function getSourceList() {
   const data = await chrome.storage.local.get(SUBTITLE_SOURCES_KEY);
   const sources = data[SUBTITLE_SOURCES_KEY];
   // Nếu là mảng thì trả về mảng, nếu chưa có dữ liệu (undefined/null) thì trả về mảng rỗng []
-  return Array.isArray(sources) ? sources : [];
+  if (sources === undefined) return [];
+  if (!Array.isArray(sources)) {
+    utils.warn(`storage: getSourceList(): ${SUBTITLE_SOURCES_KEY} hỏng (${typeof sources}), trả array trống.`);
+    utils.warn(`storage: getSourceList(): Chú ý: dữ liệu lỗi có thể sẽ bị xóa nếu addSource() được gọi tiếp theo.`);
+    return [];
+  }
+  return sources;
 }
 /** Hàm loại bỏ nguồn dựa trên `id` (định danh ổn định gán lúc addSource).
  * KHÔNG xóa theo savedAt — 2 nguồn thêm cùng 1 ms (cùng savedAt) vẫn là 2 nguồn riêng biệt.
@@ -118,54 +123,54 @@ export async function getSourceList() {
  */
 export async function removeSource(id) {
   if (typeof id !== "string" || !id.trim()) {
-    utils.warn(`storage: id nguồn ko hợp lệ: ${id}`);
-    return "id nguồn không hợp lệ hoặc trống";
+    utils.warn(`storage: removeSource(): id nguồn ko hợp lệ: ${id}`);
+    return `storage: removeSource(): id nguồn không hợp lệ hoặc trống`;
   }
   return enqueueWrite(async () => {
     const sources = await getSourceList();
-    const updated = sources.filter(item => item?.id !== id);
-    const deleted = sources.filter(item => item?.id === id);
+    const updated = sources.filter(item => item?.storageId !== id);
+    const deleted = sources.filter(item => item?.storageId === id);
     if (deleted.length === 0) {
-      utils.warn(`storage: Không tìm thấy nguồn có id: ${id}`);
-      return `Không tìm thấy nguồn có id: ${id}`;
+      utils.warn(`storage: removeSource(): Không tìm thấy nguồn có id: ${id}`);
+      return `storage: removeSource(): Không tìm thấy nguồn có id: ${id}`;
     }
     await chrome.storage.local.set({ [SUBTITLE_SOURCES_KEY]: updated });
-    utils.log(`storage: Đã xóa ${deleted.length} nguồn:\n   ${deleted.map(item => item?.url).join('\n   ')}`);
+    utils.log(`storage: removeSource(): Đã xóa ${deleted.length} nguồn:\n   ${deleted.map(item => item?.url).join('\n   ')}`);
     return "";
   });
 }
+
 /** Hàm lưu dữ liệu file sub (obj) dựa trên videoId. Đồng thời cập nhật chỉ mục nhẹ
  * ASSCEE_subIndex (chỉ fileObj + id + thời gian, KHÔNG chứa parsedData) để getSubDataList đọc nhanh.
  * @param {string} videoId đầu vào
- * @param {*} subtitleObj đầu vào dạng subObj (quy định trong file background.js, xem pipeline.txt)
+ * @param {*} subtitleObj
  * @returns {Promise<string>} "" khi lưu xong; chuỗi lỗi khi input không hợp lệ
  */
 export async function addSubData(videoId, subtitleObj = {}) {
-    if (typeof videoId !== "string" || !videoId) {
-      return "videoId không hợp lệ hoặc trống";
-    }
-    // Chỉ lưu dữ liệu subtitleObj chứa parsedData (xem pipeline.txt)
-    // Lưu ý: typeof null === "object" nên phải check thêm null, nếu ko sẽ lưu cache rỗng.
-    if (!subtitleObj || typeof subtitleObj !== "object" || Array.isArray(subtitleObj) ||
-        subtitleObj.parsedData === null || typeof subtitleObj.parsedData !== "object") { 
-        return "Dữ liệu file sub lưu cache không hợp lệ"; 
-    }
-    // Clone nông trước khi lưu: không mutate object của caller (không gán cachedAt lên object gốc).
-    // parsedData giữ tham chiếu chung (chỉ ghi, không sửa) — clone sâu tốn ~7MB, không khuyến nghị.
-    const toSave = { ...subtitleObj, cachedAt: Date.now() };
-    const subKey = `${SUBTITLE_DATA_KEY_BASE}_${videoId}`;
-    // cấu trúc key: ASSCEE_subData_<videoId>
-    // Bản thân set(subKey) là atomic theo key, NHƯNG cập nhật chỉ mục là read→modify→write trên
-    // key CHUNG (ASSCEE_subIndex) → phải chạy trong queue. Đặt chung 1 task để ghi cache hiếm
-    // khi xảy ra và reader qua getSubDataList luôn thấy trạng thái nhất quán (trước/sau task).
-    await enqueueWrite(async () => {
-      await chrome.storage.local.set({ [subKey]: toSave }); // Luôn luôn ghi đè
-      const index = await readSubIndex();
-      index[videoId] = buildCacheEntry(toSave, videoId);
-      await chrome.storage.local.set({ [SUBTITLE_INDEX_KEY]: index });
-    });
-    utils.log(`storage: Đã lưu cache sub obj cho vid: ${videoId}.`);
-    return "";
+  if (typeof videoId !== "string" || !videoId) {
+    return `storage: addSubData(): videoId không hợp lệ hoặc trống`;
+  }
+  // Chỉ lưu dữ liệu subtitleObj chứa parsedData. 
+  if (!subtitleObj || typeof subtitleObj !== "object" || Array.isArray(subtitleObj) ||
+      subtitleObj.parsedData === null || typeof subtitleObj.parsedData !== "object") { 
+      return `storage: addSubData(): Dữ liệu file sub lưu cache không hợp lệ`; 
+  }
+  // Clone nông trước khi lưu: không mutate object của caller (không gán cachedAt lên object gốc).
+  // parsedData giữ tham chiếu chung (chỉ ghi, không sửa) — clone sâu tốn ~7MB, không khuyến nghị.
+  const toSave = { ...subtitleObj, cachedAt: Date.now() };
+  const subKey = `${SUBTITLE_DATA_KEY_BASE}_${videoId}`;
+  // cấu trúc key: ASSCEE_subData_<videoId>
+  // Bản thân set(subKey) là atomic theo key, NHƯNG cập nhật chỉ mục là read→modify→write trên
+  // key CHUNG (ASSCEE_subIndex) → phải chạy trong queue. Đặt chung 1 task để ghi cache hiếm
+  // khi xảy ra và reader qua getSubDataList luôn thấy trạng thái nhất quán (trước/sau task).
+  await enqueueWrite(async () => {
+    await chrome.storage.local.set({ [subKey]: toSave }); // Luôn luôn ghi đè
+    const index = await readSubIndex();
+    index[videoId] = buildCacheEntry(toSave, videoId);
+    await chrome.storage.local.set({ [SUBTITLE_INDEX_KEY]: index });
+  });
+  utils.log(`storage: addSubData(): Đã lưu cache sub obj cho vid: ${videoId}.`);
+  return "";
 }
 /** Hàm lấy toàn bộ danh sách dữ liệu sub đang được lưu cache.
  * CHỈ đọc phần nhẹ (fileObj + id + thời gian) từ chỉ mục ASSCEE_subIndex,
@@ -187,7 +192,7 @@ export async function getSubDataList(searchId = "") {
     const id = searchId.startsWith('#') ? searchId.slice(1) : searchId;
     result = cacheList.filter(item => item.videoId === id);
   }
-  utils.log(`storage: Kết quả tìm kiếm cache cho ${searchId}:`, result);
+  utils.log(`storage: getSubDataList(): Kết quả tìm kiếm cache cho ${searchId}:`, result);
   return result; // Trả về mảng dạng: [ { videoId, cachedId, cachedAt, ...fileObj }, ... ]
 }
 /** Đọc chỉ mục ASSCEE_subIndex. Thiếu key / sai kiểu → {} (không quét storage, không migrate).
@@ -235,8 +240,8 @@ export async function useSubData(videoId) {
  */
 export async function removeSubData(videoId) {
   if (typeof videoId !== "string" || !videoId) {
-    utils.warn(`storage: videoId trống, ko có obj để xóa.`);
-    return "videoId không hợp lệ hoặc trống";
+    utils.warn(`storage: removeSubData(): videoId trống, ko có obj để xóa.`);
+    return "storage: removeSubData(): videoId không hợp lệ hoặc trống";
   }
   // Xác định đúng key dựa trên videoId tương tự như hàm useSubData
   const subKey = `${SUBTITLE_DATA_KEY_BASE}_${videoId}`;
@@ -246,15 +251,15 @@ export async function removeSubData(videoId) {
     // Kiểm tra xem dữ liệu có tồn tại trước khi xóa (để hiển thị log chính xác)
     const data = await chrome.storage.local.get(subKey);
     if (!data[subKey]) {
-      utils.warn(`storage: obj ${videoId} ko có dữ liệu để xóa.`);
-      return `Không có dữ liệu cache cho vid: ${videoId}`;
+      utils.warn(`storage: removeSubData(): obj ${videoId} ko có dữ liệu để xóa.`);
+      return `storage: removeSubData(): Không có dữ liệu cache cho vid: ${videoId}`;
     }
     // Tiến hành xóa key cụ thể này khỏi chrome.storage.local
     await chrome.storage.local.remove(subKey);
     const index = await readSubIndex();
     delete index[videoId];
     await chrome.storage.local.set({ [SUBTITLE_INDEX_KEY]: index });
-    utils.log(`storage: Đã xóa cache sub obj của vid: ${videoId}.`);
+    utils.log(`storage: removeSubData(): Đã xóa cache sub obj của vid: ${videoId}.`);
     return "";
   });
 }
@@ -286,7 +291,7 @@ export async function getConfig(key = null) {
       : null
   // Trả về bản sao object config do key = null hoặc không phải string chuẩn
   // Nếu là string chuẩn, kiểm tra nếu config có key đó, nếu ko có key thì trả null.
-  utils.log(`storage: Lấy config[${key}]: ${output}`);
+  utils.log(`storage: getConfig(): Lấy config[${key}]: ${output}`);
   return output;
 }
 /** Hàm cập nhật config người dùng (1 key). Chạy trong queue để 2 lời gọi đồng thời
@@ -308,7 +313,7 @@ export async function setConfig(key, value) {
     const config = await getConfig(); // getConfig trả bản sao nông → sửa thoải mái
     config[key] = value;
     await chrome.storage.local.set({ [USER_CONFIG_KEY]: config });
-    utils.log(`storage: Đã cập nhật. config[${key}] = ${value}`);
+    utils.log(`storage: setConfig(): Đã cập nhật. config[${key}] = ${value}`);
     return "";
   });
 }
@@ -324,7 +329,7 @@ export async function getRendererStat() {
   const raw = data?.[RENDERER_STAT_KEY];
   const stored = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   const { lastTimeSet, ...snapshot } = stored; // lastTimeSet chỉ dùng nội bộ
-  utils.log(`storage: Lấy rendererData:`, snapshot);
+  utils.log(`storage: getRendererStat(): Lấy rendererData:`, snapshot);
   return snapshot;
 }
 /** Hàm cập nhật dữ liệu render (fps, nps, dfps, subTitle) để popup hiển thị (cho renderer làm).
@@ -351,7 +356,7 @@ export async function setRendererStat(newData = {}) {
     const { lastTimeSet: _ignored, ...incoming } = newData;
     const updated = { ...stored, ...incoming, lastTimeSet: Date.now() };
     await chrome.storage.local.set({ [RENDERER_STAT_KEY]: updated });
-    utils.log(`storage: Đã ghi rendererData:`, updated);
+    utils.log(`storage: setRendererStat(): Đã ghi rendererData:`, updated);
     return "";
   });
 }
