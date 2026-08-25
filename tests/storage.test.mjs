@@ -73,21 +73,22 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 // ==================== id ổn định cho source ====================
 
-test("addSource: thêm nguồn hợp lệ → \"\", có id UUID + savedAt", async () => {
-  const res = await storage.addSource({ url: GITHUB_URL, folderName: "Repo" });
+test("addSource: thêm nguồn hợp lệ → \"\", có storageId UUID, savedAt KHÔNG do storage gán", async () => {
+  const res = await storage.addSource({ url: GITHUB_URL, name: "Repo" });
   assert.equal(res, "");
   const sources = mock.store.get(SUBTITLE_SOURCES_KEY);
   assert.equal(sources.length, 1);
   assert.equal(sources[0].url, GITHUB_URL);
-  assert.match(sources[0].id, UUID_RE);
-  assert.equal(typeof sources[0].savedAt, "number");
+  assert.match(sources[0].storageId, UUID_RE);
+  // savedAt là metadata do fetcher gán (trước khi gọi addSource), KHÔNG phải của storage.
+  assert.equal("savedAt" in sources[0], false);
 });
 
-test("addSource: không mutate object của caller (không gán id/savedAt lên object gốc)", async () => {
-  const src = { url: GITHUB_URL, folderName: "Repo" };
+test("addSource: gán storageId lên object của caller (mutate là chủ ý)", async () => {
+  const src = { url: GITHUB_URL, name: "Repo" };
   await storage.addSource(src);
-  assert.equal("id" in src, false);
-  assert.equal("savedAt" in src, false);
+  assert.match(src.storageId, UUID_RE); // storage gán storageId trực tiếp lên object người gọi
+  assert.equal("savedAt" in src, false); // savedAt vẫn do fetcher gán, không phải storage
 });
 
 test("addSource: chặn trùng chính xác URL (storage KHÔNG tự normalize)", async () => {
@@ -96,7 +97,7 @@ test("addSource: chặn trùng chính xác URL (storage KHÔNG tự normalize)",
   const first = await storage.addSource({ url: GITHUB_URL });
   assert.equal(first, "");
   const dup = await storage.addSource({ url: GITHUB_URL });
-  assert.equal(dup, "Nguồn này đã tồn tại trong danh sách");
+  assert.equal(dup, "storage: addSource(): Nguồn này đã tồn tại trong danh sách");
   assert.equal((await storage.getSourceList()).length, 1);
 });
 
@@ -118,7 +119,7 @@ test("addSource: input sai (url không phải string/trống/không hỗ trợ) 
   ];
   for (const bad of badInputs) {
     const res = await storage.addSource(bad);
-    assert.equal(res, "URL không chuẩn");
+    assert.equal(res, "storage: addSource(): URL không chuẩn");
   }
   assert.equal((await storage.getSourceList()).length, 0);
 });
@@ -133,31 +134,31 @@ test("addSource: 2 lời gọi đồng thời khác URL → không mất cập n
   assert.equal((await storage.getSourceList()).length, 2);
 });
 
-test("removeSource: xóa theo id — 2 nguồn cùng savedAt không bị xóa nhầm", async () => {
-  await storage.addSource({ url: GITHUB_URL, folderName: "A" });
-  await storage.addSource({ url: GITHUB_URL_2, folderName: "B" });
+test("removeSource: xóa theo storageId — 2 nguồn cùng savedAt không bị xóa nhầm", async () => {
+  await storage.addSource({ url: GITHUB_URL, name: "A" });
+  await storage.addSource({ url: GITHUB_URL_2, name: "B" });
   const sources = mock.store.get(SUBTITLE_SOURCES_KEY);
   assert.equal(sources.length, 2);
-  // Ép 2 nguồn cùng savedAt (mô phỏng thêm trong cùng 1 ms) — id vẫn khác nhau.
+  // Ép 2 nguồn cùng savedAt (mô phỏng thêm trong cùng 1 ms) — storageId vẫn khác nhau.
   sources[0].savedAt = 12345;
   sources[1].savedAt = 12345;
   mock.store.set(SUBTITLE_SOURCES_KEY, sources);
 
-  const res = await storage.removeSource(sources[0].id);
+  const res = await storage.removeSource(sources[0].storageId);
   assert.equal(res, "");
   const remaining = mock.store.get(SUBTITLE_SOURCES_KEY);
   assert.equal(remaining.length, 1);
-  assert.equal(remaining[0].id, sources[1].id);
+  assert.equal(remaining[0].storageId, sources[1].storageId);
   assert.equal(remaining[0].savedAt, 12345); // nguồn còn lại không bị đụng tới
 });
 
 test("removeSource: id sai/không tìm thấy → chuỗi lỗi, không throw", async () => {
   for (const bad of [undefined, null, 123, "", "   "]) {
     const res = await storage.removeSource(bad);
-    assert.equal(res, "id nguồn không hợp lệ hoặc trống");
+    assert.equal(res, "storage: removeSource(): id nguồn không hợp lệ hoặc trống");
   }
   const unknown = await storage.removeSource("no-such-id");
-  assert.equal(unknown, "Không tìm thấy nguồn có id: no-such-id");
+  assert.equal(unknown, "storage: removeSource(): Không tìm thấy nguồn có id: no-such-id");
 });
 
 // ==================== addSubData clone input + chỉ mục nhẹ ====================
@@ -263,8 +264,8 @@ test("removeSubData: xóa cả key sub lẫn mục trong chỉ mục", async () 
   const again = await storage.removeSubData("vid1");
   assert.ok(again);
   assert.notEqual(again, "");
-  assert.equal(await storage.removeSubData(""), "videoId không hợp lệ hoặc trống");
-  assert.equal(await storage.removeSubData(123), "videoId không hợp lệ hoặc trống");
+  assert.equal(await storage.removeSubData(""), "storage: removeSubData(): videoId không hợp lệ hoặc trống");
+  assert.equal(await storage.removeSubData(123), "storage: removeSubData(): videoId không hợp lệ hoặc trống");
 });
 
 test("useSubData: trả toàn bộ subObj (gồm parsedData), null nếu không có", async () => {

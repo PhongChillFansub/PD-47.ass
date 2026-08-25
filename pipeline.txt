@@ -125,3 +125,53 @@ storage.js
 tests/
     storage.test.mjs — bộ test storage.js (mock chrome.storage.local), chạy: npm test (node --test)
 
+
+25aug26 (notes)
+
+parser.js — xử lí tag override (kế hoạch)
+    Mục tiêu: parser xử lí hết raw text → JS object để renderer dựng thành cây DOM.
+    Phân loại tag (trong {...}) theo 4 nhóm:
+    2.1 (Clip) Toàn cục, độc lập: áp 1 lần mỗi dòng, KHÔNG đổi kích thước khung chữ.
+        - \clip / \iclip (cái CUỐI CÙNG có hiệu lực)
+        - Chú ý: nếu có nhiều \clip lẫn \iclip (kể cả trong \t), thì \?clip cuối cùng quyết định
+          loại clip (\clip hay \iclip) cho toàn bộ các tag \?clip trước đó.
+    2.2 (Collision) Toàn cục, can thiệp: áp 1 lần mỗi dòng, CÓ đổi dữ liệu khung chữ.
+        - \an: đổi tọa độ khung chữ (cái ĐẦU TIÊN có hiệu lực)
+        - \org: vô hiệu hóa collision (cái ĐẦU TIÊN có hiệu lực)
+        - \pos / \move: vừa đổi tọa độ khung vừa vô hiệu collision (cái ĐẦU TIÊN có hiệu lực)
+        - \t: vô hiệu hóa collision
+    2.3 (Decoration Local Tags) Cục bộ, độc lập: áp mỗi cụm từ (chia cụm từ thành các phần
+        riêng biệt), KHÔNG đổi kích thước khung chữ.
+        - các tag màu sắc, viền, bóng của chữ; \fa<x-y>; \fr<x-y-z>
+    2.4 (Layout Local Tags) Cục bộ, can thiệp: áp mỗi cụm từ, CÓ đổi kích thước khung chữ.
+        - cỡ chữ (\fs, \fsc), dấu cách & xuống dòng (\h, \N, \n), đổi font (\b, \i, \fn, \r), \fsp
+    Thứ tự viết: (prereq: tokenizer + phân loại tag) → 2.4 → 2.3 → 2.2 → 2.1.
+    Quyết định / ràng buộc:
+    - Run model = hybrid: mỗi run/syl lưu style gốc của dòng (từ \r) + danh sách delta tag.
+    - parser.js đang `export default function parser` trong khi fetcher/storage dùng named export
+      → khi viết background.js cần thống nhất (đề xuất đổi parser sang named export).
+    - Parser KHÔNG đo kích thước chữ thật, KHÔNG dùng OffscreenCanvas: mọi tọa độ (pos/move)
+      giữ nguyên theo PlayResX/PlayResY trong file sub. Renderer mới scale sang kích thước thật,
+      đo kích thước chữ thật và xử lí collision.
+    - \t / \move: defer — parser chỉ lưu nguyên văn tag, KHÔNG resolve theo thời gian.
+      Renderer resolve trong JS ở mỗi tick rvfc (dùng metadata.mediaTime), KHÔNG dùng CSS
+      transition/animation (để khi end-user pause video, rvfc ngừng bắn → transform tự đứng yên).
+
+renderer / kiến trúc (notes)
+    - rvfc (requestVideoFrameCallback) chạy theo frame ĐƯỢC TRÌNH DIỄN (presented frame), KHÔNG theo
+      vsync: source 30fps không nội suy → ~30 lần/s (1 frame giữ 2 vsync); source thật 60fps
+      (hoặc YT nội suy lên 60) → ~60 lần/s. => KHÔNG hardcode số lần/giây, limiter phải bù cả 2
+      trường hợp (cần verify thực nghiệm).
+    - Giới hạn fps theo 2 cách:
+      + Giới hạn thời gian (chế độ nặng): nếu thời gian giữa 2 frame nhỏ hơn ngưỡng thì skip.
+      + Giới hạn tần suất bằng bộ đếm (chế độ nhẹ): cứ N frame chỉ render M (VD 1/3, 4/5).
+    - Chỉ tính 1 frame là "đã render" khi có thay đổi nội dung node.
+    - bg (service worker) chỉ gửi sub data ĐÃ PARSE 1 lần cho renderer (không gửi theo frame).
+      Toàn bộ dữ liệu sub giữ nguyên không gian PlayRes; việc scale sang kích thước video thật,
+      đo kích thước chữ thật và xử lí collision đều nằm ở renderer (content script).
+    - Dữ liệu của popup chỉ đọc từ storage.
+    - Đo chữ & layout (renderer): ĐÃ CHỐT dùng thuật toán cốt lõi của pretext
+      (github.com/chenglou/pretext): chỉ lấy thuật toán lõi (prepare/đo segment một lần +
+      layout thuần toán, kể cả rich-inline) đưa vào repo — KHÔNG bundle như dependency.
+      Parser/bg vẫn thuần PlayRes, pretext chỉ dùng ở renderer. Chi tiết để ghi khi viết renderer.
+
