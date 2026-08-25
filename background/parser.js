@@ -12,6 +12,8 @@
 // định dạng:	index,  h:mm:ss.cs, h:mm:ss.cs, string,   string, px,       px,       px,       string  string
 // !: Margin có thể là 0000 (undefined chuyển thành) hoặc 0 (defined). Xử lí cả 2 như giá trị 0
 // !: Name trong Aegisub chính là line.actor. Nếu trong line.actor có dấu "," thì sẽ bị lưu thành ";".
+// utils: cung cấp logger(message, type = 'info', ...extra); dùng log/warn bên dưới.
+import * as utils from './utils.js';
 /** Định nghĩa/chú thích object FALLBACK_DEFAULT_STYLE (parsedDataFormat.style) */
 /**
  * @typedef {object} parsedDataFormat.style Kiểu style nguyên bản 
@@ -100,8 +102,8 @@ const FALLBACK_DEFAULT_STYLE = {
 Object.freeze(FALLBACK_DEFAULT_STYLE); // Khóa chỉ đọc
 /** Danh sách các key chuẩn của style để so sánh */
 const REQUIRED_STYLE_KEYS = Object.keys(FALLBACK_DEFAULT_STYLE);
-/** Là logPrefix của parser, of course? */
-const parserLogPrefix = "[PD-47.ass] parser:";
+/** LogPrefix của parser (utils.logger đã tự thêm "[<ts> PD-47.ass]" nên chỉ cần "parser:"). */
+const parserLogPrefix = "parser:";
 /** Chuyển tên trường từ định dạng ASS sang camelCase để sử dụng làm key JavaScript.
  * Ví dụ: "Fontname" -> "fontName", "PrimaryColour" -> "primaryColour".
  *
@@ -195,7 +197,7 @@ export default function parser(rawText) {
 	 * @type {parsedDataFormat.global} */
 	const parsedData = { info: {}, styles: [], events: [], globalCss: {}, styleCss: [], lineCss: [] };
 	if (!rawText) {
-		console.warn("[PD-47.ass] parser: Đã có ai làm gì đâu? Đã làm gì đâu? (rawText trống)");
+		utils.warn(`${parserLogPrefix} Đã có ai làm gì đâu? Đã làm gì đâu? (rawText trống)`);
 		return parsedData; // Nếu ko có rawText, trả về Data trống và gửi log lỗi text trống.
 	};
 	/** Mảng các dòng text của file ASS sau khi tách theo dòng mới.
@@ -256,7 +258,7 @@ export default function parser(rawText) {
 				const k = key.trim(), v = value.trim();
 				parsedData.info[k] = v;
 				if (k === 'ScriptType' && v !== 'v4.00+') { // Ko đảm bảo nếu ScriptType trong file ko phải v4.00+
-					console.warn(`${parserLogPrefix} Tin... File chuẩn chưa em? (Extension ko hỗ trợ tốt với ScriptType=${v})`);
+					utils.warn(`${parserLogPrefix} Tin... File chuẩn chưa em? (Extension ko hỗ trợ tốt với ScriptType=${v})`);
 				}
 			}
 		} else if (currentSection === '[V4+ Styles]') {
@@ -356,7 +358,7 @@ export default function parser(rawText) {
 	parsedData.info.PlayResX = parseClampedNum(true, parsedData.info.PlayResX, 640, 640); // Chuẩn hóa .PlayResX
 	parsedData.info.PlayResY = parseClampedNum(true, parsedData.info.PlayResY, 480, 480); // Chuẩn hóa .PlayResY
 	parsedData.info.ScaledBorderAndShadow = (parsedData.info.ScaledBorderAndShadow === "yes" ? true : false); // Chuẩn hóa .ScaledBorderAndShadow
-	console.log(`${parserLogPrefix} Đã xử lí thô.`, parsedData);
+	utils.log(`${parserLogPrefix} Đã xử lí thô.`, parsedData);
 	// Phần xử lí chuyển đổi sang CSS. Sử dụng globalCss, styleCss và lineCss.
 	// Phần globalCss (từ các giá trị trong info)
 	parsedData.globalCss = {

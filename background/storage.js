@@ -11,11 +11,11 @@
  * - Thuần đọc (getSourceList, getSubDataList, getConfig, useSubData, getRendererStat)
  *   chạy ngoài queue.
  */
-/** Nhận logger(message, type = 'info', extra = undefined) */
+// utils: cung cấp logger(message, type = 'info', ...extra); dùng log/warn/error bên dưới.
 import * as utils from './utils.js'; 
 /** Dùng trong 3 hàm export với link folder: addSource, getSourceList, removeSource
  * 
- * Lưu tất cả obj folder trong 1 key. Mỗi nguồn có `id` (crypto.randomUUID()) làm định danh
+ * Lưu tất cả obj folder trong 1 key. Mỗi nguồn có `storageId` (crypto.randomUUID()) làm định danh
  * ổn định — `savedAt` chỉ là metadata, KHÔNG dùng làm identity (2 nguồn thêm cùng 1 ms
  * có thể trùng savedAt). */
 const SUBTITLE_SOURCES_KEY = "ASSCEE_sourceList"; 
@@ -57,9 +57,9 @@ function enqueueWrite(task) {
  * Lưu ý: storage KHÔNG chuẩn hóa URL — trách nhiệm đó nằm ở fetcher
  * (`fetchSubtitleFileList` luôn ghim `source.url` bằng URL đã chuẩn hóa
  * trước khi truyền vào `addSource`). So sánh, ko normalize.
- * @param {string} url
- * @returns {boolean} test
-*/
+ * @param {string} url URL thư mục cần kiểm tra.
+ * @returns {boolean} true nếu là URL folder GitHub/GDrive hợp lệ, ngược lại false.
+ */
 function validateSourceUrl(url) {
   if (typeof url !== "string" || !url.trim()) return false;
   url = url.trim();
@@ -96,12 +96,13 @@ export async function addSource(source = {}) {
     }
     source.storageId = crypto.randomUUID();
     await chrome.storage.local.set({ [SUBTITLE_SOURCES_KEY]: [...sources, source] });
-    utils.log(`storage: addSource(): Đã thêm nguồn: ${source.folderName}`);
+    utils.log(`storage: addSource(): Đã thêm nguồn: ${source.name}`);
     return "";
   });
 }
-/** Hàm lấy danh sách nguồn (thuần đọc, chạy ngoài queue)
- * @returns danh sách URL folder (dạng array). Mỗi nguồn có id (UUID) + savedAt (metadata).
+/** Hàm lấy danh sách nguồn (thuần đọc, chạy ngoài queue).
+ * @returns {Promise<Array>} danh sách URL folder (dạng array). Mỗi nguồn có
+ *   storageId (UUID, gán lúc addSource) + savedAt (metadata từ fetcher).
  */
 export async function getSourceList() {
   const data = await chrome.storage.local.get(SUBTITLE_SOURCES_KEY);
@@ -115,10 +116,10 @@ export async function getSourceList() {
   }
   return sources;
 }
-/** Hàm loại bỏ nguồn dựa trên `id` (định danh ổn định gán lúc addSource).
+/** Hàm loại bỏ nguồn dựa trên `id` (chính là trường `storageId`, định danh ổn định gán lúc addSource).
  * KHÔNG xóa theo savedAt — 2 nguồn thêm cùng 1 ms (cùng savedAt) vẫn là 2 nguồn riêng biệt.
  * (cũng spread thay vì pop/push do bộ nhớ là array thay vì obj)
- * @param {string} id id của nguồn cần xóa
+ * @param {string} id storageId của nguồn cần xóa
  * @returns {Promise<string>} "" khi xóa được; chuỗi lỗi khi id sai hoặc không tìm thấy nguồn
  */
 export async function removeSource(id) {
