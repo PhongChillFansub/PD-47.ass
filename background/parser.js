@@ -1,5 +1,5 @@
 // Code bằng tay
-// v0.0.8 05aug26
+// v0.0.8 26aug26
 // parser.js
 // Chức năng: xử lí kế tiếp, giai đoạn từ giai đoạn có file sub thô (rawText) đến cấu trúc file sub JS (line.raw)
 // Mẫu text của các line [Events] trong file sub
@@ -394,4 +394,92 @@ function styleParsedToCss (style) {
 
 	};
 	return { container, text, data };
+}
+/** [arena.ai] Tag có chứa tag karaoke (\k, \K, \kf, \ko) không? */
+function hasKaraokeTag(tag) {
+	return /\\[kK](?:[fo])?/.test(tag);
+}
+/** [arena.ai] Token là marker đứng riêng {\h} / {\N} / {\n} (renderer quyết định ngữ nghĩa) không? */
+function isStandaloneToken(tok) {
+	return tok === '{\\h}' || tok === '{\\N}' || tok === '{\\n}';
+}
+/** [arena.ai] Tokenize + làm sạch nội dung dòng (tiền xử lí tag override).
+ * @param {string} text line.text dạng raw (chưa stringify).
+ * @returns {Array<string>} tokens: text (không bao ngoặc) và tag (có bao ngoặc {}).
+ *   - \h / \N / \n đứng NGOÀI tag → wrap thành {\h} / {\N} / {\n} riêng biệt, GIỮ NGUYÊN để
+ *     renderer quyết định ngữ nghĩa (dấu cách / xuống dòng, theo WrapStyle / \q).
+ *   - Tag {..}: bỏ tag rỗng/comment (không có '\'), strip phần trước '\' đầu tiên, hợp nhất 2 tag
+ *     liền nhau (}{) — TRỪ khi tag sau chứa karaoke (\k/\K/\kf/\ko) và TRỪ marker {\h}/{\N}/{\n}.
+ *   - \{ \} giữ nguyên văn, unescape ở tầng cuối (renderer).
+ */
+export function tokenizeLineText(text) {
+	const result = [];
+	const regex = /\\\{|\\\}|\{|\}|\\h|\\n|\\N/g;
+	let endIndex = 0;
+	let tagStartIndex = -1;
+	let match;
+
+	const pushToken = (tok) => {
+		if (tok === '') return;
+		// Text → đẩy nguyên (merge chỉ áp cho tag).
+		if (!(tok.startsWith('{') && tok.endsWith('}'))) {
+			result.push(tok);
+			return;
+		}
+		// Tag: bỏ comment thuần + strip phần trước dấu '\' đầu tiên.
+		const firstSlash = tok.indexOf('\\', 1);
+		if (firstSlash === -1) return; // không có '\' → comment thuần, bỏ
+		const cleaned = '{' + tok.slice(firstSlash);
+		// Marker {\h}/{\N}/{\n} luôn đứng riêng, không merge.
+		if (isStandaloneToken(cleaned)) {
+			result.push(cleaned);
+			return;
+		}
+		const prev = result[result.length - 1];
+		if (prev !== undefined && prev.startsWith('{') && prev.endsWith('}')
+			&& !isStandaloneToken(prev) && !hasKaraokeTag(cleaned)) {
+			result[result.length - 1] = prev.slice(0, -1) + cleaned.slice(1);
+		} else {
+			result.push(cleaned);
+		}
+	};
+
+	while ((match = regex.exec(text)) !== null) {
+		const char = match[0];
+		if (char === '\\{' || char === '\\}') continue; // literal brace, unescape sau
+		if (char === '\\h' || char === '\\N' || char === '\\n') {
+			if (tagStartIndex === -1) { // chỉ wrap khi đứng ngoài tag
+				pushToken(text.slice(endIndex, match.index));
+				pushToken(`{${char}}`);
+				endIndex = regex.lastIndex;
+			}
+			continue;
+		}
+		if (char === '{') {
+			if (tagStartIndex === -1) {
+				pushToken(text.slice(endIndex, match.index));
+				tagStartIndex = match.index;
+				endIndex = match.index; // { không đóng → giữ nguyên văn, không nhân đôi
+			}
+			continue;
+		}
+		if (char === '}') {
+			if (tagStartIndex > -1) {
+				pushToken(text.slice(tagStartIndex, regex.lastIndex));
+				endIndex = regex.lastIndex;
+				tagStartIndex = -1;
+			}
+			// } thừa (không có { trước) → bỏ qua
+		}
+	}
+	if (endIndex < text.length) {
+		const lastText = text.slice(endIndex);
+		const last = result[result.length - 1];
+		if (last !== undefined && !last.endsWith('}')) {
+			result[result.length - 1] = last + lastText;
+		} else {
+			pushToken(lastText);
+		}
+	}
+	return result;
 }

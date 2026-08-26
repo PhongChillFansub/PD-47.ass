@@ -126,7 +126,7 @@ tests/
     storage.test.mjs — bộ test storage.js (mock chrome.storage.local), chạy: npm test (node --test)
 
 
-25aug26 (notes)
+26aug26 (notes)
 
 parser.js — xử lí tag override (kế hoạch)
     Mục tiêu: parser xử lí hết raw text → JS object để renderer dựng thành cây DOM.
@@ -157,6 +157,16 @@ parser.js — xử lí tag override (kế hoạch)
       Renderer resolve trong JS ở mỗi tick rvfc (dùng metadata.mediaTime), KHÔNG dùng CSS
       transition/animation (để khi end-user pause video, rvfc ngừng bắn → transform tự đứng yên).
 
+      Tiền xử lí nội dung dòng (đã làm — 1 hàm duy nhất):
+    - tokenizeLineText(text) gộp cả 2 bước tokenize + clean (KHÔNG tách 2 hàm).
+    - \h / \N / \n đứng NGOÀI tag → wrap thành {\h} / {\N} / {\n} riêng biệt, GIỮ NGUYÊN;
+      renderer mới quyết định ngữ nghĩa (dấu cách / xuống dòng, theo WrapStyle / \q).
+    - Tag {..}: bỏ comment thuần (không có '\'), strip phần trước '\' đầu, hợp nhất 2 tag liền nhau
+      (}{) — TRỪ khi tag sau chứa karaoke (\k/\K/\kf/\ko) và TRỪ marker {\h}/{\N}/{\n}.
+    - \{ \} giữ nguyên văn, unescape ở renderer (tầng cuối, khi không cần phân biệt text/tag nữa).
+    - TIẾP THEO: hàm phân loại tag (classify) đọc tokens → tách run theo nhóm 2.4 (layout local),
+      rồi 2.3 (decoration), 2.2 (collision), 2.1 (clip).
+
 renderer / kiến trúc (notes)
     - rvfc (requestVideoFrameCallback) chạy theo frame ĐƯỢC TRÌNH DIỄN (presented frame), KHÔNG theo
       vsync: source 30fps không nội suy → ~30 lần/s (1 frame giữ 2 vsync); source thật 60fps
@@ -174,4 +184,3 @@ renderer / kiến trúc (notes)
       (github.com/chenglou/pretext): chỉ lấy thuật toán lõi (prepare/đo segment một lần +
       layout thuần toán, kể cả rich-inline) đưa vào repo — KHÔNG bundle như dependency.
       Parser/bg vẫn thuần PlayRes, pretext chỉ dùng ở renderer. Chi tiết để ghi khi viết renderer.
-
