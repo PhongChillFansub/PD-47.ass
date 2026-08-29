@@ -1,23 +1,23 @@
-// Code bằng tay
-// v0.0.9 27aug26
-// parser.js
-// Chức năng: xử lí kế tiếp, giai đoạn từ giai đoạn có file sub thô (rawText) đến cấu trúc file sub JS (line.raw),
-// kèm tiền xử lí tag override: tokenizeLineText (token + clean) → segmentsFromTokens (tách tag trong token,
-// ghép text token thành segment). Phân loại/phân cấp tag (2.4 → 2.3 → 2.2 → 2.1) làm ở bước sau.
-// Mẫu text của các line [Events] trong file sub
-// [Events]
-// Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-// Dialogue: 0,0:00:00.00,0:00:05.00,Default,,0000,0000,0000,,
-// (Chỉnh sửa để dễ đọc hơn):
-// Format:      Layer,  Start,      End,        Style,    Name,   MarginL,  MarginR,  MarginV,  Effect, Text
-// Dialogue:    0,      0:00:00.00, 0:00:05.00, Default,      ,   0000,     0000,     0000,          ,
-// định dạng:	index,  h:mm:ss.cs, h:mm:ss.cs, string,   string, px,       px,       px,       string  string
-// !: Margin có thể là 0000 (undefined chuyển thành) hoặc 0 (defined). Xử lí cả 2 như giá trị 0
-// !: Name trong Aegisub chính là line.actor. Nếu trong line.actor có dấu "," thì sẽ bị lưu thành ";".
-// utils: cung cấp logger(message, type = 'info', ...extra); dùng log/warn bên dưới.
+/** v0.0.8 29aug26
+ * alpha mode
+ * parser.js
+ * Chức năng: xử lí kế tiếp, giai đoạn từ giai đoạn có file sub thô (rawText) đến cấu trúc file sub JS (line.raw),
+ * kèm tiền xử lí tag override: tokenizeLineText (token + clean) → segmentsFromTokens (tách tag trong token,
+ * ghép text token thành segment). Phân loại/phân cấp tag (2.4 → 2.3 → 2.2 → 2.1) làm ở bước sau.
+ * Mẫu text của các line [Events] trong file sub
+ * [Events]
+ * Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+ * Dialogue: 0,0:00:00.00,0:00:05.00,Default,,0000,0000,0000,,
+ * (Chỉnh sửa để dễ đọc hơn):
+ * Format:      Layer,  Start,      End,        Style,    Name,   MarginL,  MarginR,  MarginV,  Effect, Text
+ * Dialogue:    0,      0:00:00.00, 0:00:05.00, Default,      ,   0000,     0000,     0000,          ,
+ * định dạng:	index,  h:mm:ss.cs, h:mm:ss.cs, string,   string, px,       px,       px,       string  string
+ * !: Margin có thể là 0000 (undefined chuyển thành) hoặc 0 (defined). Xử lí cả 2 như giá trị 0
+ * !: Name trong Aegisub chính là line.actor. Nếu trong line.actor có dấu "," thì sẽ bị lưu thành ";".
+ * utils: cung cấp logger(message, type = 'info', ...extra); dùng log/warn bên dưới.
+ */
 import * as utils from './utils.js';
-/** Định nghĩa/chú thích object FALLBACK_DEFAULT_STYLE (parsedDataFormat.style) */
-/**
+/** Định nghĩa/chú thích object FALLBACK_DEFAULT_STYLE (parsedDataFormat.style) 
  * @typedef {object} parsedDataFormat.style Kiểu style nguyên bản 
  * 
  * (có thể sẽ thêm các biến khác như CSSResize?)
@@ -45,8 +45,7 @@ import * as utils from './utils.js';
  * @property {number} marginV Lề dọc (px)
  * @property {number} encoding Encoding (\fe, nên bị bỏ qua)
  */
-/** Định nghĩa/chú thích object parsedData, sau xử lí */
-/** 
+/** Định nghĩa/chú thích object parsedData, sau xử lí 
  * @typedef {object} parsedDataFormat.global Tương ứng với các phần [Script Info], [V4+ Styles], [Events]. Bỏ qua phần [Aegisub Project Garbage].
  * @property {parsedDataFormat.info} info lưu dưới dạng obj do file sub có cấu trúc key: value
  * @property {Array<parsedDataFormat.style>} styles lưu các style của file sub (nếu style không được chuẩn thì fallback cả style về FALLBACK_DEFAULT_STYLE resize)
@@ -55,8 +54,7 @@ import * as utils from './utils.js';
  * @property {Array} styleCss định dạng các style thành CSS
  * @property {Array} lineCss danh sách các style cho node span của chữ và viền v.v.
  */
-/** Định nghĩa/chú thích object parsedData.info sau xử lí */
-/**
+/** Định nghĩa/chú thích object parsedData.info sau xử lí 
  * @typedef {object} parsedDataFormat.info
  * @property {string} Title Phần text để hiển thị trong tab Thông tin chung
  * @property {string} ScriptType chỉ hỗ trợ "v4.00+", nếu ko thì xử lí file sub sẽ không đảm bảo
@@ -191,7 +189,6 @@ function validateAndNormalizeStyle(style) {
  * @typedef {string} line Dòng text sau khi tách ban đầu, đầu vào xử lí thô.
  */
 /** Hàm đọc text của file Aegisub.
- * Named export (27aug26): import { parser } from './parser.js' — đồng bộ với fetcher/storage.
  * @param {string} rawText Nội dung file ASS đầu vào dưới dạng text.
  * @returns {parsedDataFormat.global} Object chứa dữ liệu parser đã chuẩn hóa và CSS tương ứng.
  */
@@ -422,7 +419,7 @@ function isStandaloneToken(tok) {
  *     liền nhau (}{) — TRỪ khi tag sau chứa karaoke (\k/\K/\kf/\ko) và TRỪ marker {\h}/{\N}/{\n}.
  *   - \{ \} giữ nguyên văn, unescape ở tầng cuối (renderer).
  */
-export function tokenizeLineText(text) {
+function tokenizeLineText(text) {
 	const result = [];
 	const regex = /\\\{|\\\}|\{|\}|\\h|\\n|\\N/g;
 	let endIndex = 0;
@@ -511,8 +508,7 @@ export function tokenizeLineText(text) {
 // - Tag token THƯỜNG đứng CUỐI dòng (không còn text theo sau) → BỎ (không tạo segment);
 //   marker đứng cuối dòng thì VẪN GIỮ (đã flush thành segment riêng từ lúc gặp).
 
-/** Định nghĩa/chú thích object segment sau khi tách */
-/**
+/** Định nghĩa/chú thích object segment sau khi tách 
  * @typedef {object} parsedDataFormat.segment Đơn vị nhỏ nhất: 1 cụm tag + 1 đoạn text.
  * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
  * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm tầng cuối).
@@ -544,7 +540,7 @@ function splitOverrideTags(content) {
  * @param {Array<string>} tokens Tokens từ tokenizeLineText (text không bao ngoặc / tag có bao ngoặc {}).
  * @returns {Array<parsedDataFormat.segment>} Danh sách segment theo thứ tự trong dòng.
  */
-export function segmentsFromTokens(tokens) {
+function segmentsFromTokens(tokens) {
 	const segments = [];
 	if (!Array.isArray(tokens)) return segments;
 	/** Các tag đơn đang chờ text token kế tiếp. @type {string[]} */

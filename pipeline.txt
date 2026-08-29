@@ -1,4 +1,4 @@
-21aug26
+29aug26
 popup:
     popup.html
     popup.js
@@ -125,9 +125,6 @@ storage.js
 tests/
     storage.test.mjs — bộ test storage.js (mock chrome.storage.local), chạy: npm test (node --test)
 
-
-26aug26 (notes)
-
 parser.js — xử lí tag override (kế hoạch)
     Mục tiêu: parser xử lí hết raw text → JS object để renderer dựng thành cây DOM.
     Phân loại tag (trong {...}) theo 4 nhóm:
@@ -146,13 +143,19 @@ parser.js — xử lí tag override (kế hoạch)
     2.4 (Layout Local Tags) Cục bộ, can thiệp: áp mỗi cụm từ, CÓ đổi kích thước khung chữ.
         - cỡ chữ (\fs, \fsc), dấu cách & xuống dòng (\h, \N, \n), đổi font (\b, \i, \fn, \r), \fsp
     Thứ tự viết: (prereq: tokenizer + phân loại tag) → 2.4 → 2.3 → 2.2 → 2.1.
+    Thứ tự xử lí:
+        tokenizeLineText (token + clean) → segmentsFromTokens (tách các tag đơn trong tag token,
+        ghép với text token kế tiếp thành segment) → [bước SAU: phân loại/phân cấp 2.4→2.3→2.2→2.1].
     Quyết định / ràng buộc:
     - Run model = hybrid: mỗi run/syl lưu style gốc của dòng (từ \r) + danh sách delta tag.
-    - parser.js đang `export default function parser` trong khi fetcher/storage dùng named export
-      → khi viết background.js cần thống nhất (đề xuất đổi parser sang named export).
+    - parser là NAMED export (chốt 27aug26): `export function parser(rawText)` — background viết:
+      import { parser } from './parser.js' (đồng bộ fetcher/storage, KHÔNG dùng default).
     - Parser KHÔNG đo kích thước chữ thật, KHÔNG dùng OffscreenCanvas: mọi tọa độ (pos/move)
       giữ nguyên theo PlayResX/PlayResY trong file sub. Renderer mới scale sang kích thước thật,
       đo kích thước chữ thật và xử lí collision.
+    - parser() KHÔNG đụng orgline/parsedData.events. Segments ghi vào
+      parsedData.lineCss[i] = { segments } với i CÙNG CHỈ SỐ với parsedData.events
+      (push cùng lúc events.push; Dialogue ngắt dòng/continuation → lineCss.pop() theo events.pop()).
     - \t / \move: defer — parser chỉ lưu nguyên văn tag, KHÔNG resolve theo thời gian.
       Renderer resolve trong JS ở mỗi tick rvfc (dùng metadata.mediaTime), KHÔNG dùng CSS
       transition/animation (để khi end-user pause video, rvfc ngừng bắn → transform tự đứng yên).
@@ -184,14 +187,12 @@ renderer / kiến trúc (notes)
       (github.com/chenglou/pretext): chỉ lấy thuật toán lõi (prepare/đo segment một lần +
       layout thuần toán, kể cả rich-inline) đưa vào repo — KHÔNG bundle như dependency.
       Parser/bg vẫn thuần PlayRes, pretext chỉ dùng ở renderer. Chi tiết để ghi khi viết renderer.
+
+
+
 27aug26 (notes)
 
 parser.js — tách tag trong token → segment (ĐÃ LÀM, tests/parser.test.mjs)
-    - parser là NAMED export (chốt 27aug26): `export function parser(rawText)` — background viết:
-      import { parser } from './parser.js' (đồng bộ fetcher/storage, KHÔNG dùng default).
-    - Export mới: segmentsFromTokens(tokens) — bước NGAY SAU tokenizeLineText. Thứ tự xử lí:
-        tokenizeLineText (token + clean) → segmentsFromTokens (tách các tag đơn trong tag token,
-        ghép với text token kế tiếp thành segment) → [bước SAU: phân loại/phân cấp 2.4→2.3→2.2→2.1].
     - Segment model: mỗi tag token kết hợp với text token tạo thành 1 segment:
         segment = { tags: [...tag đơn raw nguyên văn], text }
         + Nhiều tag token LIỀN NHAU (tokenizer giữ riêng tag chứa karaoke) → gộp chung tags của 1 segment.
@@ -202,12 +203,3 @@ parser.js — tách tag trong token → segment (ĐÃ LÀM, tests/parser.test.mj
         + Chốt 27aug26: marker {\h}/{\N}/{\n} → flush NGAY thành segment RIÊNG tại đúng vị trí
           { tags: [marker], text: '' } (kể cả khi đứng cuối dòng); tag đang pending vẫn chờ text
           kế tiếp — marker không ăn mất pending. Renderer quét segment text rỗng có marker = chèn break.
-    - Chốt 27aug26: parser() KHÔNG đụng orgline/parsedData.events. Segments ghi vào
-      parsedData.lineCss[i] = { segments } với i CÙNG CHỈ SỐ với parsedData.events
-      (push cùng lúc events.push; Dialogue ngắt dòng/continuation → lineCss.pop() theo events.pop()).
-    - ĐÃ SỬA 27aug26: convertTimeStringToMs trả ms, TOÁN THUẦN SỐ NGUYÊN, 4 dòng:
-      thay '.' → ':' rồi split 1 lần; pad TRÁI lên 4 phần tử trước khi destructure vì cấp
-      số tính TỪ PHẢI (thiếu giờ thì phần đầu là phút, không phải giờ — CA NÀY TỪNG SAI khi
-      rút gọn); nhân cộng trực tiếp (h*36e5 + m*6e4 + s*1e3 + cs*10). Không qua float, không
-      Math.round, không try/catch (rác → NaN → || 0). Cách reduce*1000 từng bị
-      0:00:02.01 → 2009.9999999999998. Test ca biên: tests/parser.test.mjs.
