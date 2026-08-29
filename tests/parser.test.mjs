@@ -203,3 +203,17 @@ test('parser: thời gian — các ca biên (định dạng ngắn, thập phân
 		assert.equal(parsed.events[0].startTime, want, 'startTime sai với đầu vào: ' + JSON.stringify(t));
 	}
 });
+
+test('parser: pop/merge continuation đúng — đứt 3 lần vẫn gộp 1 event, events/lineCss cùng chỉ số', () => {
+	const ass = MINI_ASS
+		+ '\nDialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,{\\b1}Đứt lần 1\nlần 2\nlần 3'
+		+ '\nDialogue: 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,Dòng kế';
+	const parsed = parser(ass);
+	// 3 Dialogue vật lý (đứt 3 dòng) → 3 events / 3 lineCss, KHÔNG trùng bản dở
+	assert.equal(parsed.events.length, 3);
+	assert.equal(parsed.lineCss.length, 3);
+	assert.equal(parsed.events[1].text, '{\\b1}Đứt lần 1\nlần 2\nlần 3'); // gộp từ chuỗi gốc
+	assert.equal(parsed.events[1].startTime, 3000);
+	assert.deepEqual(parsed.lineCss[1].segments, [{ tags: ['\\b1'], text: 'Đứt lần 1\nlần 2\nlần 3' }]);
+	assert.deepEqual(parsed.lineCss[2].segments, [{ tags: [], text: 'Dòng kế' }]); // dòng sau không bị dính
+});
