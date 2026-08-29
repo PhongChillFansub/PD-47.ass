@@ -117,24 +117,18 @@ const toCamelCase = (str, indices = [0]) => {
     if (!str) return ''; // Vào trống thì ra trống.
     return Array.from(str, (char, index) => indices.includes(index) ? (char === char.toUpperCase() ? char.toLowerCase() : char.toUpperCase()) : char).join('');    
 };
-/** Chuyển thời gian theo định dạng ASS sang mili giây (ms — đơn vị dùng cho CSS timing).
- * Toán thuần SỐ NGUYÊN: tách h/m/s/cs rồi nhân cộng trực tiếp — không đi qua số float
- * nên chính xác tuyệt đối, không cần Math.round. (Cách reduce ra "giây.cs" rồi *1000
- * bị lỗi float: 0:00:02.01 → 2009.9999999999998.)
- * Hỗ trợ định dạng h:mm:ss.cs, ví dụ 0:00:01.23 → 1230 (ms).
- *
+/** Chuyển thời gian ASS (h:mm:ss.cs) sang mili giây (ms — đơn vị dùng cho CSS timing).
+ * Toán thuần SỐ NGUYÊN (không qua float nên chính xác tuyệt đối, không cần Math.round —
+ * cách reduce "giây.cs" *1000 từng bị 0:00:02.01 → 2009.9999999999998).
+ * '.' được thay thành ':' để split 1 lần; pad TRÁI lên đủ 4 phần tử trước khi destructure
+ * vì cấp số tính TỪ PHẢI (giây, phút, giờ) — mm:ss.cs vẫn đúng nếu thiếu phần giờ.
  * @param {string} t Chuỗi thời gian đầu vào.
- * @returns {number} Thời gian tính bằng mili giây, hoặc 0 nếu chuỗi không hợp lệ.
+ * @returns {number} Thời gian (ms), hoặc 0 nếu chuỗi không hợp lệ (rác → NaN → || 0; không thể throw).
  */
 const convertTimeStringToMs = t => {
-    try {
-        const parts = String(t).split(':');
-        const [s, cs = ''] = parts.pop().split('.'); // phần cuối luôn là ss.cs
-        let ms = (+s || 0) * 1000 + cs.padEnd(2, '0').slice(0, 2) * 10; // '1.2' → 1200ms (khớp ngữ nghĩa thập phân)
-        let unit = 60000; // các phần trước ss lần lượt là phút (60_000ms), giờ (3_600_000ms), ...
-        for (let i = parts.length - 1; i >= 0; i--) { ms += (+parts[i] || 0) * unit; unit *= 60; }
-        return ms || 0;
-    } catch { return 0; }
+    const p = String(t).replace('.', ':').split(':').slice(-4);
+    const [h = 0, m = 0, s = 0, cs = 0] = Array(4 - p.length).fill(0).concat(p); // pad trái, cấp số từ phải
+    return h * 36e5 + m * 6e4 + s * 1e3 + String(cs).padEnd(2, '0').slice(0, 2) * 10 || 0; // '1.2' → 1200ms (ngữ nghĩa thập phân)
 };
 /** Chuyển chuỗi màu Aegisub sang định dạng rgba() dùng cho CSS.
  * Hỗ trợ cả định dạng style màu &HAABBGGRR và inline màu &HBBGGRR&.

@@ -187,3 +187,19 @@ test('parser: thời gian ms chính xác tuyệt đối (toán nguyên, không l
 	assert.equal(parsed.events[0].startTime, 2010);
 	assert.equal(parsed.events[0].endTime, 3723210); // 1h2m3.21s
 });
+
+test('parser: thời gian — các ca biên (định dạng ngắn, thập phân, rác)', () => {
+	const cases = [
+		['0:00:02.01', 2010],      // mốc từng dính lỗi float
+		['1:02:03.21', 3723210],   // đủ h:mm:ss.cs
+		['02:03.21', 123210],      // thiếu giờ → cấp số tính TỪ PHẢI (phút, không phải giờ)
+		['0:00:01.2', 1200],       // cs thiếu chữ số → ngữ nghĩa thập phân ('1.2' giây)
+		['1:02:03.', 3723000],     // cs trống
+		['rác', 0], ['', 0],       // rác → 0
+	];
+	for (const [t, want] of cases) {
+		const ass = MINI_ASS.replace('Dialogue: 0,0:00:01.00,0:00:02.00', 'Dialogue: 0,' + t + ',' + t);
+		const parsed = parser(ass);
+		assert.equal(parsed.events[0].startTime, want, 'startTime sai với đầu vào: ' + JSON.stringify(t));
+	}
+});

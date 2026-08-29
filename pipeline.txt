@@ -205,6 +205,9 @@ parser.js — tách tag trong token → segment (ĐÃ LÀM, tests/parser.test.mj
     - Chốt 27aug26: parser() KHÔNG đụng orgline/parsedData.events. Segments ghi vào
       parsedData.lineCss[i] = { segments } với i CÙNG CHỈ SỐ với parsedData.events
       (push cùng lúc events.push; Dialogue ngắt dòng/continuation → lineCss.pop() theo events.pop()).
-    - ĐÃ SỬA 27aug26: convertTimeStringToMs trả ms, TOÁN THUẦN SỐ NGUYÊN (tách h/m/s/cs rồi
-      nhân cộng — không qua float, không cần Math.round; cách reduce*1000 từng bị
-      0:00:02.01 → 2009.9999999999998). Đơn vị ms dùng cho CSS timing và so mediaTime ở renderer.
+    - ĐÃ SỬA 27aug26: convertTimeStringToMs trả ms, TOÁN THUẦN SỐ NGUYÊN, 4 dòng:
+      thay '.' → ':' rồi split 1 lần; pad TRÁI lên 4 phần tử trước khi destructure vì cấp
+      số tính TỪ PHẢI (thiếu giờ thì phần đầu là phút, không phải giờ — CA NÀY TỪNG SAI khi
+      rút gọn); nhân cộng trực tiếp (h*36e5 + m*6e4 + s*1e3 + cs*10). Không qua float, không
+      Math.round, không try/catch (rác → NaN → || 0). Cách reduce*1000 từng bị
+      0:00:02.01 → 2009.9999999999998. Test ca biên: tests/parser.test.mjs.
