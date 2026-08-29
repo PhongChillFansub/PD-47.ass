@@ -1,7 +1,9 @@
 // Code bằng tay
-// v0.0.8 26aug26
+// v0.0.9 27aug26
 // parser.js
-// Chức năng: xử lí kế tiếp, giai đoạn từ giai đoạn có file sub thô (rawText) đến cấu trúc file sub JS (line.raw)
+// Chức năng: xử lí kế tiếp, giai đoạn từ giai đoạn có file sub thô (rawText) đến cấu trúc file sub JS (line.raw),
+// kèm tiền xử lí tag override: tokenizeLineText (token + clean) → segmentsFromTokens (tách tag trong token,
+// ghép text token thành segment). Phân loại/phân cấp tag (2.4 → 2.3 → 2.2 → 2.1) làm ở bước sau.
 // Mẫu text của các line [Events] trong file sub
 // [Events]
 // Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -115,14 +117,24 @@ const toCamelCase = (str, indices = [0]) => {
     if (!str) return ''; // Vào trống thì ra trống.
     return Array.from(str, (char, index) => indices.includes(index) ? (char === char.toUpperCase() ? char.toLowerCase() : char.toUpperCase()) : char).join('');    
 };
-/** Chuyển thời gian theo định dạng ASS sang mili giây.
- * Hỗ trợ định dạng h:mm:ss.cs, ví dụ 0:00:01.23.
+/** Chuyển thời gian theo định dạng ASS sang mili giây (ms — đơn vị dùng cho CSS timing).
+ * Toán thuần SỐ NGUYÊN: tách h/m/s/cs rồi nhân cộng trực tiếp — không đi qua số float
+ * nên chính xác tuyệt đối, không cần Math.round. (Cách reduce ra "giây.cs" rồi *1000
+ * bị lỗi float: 0:00:02.01 → 2009.9999999999998.)
+ * Hỗ trợ định dạng h:mm:ss.cs, ví dụ 0:00:01.23 → 1230 (ms).
  *
  * @param {string} t Chuỗi thời gian đầu vào.
  * @returns {number} Thời gian tính bằng mili giây, hoặc 0 nếu chuỗi không hợp lệ.
  */
 const convertTimeStringToMs = t => {
-    try { return t.split(':').reduce((acc, v) => acc * 60 + +v, 0) || 0; } catch { return 0;}
+    try {
+        const parts = String(t).split(':');
+        const [s, cs = ''] = parts.pop().split('.'); // phần cuối luôn là ss.cs
+        let ms = (+s || 0) * 1000 + cs.padEnd(2, '0').slice(0, 2) * 10; // '1.2' → 1200ms (khớp ngữ nghĩa thập phân)
+        let unit = 60000; // các phần trước ss lần lượt là phút (60_000ms), giờ (3_600_000ms), ...
+        for (let i = parts.length - 1; i >= 0; i--) { ms += (+parts[i] || 0) * unit; unit *= 60; }
+        return ms || 0;
+    } catch { return 0; }
 };
 /** Chuyển chuỗi màu Aegisub sang định dạng rgba() dùng cho CSS.
  * Hỗ trợ cả định dạng style màu &HAABBGGRR và inline màu &HBBGGRR&.
@@ -185,10 +197,11 @@ function validateAndNormalizeStyle(style) {
  * @typedef {string} line Dòng text sau khi tách ban đầu, đầu vào xử lí thô.
  */
 /** Hàm đọc text của file Aegisub.
+ * Named export (27aug26): import { parser } from './parser.js' — đồng bộ với fetcher/storage.
  * @param {string} rawText Nội dung file ASS đầu vào dưới dạng text.
  * @returns {parsedDataFormat.global} Object chứa dữ liệu parser đã chuẩn hóa và CSS tương ứng.
  */
-export default function parser(rawText) {
+export function parser(rawText) {
 	/** Dữ liệu tệp phụ đề.
 	 * 
 	 * Info lưu dưới dạng obj do file sub có cấu trúc key: value
@@ -238,6 +251,7 @@ export default function parser(rawText) {
 		if (isContinuation) {
 			if (parsedData._lastRawDialogue) {
 				parsedData.events.pop(); // Loại bỏ dòng Dialogue bị lỗi, thiếu trường trước đó
+				parsedData.lineCss.pop(); // lineCss cùng chỉ số với events → pop theo (1 entry / 1 Dialogue)
 				line = parsedData._lastRawDialogue.raw + '\n' + line; // Ghép dòng lỗi đó với dòng hiện tại
 				isContinuation = false; // Đánh dấu đã khôi phục xong để tiếp tục parse phía dưới
 			} else continue; // Bỏ qua nếu là dòng rác hoặc dòng comment bị lỗi xuống dòng
@@ -351,6 +365,8 @@ export default function parser(rawText) {
 				orgline.raw = line; // Lưu lại chuỗi gốc đề phòng dòng tiếp theo bị ngắt
 				parsedData._lastRawDialogue = orgline; // Lưu tham chiếu dòng dialogue mới nhất
 				parsedData.events.push(orgline);
+				// segments của dòng ghi vào lineCss (cùng chỉ số với events), KHÔNG thay đổi orgline
+				parsedData.lineCss.push({ segments: segmentsFromTokens(tokenizeLineText(orgline.text ?? '')) });
     		}
 		}
 	}
@@ -482,4 +498,79 @@ export function tokenizeLineText(text) {
 		}
 	}
 	return result;
+}
+
+// ==========================================================================
+// ==== TÁCH TAG TRONG TOKEN → SEGMENT (bước ngay sau tokenizeLineText) ====
+// ==========================================================================
+// Thứ tự xử lí: tokenizeLineText (token + clean) → segmentsFromTokens (tách các tag đơn
+// trong tag token, ghép với text token kế tiếp thành segment).
+// Phân loại/phân cấp tag (nhóm 2.4 → 2.3 → 2.2 → 2.1) là bước SAU, chưa viết ở bản này.
+//
+// Segment model (theo pipeline): mỗi tag token kết hợp với text token tạo thành 1 segment:
+//   segment = { tags: [...các tag đơn tách từ (các) tag token, raw nguyên văn], text: '...' }
+// - Nhiều tag token đứng LIỀN TIẾP (vd {\b1}{\k25} — tokenizer giữ riêng tag chứa karaoke)
+//   → gộp chung vào tags của 1 segment.
+// - Text token đứng TRƯỚC mọi tag token → segment { tags: [], text }.
+// - Marker {\h}/{\N}/{\n} → flush NGAY thành segment RIÊNG tại đúng vị trí
+//   { tags: [marker], text: '' }; tag đang pending vẫn chờ text kế tiếp (marker không ăn mất pending).
+// - Tag token THƯỜNG đứng CUỐI dòng (không còn text theo sau) → BỎ (không tạo segment);
+//   marker đứng cuối dòng thì VẪN GIỮ (đã flush thành segment riêng từ lúc gặp).
+
+/** Định nghĩa/chú thích object segment sau khi tách */
+/**
+ * @typedef {object} parsedDataFormat.segment Đơn vị nhỏ nhất: 1 cụm tag + 1 đoạn text.
+ * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
+ * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm tầng cuối).
+ */
+
+/** [arena.ai] Tách nội dung 1 tag token (không bao ngoặc) thành các tag đơn theo '\' ở mức ngoặc ngoài cùng.
+ * Theo dõi độ sâu ngoặc '()' nên tag trong \t(...)/\clip(...) không bị tách oan.
+ * @param {string} content Nội dung trong {...} (vd: "\\bord2\\t(\\fs30)\\c&HFF&").
+ * @returns {Array<string>} Các tag đơn, mỗi phần tử bắt đầu bằng '\', raw nguyên văn; content không chứa '\' → [].
+ */
+function splitOverrideTags(content) {
+	const tags = [];
+	let depth = 0;
+	let start = -1; // vị trí '\' mở đầu tag đang dở (ngoài ngoặc)
+	for (let i = 0; i < content.length; i++) {
+		const ch = content[i];
+		if (ch === '(') { depth++; }
+		else if (ch === ')') { if (depth > 0) depth--; }
+		else if (ch === '\\' && depth === 0) {
+			if (start !== -1) tags.push(content.slice(start, i));
+			start = i;
+		}
+	}
+	if (start !== -1) tags.push(content.slice(start));
+	return tags;
+}
+
+/** [arena.ai] Đổi tokens (đầu ra của tokenizeLineText) thành danh sách segment.
+ * @param {Array<string>} tokens Tokens từ tokenizeLineText (text không bao ngoặc / tag có bao ngoặc {}).
+ * @returns {Array<parsedDataFormat.segment>} Danh sách segment theo thứ tự trong dòng.
+ */
+export function segmentsFromTokens(tokens) {
+	const segments = [];
+	if (!Array.isArray(tokens)) return segments;
+	/** Các tag đơn đang chờ text token kế tiếp. @type {string[]} */
+	let pendingTags = [];
+	for (const tok of tokens) {
+		if (tok.startsWith('{') && tok.endsWith('}')) {
+			// Marker {\h}/{\N}/{\n} → segment RIÊNG tại đúng vị trí (text rỗng); pending giữ nguyên.
+			if (isStandaloneToken(tok)) {
+				segments.push({ tags: [tok.slice(1, -1)], text: '' });
+				continue;
+			}
+			// Tag token thường → tách thành các tag đơn, gộp vào pending (các tag token liền nhau chung 1 segment).
+			pendingTags.push(...splitOverrideTags(tok.slice(1, -1)));
+			continue;
+		}
+		// Text token → đóng 1 segment với mọi tag đang chờ.
+		segments.push({ tags: pendingTags, text: tok });
+		pendingTags = [];
+	}
+	// Tag token THƯỜNG cuối dòng không có text theo sau → BỎ (không tạo segment — chốt 27aug26).
+	// Marker không rơi vào đây vì đã flush thành segment riêng ngay khi gặp.
+	return segments;
 }

@@ -184,3 +184,27 @@ renderer / kiến trúc (notes)
       (github.com/chenglou/pretext): chỉ lấy thuật toán lõi (prepare/đo segment một lần +
       layout thuần toán, kể cả rich-inline) đưa vào repo — KHÔNG bundle như dependency.
       Parser/bg vẫn thuần PlayRes, pretext chỉ dùng ở renderer. Chi tiết để ghi khi viết renderer.
+27aug26 (notes)
+
+parser.js — tách tag trong token → segment (ĐÃ LÀM, tests/parser.test.mjs)
+    - parser là NAMED export (chốt 27aug26): `export function parser(rawText)` — background viết:
+      import { parser } from './parser.js' (đồng bộ fetcher/storage, KHÔNG dùng default).
+    - Export mới: segmentsFromTokens(tokens) — bước NGAY SAU tokenizeLineText. Thứ tự xử lí:
+        tokenizeLineText (token + clean) → segmentsFromTokens (tách các tag đơn trong tag token,
+        ghép với text token kế tiếp thành segment) → [bước SAU: phân loại/phân cấp 2.4→2.3→2.2→2.1].
+    - Segment model: mỗi tag token kết hợp với text token tạo thành 1 segment:
+        segment = { tags: [...tag đơn raw nguyên văn], text }
+        + Nhiều tag token LIỀN NHAU (tokenizer giữ riêng tag chứa karaoke) → gộp chung tags của 1 segment.
+        + Text đứng trước mọi tag → segment { tags: [], text }.
+        + Tag token cuối dòng (không còn text) → BỎ, không tạo segment (chốt 27aug26).
+        + splitOverrideTags: tách theo '\' ở mức ngoặc ngoài cùng (đếm depth '()' nên \t(...)/\clip(...)
+          không bị tách oan).
+        + Chốt 27aug26: marker {\h}/{\N}/{\n} → flush NGAY thành segment RIÊNG tại đúng vị trí
+          { tags: [marker], text: '' } (kể cả khi đứng cuối dòng); tag đang pending vẫn chờ text
+          kế tiếp — marker không ăn mất pending. Renderer quét segment text rỗng có marker = chèn break.
+    - Chốt 27aug26: parser() KHÔNG đụng orgline/parsedData.events. Segments ghi vào
+      parsedData.lineCss[i] = { segments } với i CÙNG CHỈ SỐ với parsedData.events
+      (push cùng lúc events.push; Dialogue ngắt dòng/continuation → lineCss.pop() theo events.pop()).
+    - ĐÃ SỬA 27aug26: convertTimeStringToMs trả ms, TOÁN THUẦN SỐ NGUYÊN (tách h/m/s/cs rồi
+      nhân cộng — không qua float, không cần Math.round; cách reduce*1000 từng bị
+      0:00:02.01 → 2009.9999999999998). Đơn vị ms dùng cho CSS timing và so mediaTime ở renderer.
