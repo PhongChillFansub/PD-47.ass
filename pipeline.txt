@@ -125,7 +125,7 @@ storage.js
 tests/
     storage.test.mjs — bộ test storage.js (mock chrome.storage.local), chạy: npm test (node --test)
 
-parser.js — xử lí tag override (kế hoạch)
+parser.js — xử lí tag override (kế hoạch + ĐÃ LÀM 27-29aug26)
     Mục tiêu: parser xử lí hết raw text → JS object để renderer dựng thành cây DOM.
     Phân loại tag (trong {...}) theo 4 nhóm:
     2.1 (Clip) Toàn cục, độc lập: áp 1 lần mỗi dòng, KHÔNG đổi kích thước khung chữ.
@@ -146,6 +146,7 @@ parser.js — xử lí tag override (kế hoạch)
     Thứ tự xử lí:
         tokenizeLineText (token + clean) → segmentsFromTokens (tách các tag đơn trong tag token,
         ghép với text token kế tiếp thành segment) → [bước SAU: phân loại/phân cấp 2.4→2.3→2.2→2.1].
+
     Quyết định / ràng buộc:
     - Run model = hybrid: mỗi run/syl lưu style gốc của dòng (từ \r) + danh sách delta tag.
     - parser là NAMED export (chốt 27aug26): `export function parser(rawText)` — background viết:
@@ -160,15 +161,74 @@ parser.js — xử lí tag override (kế hoạch)
       Renderer resolve trong JS ở mỗi tick rvfc (dùng metadata.mediaTime), KHÔNG dùng CSS
       transition/animation (để khi end-user pause video, rvfc ngừng bắn → transform tự đứng yên).
 
-      Tiền xử lí nội dung dòng (đã làm — 1 hàm duy nhất):
+    Tiền xử lí nội dung dòng (ĐÃ LÀM 27aug26 — 1 hàm duy nhất + tách segment):
     - tokenizeLineText(text) gộp cả 2 bước tokenize + clean (KHÔNG tách 2 hàm).
     - \h / \N / \n đứng NGOÀI tag → wrap thành {\h} / {\N} / {\n} riêng biệt, GIỮ NGUYÊN;
       renderer mới quyết định ngữ nghĩa (dấu cách / xuống dòng, theo WrapStyle / \q).
     - Tag {..}: bỏ comment thuần (không có '\'), strip phần trước '\' đầu, hợp nhất 2 tag liền nhau
       (}{) — TRỪ khi tag sau chứa karaoke (\k/\K/\kf/\ko) và TRỪ marker {\h}/{\N}/{\n}.
     - \{ \} giữ nguyên văn, unescape ở renderer (tầng cuối, khi không cần phân biệt text/tag nữa).
-    - TIẾP THEO: hàm phân loại tag (classify) đọc tokens → tách run theo nhóm 2.4 (layout local),
-      rồi 2.3 (decoration), 2.2 (collision), 2.1 (clip).
+    - segmentsFromTokens(tokens): tách tag trong token → segment (ĐÃ LÀM, tests/parser.test.mjs)
+        + Segment model: mỗi tag token kết hợp với text token tạo thành 1 segment:
+            segment = { tags: [...tag đơn raw nguyên văn], text }
+            + Nhiều tag token LIỀN NHAU (tokenizer giữ riêng tag chứa karaoke) → gộp chung tags của 1 segment.
+            + Text đứng trước mọi tag → segment { tags: [], text }.
+            + Tag token cuối dòng (không còn text) → BỎ, không tạo segment (chốt 27aug26).
+            + splitOverrideTags: tách theo '\' ở mức ngoặc ngoài cùng (đếm depth '()' nên \t(...)/\clip(...)
+              không bị tách oan).
+            + Chốt 27aug26: marker {\h}/{\N}/{\n} → flush NGAY thành segment RIÊNG tại đúng vị trí
+              { tags: [marker], text: '' } (kể cả khi đứng cuối dòng); tag đang pending vẫn chờ text
+              kế tiếp — marker không ăn mất pending. Renderer quét segment text rỗng có marker = chèn break.
+
+    styleCss (ĐÃ LÀM 29aug26 — bước 3 chi tiết):
+    - Trước 29aug26: filter + map sau loop (line 381-382). Sau 29aug26:
+        + Validation + dedup last-wins ngay khi push Style (đối xứng events/lineCss):
+          validateAndNormalizeStyle fix bug forEach→for...of, cho phép name rỗng,
+          trùng tên → thay thế entry cũ để styles[i] ↔ styleCss[i] đồng bộ.
+        + CSS generation: re-map sau khi info chuẩn hóa (PlayResX/Y, ScaledBorderAndShadow) để data chính xác,
+          vẫn giữ 1-pass validation + 1-pass CSS, không còn 2-pass filter cũ.
+    - styleParsedToCss(style, info): phân tách rõ container / text / data (ĐÃ IMPLEMENT 29aug26)
+        Triết lý: parser giữ px theo PlayRes, renderer mới scale sang video thật và đo chữ (pretext).
+
+        container (vỏ ngoài — định vị dòng):
+          - Nhiệm vụ: đặt khung dòng trong video theo \an + marginL/R/V (+ \pos/\move sau này xử ở collision).
+          - Chứa: display:inline-block, position:absolute (renderer set left/top), max-width:100%,
+                  text-align từ \an (1,4,7→left; 2,5,8→center; 3,6,9→right),
+                  line-height:1.15, white-space:pre-wrap (globalCss override theo WrapStyle),
+                  word-break:keep-all, overflow-wrap:break-word,
+                  nếu borderStyle==3 (opaque box): background-color=outlineColour, padding=outline, box-shadow=shadow+backColour,
+                  nếu borderStyle==1: background transparent.
+          - KHÔNG chứa font/color/transform — thuộc text.
+
+        text (ruột — chữ):
+          - Nhiệm vụ: typography gốc, base cho delta tag \b,\i,\fn,\fs,\fsc,\fsp,\fr,\c...
+          - Chứa: font-family="fontName", font-size=fontSize px (PlayRes), color=primaryColour,
+                  font-weight=bold?700:400, font-style=italic?italic:normal,
+                  text-decoration=underline/line-through,
+                  letter-spacing=spacing px,
+                  transform=scaleX(scaleX/100) scaleY(scaleY/100) rotate(angle deg),
+                  transform-origin từ \an (1:0%100%, 2:50%100%, 3:100%100%, 4:0%50%, 5:50%50%, 6:100%50%, 7:0%0%, 8:50%0%, 9:100%0%),
+                  paint-order=stroke fill markers,
+                  CSS vars: --primary/--secondary/--outline/--back-color, --outline-width, --shadow-depth, --font-size,
+                  outline/shadow:
+                    + borderStyle==1: -webkit-text-stroke-width=outline, -webkit-text-stroke-color=outlineColour,
+                                      text-shadow=shadow px shadow px backColour
+                    + borderStyle==3: stroke 0, text-shadow none (shadow đã là box-shadow của container).
+
+        data (bổ sung — renderer tính toán):
+          - Raw: fontName, fontSize, primary/secondary/outline/backColour (rgba), bold, italic, underline, strikeOut,
+                 scaleX/Y, spacing, angle, borderStyle, isBox (borderStyle==3), outline, shadow,
+                 alignment, hAlign (left/center/right), transformOrigin, marginL/R/V, encoding,
+          - Info: playResX/Y, scaledBorderAndShadow (từ info) để renderer quyết định outline/shadow có scale theo video không.
+          - Dùng cho: đo chữ, collision, karaoke (\2c), tag override \bord/\shad/\c...
+
+        Ví dụ output (PlayRes 1280x720, an=7, borderStyle=3, outline=5, shadow=3):
+          container: {display:inline-block, position:absolute, text-align:left, background-color:rgba(255,255,0,1), padding:5px, box-shadow:3px 3px rgba(0,0,0,1)}
+          text: {font-family:"Arial", font-size:30px, color:rgba(255,255,255,1), font-weight:700, transform:scaleX(1.2) scaleY(0.8) rotate(15deg), transform-origin:0% 0%, ...}
+          data: {name:BoxStyle, fontSize:30, alignment:7, hAlign:left, isBox:true, playResX:1280, playResY:720, scaledBorderAndShadow:true, ...}
+
+    TIẾP THEO: hàm phân loại tag (classify) đọc segments → tách run theo nhóm 2.4 (layout local),
+      rồi 2.3 (decoration), 2.2 (collision), 2.1 (clip). Xem chi tiết 29aug26 notes bên dưới.
 
 renderer / kiến trúc (notes)
     - rvfc (requestVideoFrameCallback) chạy theo frame ĐƯỢC TRÌNH DIỄN (presented frame), KHÔNG theo
@@ -188,18 +248,63 @@ renderer / kiến trúc (notes)
       layout thuần toán, kể cả rich-inline) đưa vào repo — KHÔNG bundle như dependency.
       Parser/bg vẫn thuần PlayRes, pretext chỉ dùng ở renderer. Chi tiết để ghi khi viết renderer.
 
+29aug26 (notes) — thiết kế data structure cho bước tiếp theo (both_design, đã chọn)
 
+Câu hỏi: có nên viết styleCss trước khi xử lí tag?
+→ Trả lời: Có, nên viết/thiết kế styleCss trước (hoặc song song) vì:
+  - Run model = hybrid: mỗi run lưu base style (từ \r hoặc style của dòng) + delta tag.
+    Không có styleCss thì không biết base để apply delta.
+  - Tuy nhiên tag 2.4 (layout) cũng làm thay đổi kích thước, nên cần thiết kế cả 2 struct cùng lúc
+    để tránh phải sửa lại lineCss nhiều lần → chọn both_design: thiết kế data structure trước, implement styleCss trước, rồi mới classify.
+  - ĐÃ LÀM 29aug26: implement styleParsedToCss chi tiết như trên, với container/text/data tách bạch.
 
-27aug26 (notes)
+Đề xuất struct lineCss sau classify (tương lai):
+    parsedData.lineCss[i] = {
+        styleName: orgline.style, // tên style gốc
+        styleIndex: index trong styles (lookup nhanh, fallback về 0/Default nếu không tìm thấy)
+        // giai đoạn hiện tại (29aug26):
+        segments: [{ tags: [raw tag], text }], // ĐÃ LÀM
+        // giai đoạn tiếp theo (classify):
+        runs: [
+            {
+                // hybrid: lưu base style + delta
+                baseStyleName: string, // sau \r có thể đổi
+                layout: { // nhóm 2.4: ảnh hưởng đo chữ
+                    fs?: number, fscx?: number, fscy?: number, fsp?: number,
+                    fn?: string, b?: boolean, i?: boolean, r?: string, // \r reset về style khác
+                    // marker h/N/n cũng tính là layout vì đổi kích thước dòng
+                },
+                decoration: { // nhóm 2.3: không đổi kích thước
+                    c1?, c2?, c3?, c4?, // màu
+                    bord?, shad?, xbord?, ybord?, xshad?, yshad?,
+                    be?, blur?,
+                    fa?, fr?, fax?, fay?, frx?, fry?, frz?
+                },
+                text: string, // đã unescape \{ \} ở renderer, nhưng parser giữ nguyên
+                // karaoke:
+                karaoke?: { type: 'k'|'K'|'kf'|'ko', durationMs: number, startMs?: number }
+            }
+        ],
+        collision: { // nhóm 2.2: toàn cục, first wins
+            an?: number, // 1-9
+            org?: { x, y },
+            pos?: { x, y },
+            move?: { x1, y1, x2, y2, t1?, t2? }, // defer, renderer resolve theo mediaTime
+            // \t cũng vô hiệu collision, nhưng defer
+        },
+        clip: { // nhóm 2.1: toàn cục, last wins, last type quyết định \clip hay \iclip cho tất cả
+            rawList: string[], // tất cả \clip/\iclip raw theo thứ tự
+            effectiveType: 'clip'|'iclip'|null,
+            effectiveRaw: string|null // cái cuối cùng
+        }
+    }
 
-parser.js — tách tag trong token → segment (ĐÃ LÀM, tests/parser.test.mjs)
-    - Segment model: mỗi tag token kết hợp với text token tạo thành 1 segment:
-        segment = { tags: [...tag đơn raw nguyên văn], text }
-        + Nhiều tag token LIỀN NHAU (tokenizer giữ riêng tag chứa karaoke) → gộp chung tags của 1 segment.
-        + Text đứng trước mọi tag → segment { tags: [], text }.
-        + Tag token cuối dòng (không còn text) → BỎ, không tạo segment (chốt 27aug26).
-        + splitOverrideTags: tách theo '\' ở mức ngoặc ngoài cùng (đếm depth '()' nên \t(...)/\clip(...)
-          không bị tách oan).
-        + Chốt 27aug26: marker {\h}/{\N}/{\n} → flush NGAY thành segment RIÊNG tại đúng vị trí
-          { tags: [marker], text: '' } (kể cả khi đứng cuối dòng); tag đang pending vẫn chờ text
-          kế tiếp — marker không ăn mất pending. Renderer quét segment text rỗng có marker = chèn break.
+Next steps checklist (29aug26):
+    [x] 1. Chuyển style chuẩn hóa + styleCss vào push (line 304) + fix bug validate + last-wins — ĐÃ LÀM 29aug26
+    [x] 2. Dọn pipeline line 192+ — gộp 27aug26 notes lên trên, xóa đoạn trùng — ĐÃ LÀM 29aug26
+    [x] 3. Viết styleParsedToCss chi tiết: container/text/data tách bạch, map ASS → CSS, transform-origin từ \an, box vs outline — ĐÃ LÀM 29aug26 (bước 3)
+    [ ] 4. Viết classify: 2.4 layout local → tách run, xử lý \r, \h, \N, \n, \fs, \fsc, \fsp, \fn, \b, \i
+    [ ] 5. Viết 2.3 decoration: màu, bord, shad, fa, fr
+    [ ] 6. Viết 2.2 collision: an, org, pos, move, t (defer)
+    [ ] 7. Viết 2.1 clip: clip/iclip last-wins
+    [ ] 8. Cập nhật tests/parser.test.mjs cho styleCss + runs

@@ -160,29 +160,35 @@ function parseClampedNum (isInteger, v, def, min, max) {
 }
 /** Kiểm tra và chuẩn hóa một style từ ASS trước khi dùng trong renderer.
  * Nếu style thiếu thông tin bắt buộc hoặc giá trị không hợp lệ, hàm sẽ trả về false để loại bỏ style đó.
+ * - Cho phép style.name rỗng (Aegisub vẫn coi là hợp lệ — comment cũ line 303).
+ * - Fix bug cũ: return false trong forEach không thoát được hàm ngoài → dùng for...of.
  * @param {parsedDataFormat.style} style Style cần kiểm tra và chuẩn hóa.
  * @returns {boolean} true nếu style hợp lệ, false nếu style bị bỏ qua.
  */
-function validateAndNormalizeStyle(style) {
-	if (REQUIRED_STYLE_KEYS.some(key => style[key] == null || (typeof style[key] === "string" && style[key].trim() === ""))) return false;
-	// Nếu bất kì key nào là null, undefined, hoặc string trống/toàn dấu cách thì trả về style false (bị loại bỏ).
-	REQUIRED_STYLE_KEYS.forEach(key => {
+export function validateAndNormalizeStyle(style) {
+	// name được phép rỗng, các key khác không được null/undefined/''/toàn space
+	if (REQUIRED_STYLE_KEYS.some(key => {
+		if (key === 'name') return style[key] == null; // chỉ loại khi null/undefined, cho phép ''
+		return style[key] == null || (typeof style[key] === 'string' && style[key].trim() === '');
+	})) return false;
+	for (const key of REQUIRED_STYLE_KEYS) {
 		const defaultValue = FALLBACK_DEFAULT_STYLE[key];
 		const defaultType = typeof defaultValue;
 		switch (defaultType) {
-			case "boolean":
-				style[key] = style[key] !== "0"; // Nếu string ban đầu là 0 thì là false, còn lại là true
+			case 'boolean':
+				style[key] = style[key] !== '0'; // '0' → false, còn lại true
 				break;
-			case "number":
+			case 'number': {
 				const value = Number.parseFloat(style[key]);
-				if (Number.isNaN(value)) return false; // Nếu ko chuyển được thành số thì trả về style false (bị loại)
+				if (Number.isNaN(value)) return false; // số không parse được → loại style
 				style[key] = value;
 				break;
+			}
 			default:
-				// String ở đây đã luôn hợp lệ (khác string trống hoặc toàn dấu cách), giữ nguyên.
+				// string đã hợp lệ (trừ name có thể rỗng), giữ nguyên
 				break;
 		}
-	});
+	}
 	return true;
 }
 /**
@@ -301,7 +307,24 @@ export function parser(rawText) {
 					// VD: Ở đây gọi style.primaryColour thì ở Aegisub là style.color1 (trong môi trường line là line.styleref.color1)
                 });
 				// Chú ý: Name của Style có thể bỏ trống ('') và vẫn hợp lệ
+				// 29aug26: chuẩn hóa + tạo styleCss ngay khi push (đối xứng với events/lineCss)
+				// - validateAndNormalizeStyle: fix bug forEach, cho phép name rỗng
+				// - trùng tên: last wins (Aegisub ghi đè) → thay thế entry cũ để styles[i] ↔ styleCss[i] luôn đồng bộ
+				if (!validateAndNormalizeStyle(style)) {
+					// style không hợp lệ → bỏ qua, không push
+					continue;
+				}
+				// Map name → index để xử lý trùng tên (trừ trường hợp name rỗng thì luôn push mới)
+				if (style.name !== '') {
+					const existingIdx = parsedData.styles.findIndex(s => s.name === style.name);
+					if (existingIdx !== -1) {
+						parsedData.styles[existingIdx] = style;
+						parsedData.styleCss[existingIdx] = styleParsedToCss(style, parsedData.info);
+						continue;
+					}
+				}
 				parsedData.styles.push(style);
+				parsedData.styleCss.push(styleParsedToCss(style, parsedData.info));
 			}
 		} else if (currentSection === '[Events]') {
 			// Trong đoạn Events, cấu trúc cũng tương tự đoạn Styles.
@@ -365,6 +388,9 @@ export function parser(rawText) {
 	parsedData.info.PlayResX = parseClampedNum(true, parsedData.info.PlayResX, 640, 640); // Chuẩn hóa .PlayResX
 	parsedData.info.PlayResY = parseClampedNum(true, parsedData.info.PlayResY, 480, 480); // Chuẩn hóa .PlayResY
 	parsedData.info.ScaledBorderAndShadow = (parsedData.info.ScaledBorderAndShadow === "yes" ? true : false); // Chuẩn hóa .ScaledBorderAndShadow
+	// 29aug26 bước 3: sau khi info đã chuẩn hóa, re-map styleCss để data.playResX/Y và scaled flag chính xác
+	// (vẫn giữ logic push ngay khi parse để đồng bộ index, chỉ refresh CSS sau khi có info chuẩn)
+	parsedData.styleCss = parsedData.styles.map(s => styleParsedToCss(s, parsedData.info));
 	utils.log(`${parserLogPrefix} Đã xử lí thô.`, parsedData);
 	// Phần xử lí chuyển đổi sang CSS. Sử dụng globalCss, styleCss và lineCss.
 	// Phần globalCss (từ các giá trị trong info)
@@ -376,38 +402,157 @@ export function parser(rawText) {
         'max-width': '100%',
 		// Đơn giản là lấy WrapStyle
     };
-	// Phần styleCss (các giá trị trong style)
-	// Dựa trên giả định khung video là PlayRes(X-Y).
-	parsedData.styles = parsedData.styles.filter(validateAndNormalizeStyle); // Lọc và chuẩn hóa dữ liệu style
-	parsedData.styleCss = parsedData.styles.map(styleParsedToCss);
-
+	// Phần styleCss: 29aug26 bước 3
+	// - Validation + dedup (last-wins) đã làm ngay khi push Style (line ~326), đối xứng events/lineCss.
+	// - CSS generation: re-map sau khi info đã chuẩn hóa để data.playResX/Y và scaledBorderAndShadow chính xác.
+	//   Vẫn giữ styles[i] ↔ styleCss[i] đồng bộ, không còn filter 2-pass cũ.
 
 	return parsedData;
 }
 /** Chuyển đổi style đã chuẩn hóa thành object CSS.
- * Cơ chế: style là dữ liệu đầu tiên khi áp vào các line.
+ * 29aug26 — bước 3: phân tích kĩ container / text / data
+ *
+ * Triết lý:
+ * - Parser KHÔNG đo chữ thật, KHÔNG scale sang video thật. Mọi px giữ theo PlayRes.
+ * - Renderer mới scale (videoSize / PlayRes) và đo chữ thật (pretext).
+ *
+ * container (vỏ ngoài — định vị dòng):
+ *   - Nhiệm vụ: đặt khung dòng trong video theo \an + marginL/R/V (+ \pos/\move sau này).
+ *   - Chứa: display, position, max-width, text-align (từ \an), line-height,
+ *           background/box-shadow khi borderStyle==3 (opaque box).
+ *   - KHÔNG chứa font/color/transform — những thứ đó thuộc text.
+ *   - alignment → hAlign (left/center/right) để set text-align, và transformOrigin cho \fr.
+ *
+ * text (ruột — chữ):
+ *   - Nhiệm vụ: typography gốc của dòng, làm base cho delta tag \b,\i,\fn,\fs,\fsc,\fsp,\fr,\c...
+ *   - Chứa: font-family, font-size (PlayRes px), color (primaryColour),
+ *           font-weight/style, text-decoration (u/s), letter-spacing (fsp),
+ *           transform: scaleX/Y + rotate (fscx/fscy/fr), transform-origin từ \an,
+ *           outline/shadow: nếu borderStyle==1 dùng -webkit-text-stroke + text-shadow,
+ *           nếu borderStyle==3 thì không stroke (box lo chứa background).
+ *   - Kèm CSS variables --primary/--secondary/--outline/--back để tag \1c..\4c override nhanh.
+ *
+ * data (bổ sung — renderer tính toán):
+ *   - Raw số: fontSize, scaleX/Y, spacing, angle, outline, shadow, margins, alignment,
+ *   - Màu: secondary/outline/back (rgba), primary đã có trong text.color nhưng giữ lại để karaoke,
+ *   - Cờ: isBox (borderStyle==3), borderStyle, encoding,
+ *   - PlayResX/Y, scaledBorderAndShadow từ info để renderer quyết định outline/shadow có scale theo video không.
+ *
  * @param {parsedDataFormat.style} style Style đã chuẩn hóa.
- * @returns {Object<string, Object<string, string>>} 
- * obj chứa style obj CSS của container node (vỏ), text node (ruột chứa chữ) và dữ liệu bổ sung (cần xử lí sau khi có kích thước khung)
+ * @param {parsedDataFormat.info} [info] Info đã (hoặc chưa) chuẩn hóa — dùng để lấy PlayRes/ScaledBorderAndShadow.
+ * @returns {{container: Object, text: Object, data: Object}}
  */
-function styleParsedToCss (style) {
-	const container = { // Dữ liệu của container node
+export function styleParsedToCss (style, info = {}) {
+	const playResX = info.PlayResX ?? 640;
+	const playResY = info.PlayResY ?? 480;
+	const scaled = info.ScaledBorderAndShadow ?? false;
 
+	const alignment = style.alignment;
+	// hAlign: 1,4,7 → left; 2,5,8 → center; 3,6,9 → right
+	const hAlign = alignment % 3 === 1 ? 'left' : alignment % 3 === 2 ? 'center' : 'right';
+	// transform-origin theo anchor \an (để \fr quay quanh đúng điểm neo)
+	const transformOriginMap = {
+		1: '0% 100%', 2: '50% 100%', 3: '100% 100%',
+		4: '0% 50%',  5: '50% 50%',  6: '100% 50%',
+		7: '0% 0%',   8: '50% 0%',   9: '100% 0%',
 	};
-	const text = { // Dữ liệu của text node
+	const transformOrigin = transformOriginMap[alignment] || '50% 50%';
 
-	};
-	const data = { // Dữ liệu bổ sung
+	const isBox = style.borderStyle === 3;
 
+	// container: định vị, không chứa font
+	const container = {
+		'display': 'inline-block',
+		'position': 'absolute', // renderer sẽ set left/top/right/bottom theo an + margin + pos/move
+		'max-width': '100%',
+		'text-align': hAlign,
+		'line-height': '1.15', // ASS không có line-height riêng, dùng 1.15 cho dễ đọc, renderer có thể override
+		'white-space': 'pre-wrap', // fallback, globalCss sẽ override theo WrapStyle
+		'word-break': 'keep-all',
+		'overflow-wrap': 'break-word',
+		...(isBox ? {
+			// borderStyle 3: opaque box — theo spec Aegisub, outlineColour là màu nền box,
+			// outline là padding của box, shadow là box-shadow (hoặc vẫn là text-shadow? tạm dùng box-shadow)
+			'background-color': style.outlineColour,
+			'padding': `${style.outline}px`,
+			'box-shadow': style.shadow ? `${style.shadow}px ${style.shadow}px ${style.backColour}` : 'none',
+		} : {
+			'background-color': 'transparent',
+		}),
 	};
+
+	const decoration = [style.underline ? 'underline' : '', style.strikeOut ? 'line-through' : ''].filter(Boolean).join(' ') || 'none';
+
+	// text: typography + base transform + outline/shadow
+	const text = {
+		'font-family': `"${style.fontName}", sans-serif`,
+		'font-size': `${style.fontSize}px`, // PlayRes px, renderer scale sau: videoHeight/PlayResY
+		'color': style.primaryColour,
+		'font-weight': style.bold ? '700' : '400',
+		'font-style': style.italic ? 'italic' : 'normal',
+		'text-decoration': decoration,
+		'letter-spacing': `${style.spacing}px`,
+		'transform': `scaleX(${style.scaleX / 100}) scaleY(${style.scaleY / 100}) rotate(${style.angle}deg)`,
+		'transform-origin': transformOrigin,
+		'paint-order': 'stroke fill markers', // để stroke không che fill khi dùng -webkit-text-stroke
+		// CSS variables cho tag override nhanh (\c, \2c, \3c, \4c, \bord, \shad)
+		'--primary-color': style.primaryColour,
+		'--secondary-color': style.secondaryColour,
+		'--outline-color': style.outlineColour,
+		'--back-color': style.backColour,
+		'--outline-width': `${style.outline}px`,
+		'--shadow-depth': `${style.shadow}px`,
+		'--font-size': `${style.fontSize}px`,
+		...(isBox ? {
+			'-webkit-text-stroke-width': '0px',
+			'text-shadow': 'none',
+		} : {
+			'-webkit-text-stroke-width': style.outline ? `${style.outline}px` : '0px',
+			'-webkit-text-stroke-color': style.outlineColour,
+			'text-shadow': style.shadow ? `${style.shadow}px ${style.shadow}px ${style.backColour}` : 'none',
+		}),
+	};
+
+	const data = {
+		name: style.name,
+		fontName: style.fontName,
+		fontSize: style.fontSize,
+		primaryColour: style.primaryColour,
+		secondaryColour: style.secondaryColour,
+		outlineColour: style.outlineColour,
+		backColour: style.backColour,
+		bold: style.bold,
+		italic: style.italic,
+		underline: style.underline,
+		strikeOut: style.strikeOut,
+		scaleX: style.scaleX,
+		scaleY: style.scaleY,
+		spacing: style.spacing,
+		angle: style.angle,
+		borderStyle: style.borderStyle,
+		isBox,
+		outline: style.outline,
+		shadow: style.shadow,
+		alignment,
+		hAlign,
+		transformOrigin,
+		marginL: style.marginL,
+		marginR: style.marginR,
+		marginV: style.marginV,
+		encoding: style.encoding,
+		playResX,
+		playResY,
+		scaledBorderAndShadow: scaled,
+	};
+
 	return { container, text, data };
 }
 /** [arena.ai] Tag có chứa tag karaoke (\k, \K, \kf, \ko) không? */
-function hasKaraokeTag(tag) {
+export function hasKaraokeTag(tag) {
 	return /\\[kK](?:[fo])?/.test(tag);
 }
 /** [arena.ai] Token là marker đứng riêng {\h} / {\N} / {\n} (renderer quyết định ngữ nghĩa) không? */
-function isStandaloneToken(tok) {
+export function isStandaloneToken(tok) {
 	return tok === '{\\h}' || tok === '{\\N}' || tok === '{\\n}';
 }
 /** [arena.ai] Tokenize + làm sạch nội dung dòng (tiền xử lí tag override).
@@ -419,7 +564,7 @@ function isStandaloneToken(tok) {
  *     liền nhau (}{) — TRỪ khi tag sau chứa karaoke (\k/\K/\kf/\ko) và TRỪ marker {\h}/{\N}/{\n}.
  *   - \{ \} giữ nguyên văn, unescape ở tầng cuối (renderer).
  */
-function tokenizeLineText(text) {
+export function tokenizeLineText(text) {
 	const result = [];
 	const regex = /\\\{|\\\}|\{|\}|\\h|\\n|\\N/g;
 	let endIndex = 0;
@@ -519,7 +664,7 @@ function tokenizeLineText(text) {
  * @param {string} content Nội dung trong {...} (vd: "\\bord2\\t(\\fs30)\\c&HFF&").
  * @returns {Array<string>} Các tag đơn, mỗi phần tử bắt đầu bằng '\', raw nguyên văn; content không chứa '\' → [].
  */
-function splitOverrideTags(content) {
+export function splitOverrideTags(content) {
 	const tags = [];
 	let depth = 0;
 	let start = -1; // vị trí '\' mở đầu tag đang dở (ngoài ngoặc)
@@ -540,7 +685,7 @@ function splitOverrideTags(content) {
  * @param {Array<string>} tokens Tokens từ tokenizeLineText (text không bao ngoặc / tag có bao ngoặc {}).
  * @returns {Array<parsedDataFormat.segment>} Danh sách segment theo thứ tự trong dòng.
  */
-function segmentsFromTokens(tokens) {
+export function segmentsFromTokens(tokens) {
 	const segments = [];
 	if (!Array.isArray(tokens)) return segments;
 	/** Các tag đơn đang chờ text token kế tiếp. @type {string[]} */
