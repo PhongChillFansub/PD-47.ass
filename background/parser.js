@@ -1,10 +1,8 @@
 /** v0.0.8 29aug26
  * alpha mode
- * parser.js
- * Chức năng: xử lí kế tiếp, giai đoạn từ giai đoạn có file sub thô (rawText) đến cấu trúc file sub JS (line.raw),
- * kèm tiền xử lí tag override: tokenizeLineText (token + clean) → segmentsFromTokens (tách tag trong token,
- * ghép text token thành segment). Phân loại/phân cấp tag (2.4 → 2.3 → 2.2 → 2.1) làm ở bước sau.
- * Mẫu text của các line [Events] trong file sub
+ * Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS (globalCss, styleCss, lineCss).
+*/
+/** Mẫu text của các line [Events] trong file sub
  * [Events]
  * Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
  * Dialogue: 0,0:00:00.00,0:00:05.00,Default,,0000,0000,0000,,
@@ -102,7 +100,7 @@ const FALLBACK_DEFAULT_STYLE = {
 Object.freeze(FALLBACK_DEFAULT_STYLE); // Khóa chỉ đọc
 /** Danh sách các key chuẩn của style để so sánh */
 const REQUIRED_STYLE_KEYS = Object.keys(FALLBACK_DEFAULT_STYLE);
-/** LogPrefix của parser (utils.logger đã tự thêm "[<ts> PD-47.ass]" nên chỉ cần "parser:"). */
+/** LogPrefix của parser (utils.logger đã tự thêm "[PD-47.ass] " nên chỉ cần "parser:"). */
 const parserLogPrefix = "parser:";
 /** Chuyển tên trường từ định dạng ASS sang camelCase để sử dụng làm key JavaScript.
  * Ví dụ: "Fontname" -> "fontName", "PrimaryColour" -> "primaryColour".
@@ -116,17 +114,19 @@ const toCamelCase = (str, indices = [0]) => {
     return Array.from(str, (char, index) => indices.includes(index) ? (char === char.toUpperCase() ? char.toLowerCase() : char.toUpperCase()) : char).join('');    
 };
 /** Chuyển thời gian ASS (h:mm:ss.cs) sang mili giây (ms — đơn vị dùng cho CSS timing).
- * Toán thuần SỐ NGUYÊN (không qua float nên chính xác tuyệt đối, không cần Math.round —
- * cách reduce "giây.cs" *1000 từng bị 0:00:02.01 → 2009.9999999999998).
- * '.' được thay thành ':' để split 1 lần; pad TRÁI lên đủ 4 phần tử trước khi destructure
- * vì cấp số tính TỪ PHẢI (giây, phút, giờ) — mm:ss.cs vẫn đúng nếu thiếu phần giờ.
- * @param {string} t Chuỗi thời gian đầu vào.
+ * 
+ * Tính toán theo số nguyên thay vì số thực để tránh lỗi làm tròn.
+ * 
+ * '.' được thay thành ':' để split 1 lần; pad TRÁI lên đủ 4 phần tử trước khi destructure.
+ * 
+ * Cấp số tính TỪ PHẢI SANG (cs, giây, phút, giờ), có thể sai nếu đầu vào ko chuẩn. (vd: t = 120, coi như 120ms)
+ * @param {string} t Chuỗi thời gian đầu vào. VD chuẩn: "0:00:05.00". Chú ý: nếu cs = "13a" (130+a ms) thì coi như 130ms (slice(0,2) → 13 → 130ms)
  * @returns {number} Thời gian (ms), hoặc 0 nếu chuỗi không hợp lệ (rác → NaN → || 0; không thể throw).
  */
 const convertTimeStringToMs = t => {
     const p = String(t).replace('.', ':').split(':').slice(-4);
-    const [h = 0, m = 0, s = 0, cs = 0] = Array(4 - p.length).fill(0).concat(p); // pad trái, cấp số từ phải
-    return h * 36e5 + m * 6e4 + s * 1e3 + String(cs).padEnd(2, '0').slice(0, 2) * 10 || 0; // '1.2' → 1200ms (ngữ nghĩa thập phân)
+    const [h = 0, m = 0, s = 0, cs = 0] = Array(4 - p.length).fill(0).concat(p);
+    return h * 36e5 + m * 6e4 + s * 1e3 + String(cs).padEnd(2, '0').slice(0, 2) * 10 || 0;
 };
 /** Chuyển chuỗi màu Aegisub sang định dạng rgba() dùng cho CSS.
  * Hỗ trợ cả định dạng style màu &HAABBGGRR và inline màu &HBBGGRR&.
@@ -160,19 +160,19 @@ function parseClampedNum (isInteger, v, def, min, max) {
 }
 /** Kiểm tra và chuẩn hóa một style từ ASS trước khi dùng trong renderer.
  * Nếu style thiếu thông tin bắt buộc hoặc giá trị không hợp lệ, hàm sẽ trả về false để loại bỏ style đó.
- * - Cho phép style.name rỗng (Aegisub vẫn coi là hợp lệ — comment cũ line 303).
- * - Fix bug cũ: return false trong forEach không thoát được hàm ngoài → dùng for...of.
+ * - Cho phép style.name rỗng (Aegisub vẫn coi là hợp lệ #a1).
  * @param {parsedDataFormat.style} style Style cần kiểm tra và chuẩn hóa.
  * @returns {boolean} true nếu style hợp lệ, false nếu style bị bỏ qua.
  */
-export function validateAndNormalizeStyle(style) {
+function validateAndNormalizeStyle(style) {
 	// name được phép rỗng, các key khác không được null/undefined/''/toàn space
 	if (REQUIRED_STYLE_KEYS.some(key => {
 		if (key === 'name') return style[key] == null; // chỉ loại khi null/undefined, cho phép ''
 		return style[key] == null || (typeof style[key] === 'string' && style[key].trim() === '');
 	})) return false;
 	for (const key of REQUIRED_STYLE_KEYS) {
-		const defaultValue = FALLBACK_DEFAULT_STYLE[key];
+		// Dòng dưới này có vẻ thừa? để lại. sau này có thể dùng giải pháp thế defaultValue thay vì xóa toàn style
+		const defaultValue = FALLBACK_DEFAULT_STYLE[key]; 
 		const defaultType = typeof defaultValue;
 		switch (defaultType) {
 			case 'boolean':
@@ -203,13 +203,13 @@ export function parser(rawText) {
 	 * 
 	 * Info lưu dưới dạng obj do file sub có cấu trúc key: value
 	 * 
-	 * Styles và Events lưu dưới dạng array do file sub có cấu trúc khác, và trong Lua Automation của Aegisub cũng xử lí tương tự.
+	 * Styles và Events lưu dưới dạng array do có cấu trúc khác so với Info, và trong Lua Automation của Aegisub cũng xử lí tương tự.
 	 * @type {parsedDataFormat.global} */
 	const parsedData = { info: {}, styles: [], events: [], globalCss: {}, styleCss: [], lineCss: [] };
 	if (!rawText) {
-		utils.warn(`${parserLogPrefix} Đã có ai làm gì đâu? Đã làm gì đâu? (rawText trống)`);
+		utils.warn(`${parserLogPrefix} Đã có ai làm gì đâu? Đã làm gì đâu? (cố tình nạp rawText trống?)`);
 		return parsedData; // Nếu ko có rawText, trả về Data trống và gửi log lỗi text trống.
-	};
+	}; // Chú ý: parser ko biết trước việc text có các phần chia section hay ko. Sẽ gặp lỗi nếu ko có chia section.
 	/** Mảng các dòng text của file ASS sau khi tách theo dòng mới.
 	 * 
 	 * Đặt tên là subtitles để tương ứng với array subtitles trong Lua Automation của Aegisub.
@@ -238,7 +238,7 @@ export function parser(rawText) {
 		if (!line || line.startsWith(';')) { continue }; 
 		// Nếu line trống (""), hoặc bắt đầu bằng ";" thì bỏ qua. ";" là phần credit của app (trong phần Script Info).
 		if (line.startsWith('[') && line.endsWith(']')) { currentSection = line.trim(); continue; } // Lưu phân đoạn
-		/** Cho biết dòng hiện tại là phần nối tiếp của dialogue bị ngắt dòng.
+		/** Cho biết dòng hiện tại là phần nối tiếp của dialogue bị ngắt dòng hay ko (chỉ hỗ trợ phần Event. #a2).
 		 * @type {boolean}
 		 */
 		let isContinuation = currentSection === '[Events]' && 
@@ -251,7 +251,9 @@ export function parser(rawText) {
 				parsedData.lineCss.pop(); // lineCss cùng chỉ số với events → pop theo (1 entry / 1 Dialogue)
 				line = parsedData._lastRawDialogue.raw + '\n' + line; // Ghép dòng lỗi đó với dòng hiện tại
 				isContinuation = false; // Đánh dấu đã khôi phục xong để tiếp tục parse phía dưới
-			} else continue; // Bỏ qua nếu là dòng rác hoặc dòng comment bị lỗi xuống dòng
+			} else continue; 
+			// Bỏ qua line trong subtitles này, nếu là dòng rác hoặc dòng comment bị lỗi xuống dòng 
+			// (ko có _lastRawDialogue mà lại có isContinuation)
 		}
 		if (!isContinuation) parsedData._lastRawDialogue = null; // Reset trạng thái nếu đây là dòng chuẩn mới
 		if (currentSection === '[Script Info]') {
@@ -321,7 +323,7 @@ export function parser(rawText) {
 						parsedData.styles[existingIdx] = style;
 						parsedData.styleCss[existingIdx] = styleParsedToCss(style, parsedData.info);
 						continue;
-					}
+					} // to-do: review tiếp từ đoạn này. Nếu trùng tên thì sao? Có đổi tên thành copy như Aegisub ko? 
 				}
 				parsedData.styles.push(style);
 				parsedData.styleCss.push(styleParsedToCss(style, parsedData.info));
