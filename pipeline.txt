@@ -308,3 +308,10 @@ Next steps checklist (29aug26):
     [ ] 6. Viết 2.2 collision: an, org, pos, move, t (defer)
     [ ] 7. Viết 2.1 clip: clip/iclip last-wins
     [ ] 8. Cập nhật tests/parser.test.mjs cho styleCss + runs
+
+Chú ý:
+ 1. Sửa dòng 389-392, chuẩn hóa info ngay trong loop for (dòng 235, cụ thể là đoạn dòng 258-275) thay vì để sau. (để chạy đc ngay styleCss.push dòng 327-328 thay vì phải update lại ở dòng 395)
+ 2. Cấu trúc CSS: 
+    globalCss làm chuẩn (container hoặc text)
+    -> Đặt các style (container, text, data trong styleParsedToCss) có chứa globalCss trong (container hoặc text)
+    -> parser xử lí đến segment (với delta của container, text, data), renderer chuyển đổi nó thành các node container-text tùy vào mức độ của delta.
