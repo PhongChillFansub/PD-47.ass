@@ -215,6 +215,13 @@ export function parser(tagProcessLevel = 0, rawText) {
 	 * @type {string[]}
 	 */
 	const subtitles = rawText.split(/\r?\n/);
+	// 31aug26 (Chú ý 1 pipeline): seed sẵn 4 key chuẩn hóa của info bằng giá trị mặc định
+	// để info LUÔN ở trạng thái đã chuẩn hóa trong suốt loop (kể cả khi file thiếu [Script Info]),
+	// dòng [Script Info] xuất hiện sau sẽ đè bằng giá trị đã chuẩn hóa NGAY TẠI CHỖ lưu.
+	parsedData.info.WrapStyle = 0;                 // mặc định: smart wrapping, top line is wider
+	parsedData.info.PlayResX = 640;                // fallback PlayResX
+	parsedData.info.PlayResY = 480;                // fallback PlayResY
+	parsedData.info.ScaledBorderAndShadow = false; // mặc định: outline/shadow không scale theo video
 	/** Phần hiện tại đang được xử lý trong file ASS, ví dụ [Script Info], [V4+ Styles] hoặc [Events].
 	 * @type {string}
 	 */
@@ -268,7 +275,14 @@ export function parser(tagProcessLevel = 0, rawText) {
 			// gán bằng Regex: tách thành phần trước và sau dấu ":" thứ nhất
 			if (key) {
 				const k = key.trim(), v = value.trim();
-				parsedData.info[k] = v;
+				// 31aug26 (Chú ý 1 pipeline): chuẩn hóa NGAY KHI LƯU 4 key quan trọng (thay vì để sau loop)
+				// để styleCss.push ở phần [V4+ Styles] chạy đúng ngay từ đầu, không cần re-map cuối file.
+				parsedData.info[k] =
+					k === 'WrapStyle' ? parseClampedNum(true, v, 0, 0, 3) :
+					k === 'PlayResX' ? parseClampedNum(true, v, 640, 640) :
+					k === 'PlayResY' ? parseClampedNum(true, v, 480, 480) :
+					k === 'ScaledBorderAndShadow' ? v === 'yes' :
+					v; // key khác: giữ nguyên bản như cũ
 				if (k === 'ScriptType' && v !== 'v4.00+') { // Ko đảm bảo nếu ScriptType trong file ko phải v4.00+
 					utils.warn(`${parserLogPrefix} Tin... File chuẩn chưa em? (Extension ko hỗ trợ tốt với ScriptType=${v})`);
 				}
@@ -386,33 +400,48 @@ export function parser(tagProcessLevel = 0, rawText) {
     		}
 		}
 	}
-	parsedData.info.WrapStyle = parseClampedNum(true, parsedData.info.WrapStyle, 0, 0, 3); // Chuẩn hóa .WrapStyle
-	parsedData.info.PlayResX = parseClampedNum(true, parsedData.info.PlayResX, 640, 640); // Chuẩn hóa .PlayResX
-	parsedData.info.PlayResY = parseClampedNum(true, parsedData.info.PlayResY, 480, 480); // Chuẩn hóa .PlayResY
-	parsedData.info.ScaledBorderAndShadow = (parsedData.info.ScaledBorderAndShadow === "yes" ? true : false); // Chuẩn hóa .ScaledBorderAndShadow
-	// 29aug26 bước 3: sau khi info đã chuẩn hóa, re-map styleCss để data.playResX/Y và scaled flag chính xác
-	// (vẫn giữ logic push ngay khi parse để đồng bộ index, chỉ refresh CSS sau khi có info chuẩn)
-	parsedData.styleCss = parsedData.styles.map(s => styleParsedToCss(s, parsedData.info));
+	// 31aug26 (Chú ý 1 pipeline): info đã chuẩn hóa ngay trong loop (seed mặc định + chuẩn hóa khi lưu)
+	// → styleCss đã push đúng từ đầu, KHÔNG còn re-map sau file nữa.
 	utils.log(`${parserLogPrefix} Đã xử lí thô.`, parsedData);
 	// Phần xử lí chuyển đổi sang CSS. Sử dụng globalCss, styleCss và lineCss.
 	// Phần globalCss (từ các giá trị trong info)
-	parsedData.globalCss = {
-        'white-space': (parsedData.info.WrapStyle === 2 ? 'pre' : 'pre-wrap'),
-        'word-break' : 'keep-all',
-        'overflow-wrap': 'break-word',
-        'text-wrap': (parsedData.info.WrapStyle === 3 ? 'balance' : parsedData.info.WrapStyle === 1 ? 'wrap' : 'pretty'),
-        'max-width': '100%',
-		// Đơn giản là lấy WrapStyle
-    };
-	// Phần styleCss: 29aug26 bước 3
-	// - Validation + dedup (last-wins) đã làm ngay khi push Style (line ~326), đối xứng events/lineCss.
-	// - CSS generation: re-map sau khi info đã chuẩn hóa để data.playResX/Y và scaledBorderAndShadow chính xác.
-	//   Vẫn giữ styles[i] ↔ styleCss[i] đồng bộ, không còn filter 2-pass cũ.
+	// 31aug26 (Chú ý 2 pipeline): globalCss làm CHUẨN — tách thành globalCssFromInfo(),
+	// giữ parsedData.globalCss làm bản chuẩn để renderer tham chiếu cho lớp gốc;
+	// đồng thời bộ props này được nhúng sẵn vào container của từng styleCss (styleParsedToCss).
+	parsedData.globalCss = globalCssFromInfo(parsedData.info);
+	// Phần styleCss: đã tạo ĐÚNG NGAY khi push Style trong loop (29aug26 validation + dedup last-wins;
+	// 31aug26 Chú ý 1: info chuẩn hóa trước đó trong loop nên không cần re-map cuối file;
+	// 31aug26 Chú ý 2: container của mỗi style đã chứa sẵn globalCss làm chuẩn).
 
 	return parsedData;
 }
+/** [arena.ai] 31aug26 (Chú ý 2 pipeline) — globalCss làm CHUẨN, suy từ info (đã chuẩn hóa).
+ * Bộ props dùng chung cho MỌI dòng của file sub. Parser nhúng thẳng bộ này vào container
+ * của từng styleCss (styleParsedToCss) → renderer áp container 1 chỗ là đủ, không cần
+ * merge globalCss riêng theo từng style. parsedData.globalCss vẫn giữ làm bản chuẩn
+ * để renderer tham chiếu cho lớp gốc (root layer) của phụ đề.
+ *
+ * Phân mức: toàn bộ props hiện tại đều thuộc mức CONTAINER (wrap/khung dòng).
+ * Nếu sau này có prop mức text thì nhúng vào phần text của styleParsedToCss tương ứng.
+ *
+ * @param {parsedDataFormat.info} [info] Info đã (hoặc chưa) chuẩn hóa — chỉ đọc WrapStyle.
+ * @returns {Object} Bộ props CSS chuẩn: white-space/word-break/overflow-wrap/text-wrap/max-width.
+ */
+function globalCssFromInfo(info = {}) {
+	const wrapStyle = Number(info.WrapStyle ?? 0); // chống string khi info chưa chuẩn hóa
+	return {
+		'white-space': (wrapStyle === 2 ? 'pre' : 'pre-wrap'), // WrapStyle 2: không word wrap
+		'word-break': 'keep-all',
+		'overflow-wrap': 'break-word',
+		'text-wrap': (wrapStyle === 3 ? 'balance' : wrapStyle === 1 ? 'wrap' : 'pretty'),
+		'max-width': '100%',
+	};
+}
 /** Chuyển đổi style đã chuẩn hóa thành object CSS.
  * 29aug26 — bước 3: phân tích kĩ container / text / data
+ * 31aug26 — Chú ý 2 pipeline: container chứa sẵn globalCss (chuẩn); delta segment theo
+ *           mức node {container, text, data} cho classify (bước 4-7) — xem typedef
+ *           parsedDataFormat.segmentDelta bên dưới segmentsFromTokens.
  *
  * Triết lý:
  * - Parser KHÔNG đo chữ thật, KHÔNG scale sang video thật. Mọi px giữ theo PlayRes.
@@ -420,7 +449,9 @@ export function parser(tagProcessLevel = 0, rawText) {
  *
  * container (vỏ ngoài — định vị dòng):
  *   - Nhiệm vụ: đặt khung dòng trong video theo \an + marginL/R/V (+ \pos/\move sau này).
- *   - Chứa: display, position, max-width, text-align (từ \an), line-height,
+ *   - Chứa: display, position, text-align (từ \an), line-height,
+ *           bộ globalCss chuẩn (white-space/word-break/overflow-wrap/text-wrap/max-width,
+ *           31aug26 Chú ý 2: nhúng sẵn, không phải merge ở renderer),
  *           background/box-shadow khi borderStyle==3 (opaque box).
  *   - KHÔNG chứa font/color/transform — những thứ đó thuộc text.
  *   - alignment → hAlign (left/center/right) để set text-align, và transformOrigin cho \fr.
@@ -462,16 +493,18 @@ export function styleParsedToCss (style, info = {}) {
 
 	const isBox = style.borderStyle === 3;
 
+	// 31aug26 (Chú ý 2 pipeline): globalCss làm chuẩn → tính 1 lần rồi nhúng thẳng vào container.
+	const globalCss = globalCssFromInfo(info);
+
 	// container: định vị, không chứa font
+	// 31aug26 (Chú ý 2 pipeline): nhúng THẲNG bộ globalCss (chuẩn) vào container —
+	// white-space/word-break/overflow-wrap/text-wrap/max-width theo WrapStyle đã chuẩn hóa.
 	const container = {
 		'display': 'inline-block',
 		'position': 'absolute', // renderer sẽ set left/top/right/bottom theo an + margin + pos/move
-		'max-width': '100%',
 		'text-align': hAlign,
 		// 'line-height': (sửa ở đây: ${style.fontSize}px)
-		'white-space': 'pre-wrap', // fallback, globalCss sẽ override theo WrapStyle
-		'word-break': 'keep-all',
-		'overflow-wrap': 'break-word',
+		...globalCss, // globalCssFromInfo(info): chuẩn wrap/khung dòng, renderer không cần merge riêng
 		...(isBox ? {
 			// borderStyle 3: opaque box — theo spec Aegisub, outlineColour là màu nền box,
 			// outline là padding của box, shadow là box-shadow (hoặc vẫn là text-shadow? tạm dùng box-shadow)
@@ -655,10 +688,22 @@ export function tokenizeLineText(text) {
 // - Tag token THƯỜNG đứng CUỐI dòng (không còn text theo sau) → BỎ (không tạo segment);
 //   marker đứng cuối dòng thì VẪN GIỮ (đã flush thành segment riêng từ lúc gặp).
 
-/** Định nghĩa/chú thích object segment sau khi tách 
+/** Định nghĩa/chú thích object segment sau khi tách
  * @typedef {object} parsedDataFormat.segment Đơn vị nhỏ nhất: 1 cụm tag + 1 đoạn text.
  * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
  * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm tầng cuối).
+ */
+/** Định nghĩa/chú thích delta theo mức node của segment/run (31aug26 — Chú ý 2 pipeline).
+ * ĐỊNH HƯỚNG cho classify (bước 4-7): parser xử lí đến segment thì mỗi segment/run mang
+ * delta tách theo 3 mức giống styleParsedToCss (container / text / data).
+ * Renderer chuyển segment thành node container-text TÙY MỨC ĐỘ DELTA:
+ * - delta có container → phải sinh CẶP node container+text MỚI (delta chạm vỏ dòng).
+ * - delta chỉ có text  → chỉ sinh node text bên trong container hiện có (đổi ruột chữ).
+ * - delta chỉ có data  → không sinh node, chỉ là số liệu cho đo chữ / collision / karaoke.
+ * @typedef {object} parsedDataFormat.segmentDelta
+ * @property {Object} [container] Tag chạm vỏ dòng (vd \bord/\4c khi borderStyle==3, \clip) → renderer tách container mới.
+ * @property {Object} [text] Tag đổi ruột chữ (\fs, \c, \b, \fr...) → renderer chỉ thêm node text.
+ * @property {Object} [data] Chỉ số liệu đo/collision (không có CSS tương ứng) → không sinh node.
  */
 
 /** [arena.ai] Tách nội dung 1 tag token (không bao ngoặc) thành các tag đơn theo '\' ở mức ngoặc ngoài cùng.
