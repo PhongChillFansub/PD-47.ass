@@ -1,4 +1,4 @@
-// v0.1.0 23aug26
+// v0.1.0 31aug26
 // alpha mode
 // Chức năng: chuyên xử lí lưu trữ trên chrome.storage.local.
 /** 
@@ -140,6 +140,8 @@ export async function removeSource(id) {
     return "";
   });
 }
+
+// to-do: sửa lại phần này sau khi viết xong parser.
 
 /** Hàm lưu dữ liệu file sub (obj) dựa trên videoId. Đồng thời cập nhật chỉ mục nhẹ
  * ASSCEE_subIndex (chỉ fileObj + id + thời gian, KHÔNG chứa parsedData) để getSubDataList đọc nhanh.

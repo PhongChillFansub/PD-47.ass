@@ -1,4 +1,4 @@
-/** v0.0.8 29aug26
+/** v0.1.0 31aug26
  * alpha mode
  * Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS (globalCss, styleCss, lineCss).
 */
@@ -191,14 +191,13 @@ function validateAndNormalizeStyle(style) {
 	}
 	return true;
 }
-/**
- * @typedef {string} line Dòng text sau khi tách ban đầu, đầu vào xử lí thô.
- */
+// tagProcess() sau này sẽ thế vào parsedData.lineCss.push(tagProcess(tagProcessLevel, orgline.text));
 /** Hàm đọc text của file Aegisub.
+ * @param {number} tagProcessLevel Mức độ xử lí tag (0: xử lí tất cả, 1: chỉ xử lí style = strip tags), dùng cho tagProcess()
  * @param {string} rawText Nội dung file ASS đầu vào dưới dạng text.
  * @returns {parsedDataFormat.global} Object chứa dữ liệu parser đã chuẩn hóa và CSS tương ứng.
  */
-export function parser(rawText) {
+export function parser(tagProcessLevel = 0, rawText) {
 	/** Dữ liệu tệp phụ đề.
 	 * 
 	 * Info lưu dưới dạng obj do file sub có cấu trúc key: value
@@ -229,7 +228,7 @@ export function parser(rawText) {
 	 */
 	let eventFormat = [];
 	// Array vì các key và value theo trật tự trong mỗi dòng, và dòng Format (của cả 2 phần) có trật tự cố định
-	/** Dòng text hiện tại đang được phân tích từ file ASS.
+	/** Dòng text sau khi tách ban đầu, đầu vào xử lí thô.
 	 * @type {string}
 	 */
 	let line;
@@ -314,16 +313,16 @@ export function parser(rawText) {
 				// - trùng tên: last wins (Aegisub ghi đè) → thay thế entry cũ để styles[i] ↔ styleCss[i] luôn đồng bộ
 				if (!validateAndNormalizeStyle(style)) {
 					// style không hợp lệ → bỏ qua, không push
+					utils.log(`${parserLogPrefix} Phát hiện style lỗi, bỏ qua.`,style);
 					continue;
 				}
 				// Map name → index để xử lý trùng tên (trừ trường hợp name rỗng thì luôn push mới)
-				if (style.name !== '') {
-					const existingIdx = parsedData.styles.findIndex(s => s.name === style.name);
-					if (existingIdx !== -1) {
-						parsedData.styles[existingIdx] = style;
-						parsedData.styleCss[existingIdx] = styleParsedToCss(style, parsedData.info);
-						continue;
-					} // to-do: review tiếp từ đoạn này. Nếu trùng tên thì sao? Có đổi tên thành copy như Aegisub ko? 
+				// last-wins cho mọi style, kể cả name=""
+				const existingIdx = parsedData.styles.findIndex(s => s.name === style.name);
+				if (existingIdx !== -1) {
+				parsedData.styles[existingIdx] = style;
+				parsedData.styleCss[existingIdx] = styleParsedToCss(style, parsedData.info);
+				continue;
 				}
 				parsedData.styles.push(style);
 				parsedData.styleCss.push(styleParsedToCss(style, parsedData.info));
@@ -383,6 +382,7 @@ export function parser(rawText) {
 				parsedData.events.push(orgline);
 				// segments của dòng ghi vào lineCss (cùng chỉ số với events), KHÔNG thay đổi orgline
 				parsedData.lineCss.push({ segments: segmentsFromTokens(tokenizeLineText(orgline.text ?? '')) });
+				// to-do: có thể phải sửa dòng lineCss.push này.
     		}
 		}
 	}
@@ -468,7 +468,7 @@ export function styleParsedToCss (style, info = {}) {
 		'position': 'absolute', // renderer sẽ set left/top/right/bottom theo an + margin + pos/move
 		'max-width': '100%',
 		'text-align': hAlign,
-		'line-height': '1.15', // ASS không có line-height riêng, dùng 1.15 cho dễ đọc, renderer có thể override
+		// 'line-height': (sửa ở đây: ${style.fontSize}px)
 		'white-space': 'pre-wrap', // fallback, globalCss sẽ override theo WrapStyle
 		'word-break': 'keep-all',
 		'overflow-wrap': 'break-word',
@@ -488,7 +488,7 @@ export function styleParsedToCss (style, info = {}) {
 	// text: typography + base transform + outline/shadow
 	const text = {
 		'font-family': `"${style.fontName}", sans-serif`,
-		'font-size': `${style.fontSize}px`, // PlayRes px, renderer scale sau: videoHeight/PlayResY
+		'font-size': `${style.fontSize}px`, // PlayRes px, renderer scale và CSSResize sau: videoHeight/PlayResY
 		'color': style.primaryColour,
 		'font-weight': style.bold ? '700' : '400',
 		'font-style': style.italic ? 'italic' : 'normal',
