@@ -1,4 +1,5 @@
 // Tests cho parser.js: tokenizeLineText + segmentsFromTokens + parser().
+// Chữ ký (chốt 31aug26): parser(tagProcessLevel = 0, rawText) → test gọi parser(0, rawText).
 // Chạy: npm test (node --test)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -126,7 +127,7 @@ const MINI_ASS = [
 
 test('parser: named export, parse info/styles/events như cũ', () => {
 	assert.equal(typeof parser, 'function');
-	const parsed = parser(MINI_ASS);
+	const parsed = parser(0, MINI_ASS);
 	assert.equal(parsed.info.Title, 'Test parser');
 	assert.equal(parsed.info.PlayResX, 640);
 	assert.equal(parsed.info.WrapStyle, 0);
@@ -140,7 +141,7 @@ test('parser: named export, parse info/styles/events như cũ', () => {
 });
 
 test('parser: KHÔNG gắn segments/classify vào orgline (tách tag là bước rời, gọi khi cần)', () => {
-	const parsed = parser(MINI_ASS);
+	const parsed = parser(0, MINI_ASS);
 	const line = parsed.events[0];
 	assert.equal(line.text, '{\\pos(320,240)\\an5}Xin {\\c&HFF&}chào{\\N}các bạn');
 	assert.equal(line.runs, undefined);
@@ -152,7 +153,7 @@ test('parser: KHÔNG gắn segments/classify vào orgline (tách tag là bước
 });
 
 test('parser: segments ghi vào lineCss (cùng chỉ số với events), KHÔNG đụng orgline', () => {
-	const parsed = parser(MINI_ASS);
+	const parsed = parser(0, MINI_ASS);
 	assert.equal(parsed.lineCss.length, 1); // 1 Dialogue → 1 entry lineCss
 	assert.deepEqual(
 		parsed.lineCss[0].segments,
@@ -171,7 +172,7 @@ test('parser: segments ghi vào lineCss (cùng chỉ số với events), KHÔNG 
 
 test('parser: Dialogue ngắt dòng (continuation) → events và lineCss vẫn cùng chỉ số', () => {
 	const ass = MINI_ASS + '\nDialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,{\\b1}bị ngắt\n{\\i}tiếp nối';
-	const parsed = parser(ass);
+	const parsed = parser(0, ass);
 	assert.equal(parsed.events.length, 2);
 	assert.equal(parsed.lineCss.length, 2); // pop/push đúng → không lệch chỉ số
 	assert.equal(parsed.events[1].text, '{\\b1}bị ngắt\n{\\i}tiếp nối');
@@ -183,7 +184,7 @@ test('parser: Dialogue ngắt dòng (continuation) → events và lineCss vẫn 
 test('parser: thời gian ms chính xác tuyệt đối (toán nguyên, không lỗi float)', () => {
 	// 0:00:02.01 là giá trị từng bị float lỗi với cách reduce*1000 (2009.9999999999998)
 	const ass = MINI_ASS.replace('Dialogue: 0,0:00:01.00,0:00:02.00', 'Dialogue: 0,0:00:02.01,1:02:03.21');
-	const parsed = parser(ass);
+	const parsed = parser(0, ass);
 	assert.equal(parsed.events[0].startTime, 2010);
 	assert.equal(parsed.events[0].endTime, 3723210); // 1h2m3.21s
 });
@@ -199,7 +200,7 @@ test('parser: thời gian — các ca biên (định dạng ngắn, thập phân
 	];
 	for (const [t, want] of cases) {
 		const ass = MINI_ASS.replace('Dialogue: 0,0:00:01.00,0:00:02.00', 'Dialogue: 0,' + t + ',' + t);
-		const parsed = parser(ass);
+		const parsed = parser(0, ass);
 		assert.equal(parsed.events[0].startTime, want, 'startTime sai với đầu vào: ' + JSON.stringify(t));
 	}
 });
@@ -208,7 +209,7 @@ test('parser: pop/merge continuation đúng — đứt 3 lần vẫn gộp 1 eve
 	const ass = MINI_ASS
 		+ '\nDialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,{\\b1}Đứt lần 1\nlần 2\nlần 3'
 		+ '\nDialogue: 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,Dòng kế';
-	const parsed = parser(ass);
+	const parsed = parser(0, ass);
 	// 3 Dialogue vật lý (đứt 3 dòng) → 3 events / 3 lineCss, KHÔNG trùng bản dở
 	assert.equal(parsed.events.length, 3);
 	assert.equal(parsed.lineCss.length, 3);
@@ -216,4 +217,88 @@ test('parser: pop/merge continuation đúng — đứt 3 lần vẫn gộp 1 eve
 	assert.equal(parsed.events[1].startTime, 3000);
 	assert.deepEqual(parsed.lineCss[1].segments, [{ tags: ['\\b1'], text: 'Đứt lần 1\nlần 2\nlần 3' }]);
 	assert.deepEqual(parsed.lineCss[2].segments, [{ tags: [], text: 'Dòng kế' }]); // dòng sau không bị dính
+});
+
+// ======================================================================
+// 31aug26 — Chú ý 1 (pipeline): info chuẩn hóa NGAY trong loop, không re-map sau file
+// ======================================================================
+
+test('Chú ý 1: file thiếu info key → seed mặc định, styleCss.push vẫn đúng ngay trong loop', () => {
+	// Bỏ hẳn PlayResX/PlayResY/ScaledBorderAndShadow khỏi [Script Info]
+	const ass = MINI_ASS
+		.replace('PlayResX: 640\n', '')
+		.replace('PlayResY: 480\n', '')
+		.replace('ScaledBorderAndShadow: yes\n', '');
+	const parsed = parser(0, ass);
+	assert.equal(parsed.info.PlayResX, 640);
+	assert.equal(parsed.info.PlayResY, 480);
+	assert.equal(parsed.info.ScaledBorderAndShadow, false);
+	// styleCss được push ngay trong loop nhưng data đã đúng (không nhờ re-map cuối file)
+	assert.equal(parsed.styleCss.length, 1);
+	assert.equal(parsed.styleCss[0].data.playResX, 640);
+	assert.equal(parsed.styleCss[0].data.playResY, 480);
+	assert.equal(parsed.styleCss[0].data.scaledBorderAndShadow, false);
+});
+
+test('Chú ý 1: giá trị rác/ngoài phạm vi bị chuẩn hóa NGAY KHI LƯU vào info', () => {
+	const ass = MINI_ASS
+		.replace('WrapStyle: 0', 'WrapStyle: 9')          // ngoài 0..3 → clamp 3
+		.replace('PlayResX: 640', 'PlayResX: 12')         // dưới min → 640
+		.replace('ScaledBorderAndShadow: yes', 'ScaledBorderAndShadow: no');
+	const parsed = parser(0, ass);
+	assert.equal(parsed.info.WrapStyle, 3);
+	assert.equal(parsed.info.PlayResX, 640);
+	assert.equal(parsed.info.ScaledBorderAndShadow, false);
+	// styleCss dùng đúng info đã chuẩn hóa tại thời điểm push
+	assert.equal(parsed.styleCss[0].data.playResX, 640);
+	assert.equal(parsed.globalCss['white-space'], 'pre-wrap'); // WrapStyle 3 ≠ 2
+});
+
+// ======================================================================
+// 31aug26 — Chú ý 2 (pipeline): globalCss làm chuẩn, nhúng sẵn vào container styleCss
+// ======================================================================
+
+test('Chú ý 2: parsedData.globalCss giữ làm CHUẨN + container styleCss nhúng đủ globalCss', () => {
+	const parsed = parser(0, MINI_ASS); // WrapStyle 0
+	// bản chuẩn (renderer tham chiếu cho lớp gốc)
+	assert.equal(parsed.globalCss['white-space'], 'pre-wrap');
+	assert.equal(parsed.globalCss['word-break'], 'keep-all');
+	assert.equal(parsed.globalCss['overflow-wrap'], 'break-word');
+	assert.equal(parsed.globalCss['text-wrap'], 'pretty');
+	assert.equal(parsed.globalCss['max-width'], '100%');
+	// container của style đã chứa sẵn → renderer áp 1 chỗ, không merge riêng
+	const container = parsed.styleCss[0].container;
+	assert.equal(container['white-space'], 'pre-wrap');
+	assert.equal(container['word-break'], 'keep-all');
+	assert.equal(container['overflow-wrap'], 'break-word');
+	assert.equal(container['text-wrap'], 'pretty');
+	assert.equal(container['max-width'], '100%');
+	// các props định vị riêng của container vẫn giữ nguyên
+	assert.equal(container['display'], 'inline-block');
+	assert.equal(container['position'], 'absolute');
+	assert.equal(container['text-align'], 'center'); // an=2
+});
+
+test('Chú ý 2: WrapStyle đổi → globalCss và container đổi theo cùng lúc', () => {
+	const cases = [
+		[1, 'pre-wrap', 'wrap'],    // end-of-line word wrapping
+		[2, 'pre', 'pretty'],       // no word wrapping → giữ trắng nguyên văn
+		[3, 'pre-wrap', 'balance'], // smart wrapping, bottom line wider
+	];
+	for (const [wrapStyle, whiteSpace, textWrap] of cases) {
+		const parsed = parser(0, MINI_ASS.replace('WrapStyle: 0', `WrapStyle: ${wrapStyle}`));
+		assert.equal(parsed.info.WrapStyle, wrapStyle);
+		assert.equal(parsed.globalCss['white-space'], whiteSpace);
+		assert.equal(parsed.globalCss['text-wrap'], textWrap);
+		assert.equal(parsed.styleCss[0].container['white-space'], whiteSpace);
+		assert.equal(parsed.styleCss[0].container['text-wrap'], textWrap);
+	}
+});
+
+test('Chú ý 2: ScaledBorderAndShadow=yes lan đúng từ info (chuẩn hóa trong loop) sang data styleCss', () => {
+	const parsed = parser(0, MINI_ASS); // file ghi "yes"
+	assert.equal(parsed.info.ScaledBorderAndShadow, true);
+	assert.equal(parsed.styleCss[0].data.scaledBorderAndShadow, true);
+	assert.equal(parsed.styleCss[0].data.playResX, 640);
+	assert.equal(parsed.styleCss[0].data.playResY, 480);
 });

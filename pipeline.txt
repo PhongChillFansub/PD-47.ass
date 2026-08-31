@@ -149,8 +149,9 @@ parser.js — xử lí tag override (kế hoạch + ĐÃ LÀM 27-29aug26)
 
     Quyết định / ràng buộc:
     - Run model = hybrid: mỗi run/syl lưu style gốc của dòng (từ \r) + danh sách delta tag.
-    - parser là NAMED export (chốt 27aug26): `export function parser(rawText)` — background viết:
-      import { parser } from './parser.js' (đồng bộ fetcher/storage, KHÔNG dùng default).
+    - parser là NAMED export (chốt 27aug26, cập nhật 31aug26): `export function parser(tagProcessLevel = 0, rawText)`
+      — tagProcessLevel để dành cho tagProcess() sau này (xem comment ở parser.js); tests gọi parser(0, rawText);
+      background viết: import { parser } from './parser.js' (đồng bộ fetcher/storage, KHÔNG dùng default).
     - Parser KHÔNG đo kích thước chữ thật, KHÔNG dùng OffscreenCanvas: mọi tọa độ (pos/move)
       giữ nguyên theo PlayResX/PlayResY trong file sub. Renderer mới scale sang kích thước thật,
       đo kích thước chữ thật và xử lí collision.
@@ -185,17 +186,20 @@ parser.js — xử lí tag override (kế hoạch + ĐÃ LÀM 27-29aug26)
         + Validation + dedup last-wins ngay khi push Style (đối xứng events/lineCss):
           validateAndNormalizeStyle fix bug forEach→for...of, cho phép name rỗng,
           trùng tên → thay thế entry cũ để styles[i] ↔ styleCss[i] đồng bộ.
-        + CSS generation: re-map sau khi info chuẩn hóa (PlayResX/Y, ScaledBorderAndShadow) để data chính xác,
-          vẫn giữ 1-pass validation + 1-pass CSS, không còn 2-pass filter cũ.
+        + CSS generation (cập nhật 31aug26 — Chú ý 1): KHÔNG còn re-map cuối file. Info được
+          chuẩn hóa NGAY trong loop (seed mặc định 4 key trước loop + chuẩn hóa tại chỗ khi lưu
+          trong [Script Info]) → styleCss.push chạy đúng ngay từ đầu. Vẫn 1-pass validation + 1-pass CSS.
     - styleParsedToCss(style, info): phân tách rõ container / text / data (ĐÃ IMPLEMENT 29aug26)
         Triết lý: parser giữ px theo PlayRes, renderer mới scale sang video thật và đo chữ (pretext).
 
         container (vỏ ngoài — định vị dòng):
           - Nhiệm vụ: đặt khung dòng trong video theo \an + marginL/R/V (+ \pos/\move sau này xử ở collision).
-          - Chứa: display:inline-block, position:absolute (renderer set left/top), max-width:100%,
+          - Chứa (31aug26 Chú ý 2: globalCss làm chuẩn được nhúng SẴN vào container, renderer KHÔNG merge riêng):
+                  display:inline-block, position:absolute (renderer set left/top),
                   text-align từ \an (1,4,7→left; 2,5,8→center; 3,6,9→right),
-                  line-height:1.15, white-space:pre-wrap (globalCss override theo WrapStyle),
-                  word-break:keep-all, overflow-wrap:break-word,
+                  line-height:1.15,
+                  + globalCss: max-width:100%, white-space theo WrapStyle (2→pre, còn lại pre-wrap),
+                    word-break:keep-all, overflow-wrap:break-word, text-wrap theo WrapStyle (3→balance, 1→wrap, còn lại pretty),
                   nếu borderStyle==3 (opaque box): background-color=outlineColour, padding=outline, box-shadow=shadow+backColour,
                   nếu borderStyle==1: background transparent.
           - KHÔNG chứa font/color/transform — thuộc text.
@@ -222,8 +226,10 @@ parser.js — xử lí tag override (kế hoạch + ĐÃ LÀM 27-29aug26)
           - Info: playResX/Y, scaledBorderAndShadow (từ info) để renderer quyết định outline/shadow có scale theo video không.
           - Dùng cho: đo chữ, collision, karaoke (\2c), tag override \bord/\shad/\c...
 
-        Ví dụ output (PlayRes 1280x720, an=7, borderStyle=3, outline=5, shadow=3):
-          container: {display:inline-block, position:absolute, text-align:left, background-color:rgba(255,255,0,1), padding:5px, box-shadow:3px 3px rgba(0,0,0,1)}
+        Ví dụ output (PlayRes 1280x720, an=7, borderStyle=3, outline=5, shadow=3, WrapStyle=0):
+          container: {display:inline-block, position:absolute, text-align:left,
+                      white-space:pre-wrap, word-break:keep-all, overflow-wrap:break-word, text-wrap:pretty, max-width:100%,   // = globalCss chuẩn (Chú ý 2)
+                      background-color:rgba(255,255,0,1), padding:5px, box-shadow:3px 3px rgba(0,0,0,1)}
           text: {font-family:"Arial", font-size:30px, color:rgba(255,255,255,1), font-weight:700, transform:scaleX(1.2) scaleY(0.8) rotate(15deg), transform-origin:0% 0%, ...}
           data: {name:BoxStyle, fontSize:30, alignment:7, hAlign:left, isBox:true, playResX:1280, playResY:720, scaledBorderAndShadow:true, ...}
 
@@ -299,7 +305,24 @@ Câu hỏi: có nên viết styleCss trước khi xử lí tag?
         }
     }
 
-Next steps checklist (29aug26):
+Cập nhật 31aug26 (Chú ý 2 — delta theo MỨC NODE, áp dụng khi viết classify bước 4-7):
+    runs mang delta tách theo 3 mức giống styleParsedToCss, THAY cho nhóm layout/decoration cũ:
+        runs: [ { baseStyleName, delta: {container?, text?, data?}, text, karaoke? } ]
+    - delta.container: tag chạm VỎ dòng (vd \bord/\4c khi borderStyle==3, ...) → renderer sinh CẶP node container+text MỚI
+    - delta.text: tag đổi RUỘT chữ (\fs, \fsc, \fsp, \fn, \b, \i, \c, \fr...) → renderer chỉ thêm node text trong container hiện có
+    - delta.data: chỉ số liệu đo chữ/collision/karaoke (không có CSS tương ứng) → KHÔNG sinh node
+    - collision/clip vẫn giữ mức DÒNG như struct trên (first-wins/last-wins)
+    - đã chốt typedef parsedDataFormat.segmentDelta trong parser.js làm gốc
+
+Next steps checklist (29aug26, cập nhật 31aug26):
+    [x] 0. Xử lí 2 Chú ý cuối pipeline (31aug26):
+          Chú ý 1 — chuẩn hóa info NGAY trong loop (seed mặc định WrapStyle/PlayResX/Y/ScaledBorderAndShadow
+          trước loop + chuẩn hóa tại chỗ khi lưu trong [Script Info]), xóa 4 dòng chuẩn hóa sau loop
+          và dòng re-map styleCss cuối file. Tests mới: "Chú ý 1" (tests/parser.test.mjs).
+          Chú ý 2 — globalCssFromInfo(info) làm CHUẨN; giữ parsedData.globalCss làm bản chuẩn cho renderer,
+          đồng thời nhúng toàn bộ props (hiện đều mức container) vào container của styleParsedToCss.
+          Struct delta segment đã chốt (xem "Cập nhật 31aug26" bên trên). Tests mới: "Chú ý 2".
+          Kèm theo: tests gọi parser(0, rawText) theo chữ ký parser(tagProcessLevel = 0, rawText).
     [x] 1. Chuyển style chuẩn hóa + styleCss vào push (line 304) + fix bug validate + last-wins — ĐÃ LÀM 29aug26
     [x] 2. Dọn pipeline line 192+ — gộp 27aug26 notes lên trên, xóa đoạn trùng — ĐÃ LÀM 29aug26
     [x] 3. Viết styleParsedToCss chi tiết: container/text/data tách bạch, map ASS → CSS, transform-origin từ \an, box vs outline — ĐÃ LÀM 29aug26 (bước 3)
@@ -309,9 +332,15 @@ Next steps checklist (29aug26):
     [ ] 7. Viết 2.1 clip: clip/iclip last-wins
     [ ] 8. Cập nhật tests/parser.test.mjs cho styleCss + runs
 
-Chú ý:
+Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug26" ở phần struct lineCss):
  1. Sửa dòng 389-392, chuẩn hóa info ngay trong loop for (dòng 235, cụ thể là đoạn dòng 258-275) thay vì để sau. (để chạy đc ngay styleCss.push dòng 327-328 thay vì phải update lại ở dòng 395)
+    → ĐÃ LÀM: seed mặc định 4 key trước loop + chuẩn hóa NGAY KHI LƯU trong [Script Info];
+      xóa khối chuẩn hóa sau loop + dòng re-map styleCss cuối file.
  2. Cấu trúc CSS: 
     globalCss làm chuẩn (container hoặc text)
     -> Đặt các style (container, text, data trong styleParsedToCss) có chứa globalCss trong (container hoặc text)
     -> parser xử lí đến segment (với delta của container, text, data), renderer chuyển đổi nó thành các node container-text tùy vào mức độ của delta.
+    → ĐÃ LÀM (phần styleCss): globalCssFromInfo() làm chuẩn, parsedData.globalCss giữ làm bản chuẩn cho renderer,
+      toàn bộ props hiện tại (đều mức container) nhúng sẵn vào container của styleParsedToCss.
+      Phần delta segment: đã chốt mô hình (typedef parsedDataFormat.segmentDelta trong parser.js +
+      mục "Cập nhật 31aug26" trong struct lineCss), thực hiện khi viết classify (bước 4-7).
