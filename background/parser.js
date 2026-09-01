@@ -1,4 +1,4 @@
-/** v0.1.0 31aug26
+/** v0.1.0 02sep26
  * alpha mode
  * Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS (globalCss, styleCss, lineCss).
 */
@@ -191,7 +191,6 @@ function validateAndNormalizeStyle(style) {
 	}
 	return true;
 }
-// tagProcess() sau này sẽ thế vào parsedData.lineCss.push(tagProcess(tagProcessLevel, orgline.text));
 /** Hàm đọc text của file Aegisub.
  * @param {number} tagProcessLevel Mức độ xử lí tag (0: xử lí tất cả, 1: chỉ xử lí style = strip tags), dùng cho tagProcess()
  * @param {string} rawText Nội dung file ASS đầu vào dưới dạng text.
@@ -215,9 +214,7 @@ export function parser(tagProcessLevel = 0, rawText) {
 	 * @type {string[]}
 	 */
 	const subtitles = rawText.split(/\r?\n/);
-	// 31aug26 (Chú ý 1 pipeline): seed sẵn 4 key chuẩn hóa của info bằng giá trị mặc định
-	// để info LUÔN ở trạng thái đã chuẩn hóa trong suốt loop (kể cả khi file thiếu [Script Info]),
-	// dòng [Script Info] xuất hiện sau sẽ đè bằng giá trị đã chuẩn hóa NGAY TẠI CHỖ lưu.
+	// fallback nếu file sub ko có info
 	parsedData.info.WrapStyle = 0;                 // mặc định: smart wrapping, top line is wider
 	parsedData.info.PlayResX = 640;                // fallback PlayResX
 	parsedData.info.PlayResY = 480;                // fallback PlayResY
@@ -275,7 +272,7 @@ export function parser(tagProcessLevel = 0, rawText) {
 			// gán bằng Regex: tách thành phần trước và sau dấu ":" thứ nhất
 			if (key) {
 				const k = key.trim(), v = value.trim();
-				// 31aug26 (Chú ý 1 pipeline): chuẩn hóa NGAY KHI LƯU 4 key quan trọng (thay vì để sau loop)
+				// chuẩn hóa NGAY KHI LƯU 4 key quan trọng (thay vì để sau loop)
 				// để styleCss.push ở phần [V4+ Styles] chạy đúng ngay từ đầu, không cần re-map cuối file.
 				parsedData.info[k] =
 					k === 'WrapStyle' ? parseClampedNum(true, v, 0, 0, 3) :
@@ -322,7 +319,7 @@ export function parser(tagProcessLevel = 0, rawText) {
 					// VD: Ở đây gọi style.primaryColour thì ở Aegisub là style.color1 (trong môi trường line là line.styleref.color1)
                 });
 				// Chú ý: Name của Style có thể bỏ trống ('') và vẫn hợp lệ
-				// 29aug26: chuẩn hóa + tạo styleCss ngay khi push (đối xứng với events/lineCss)
+				// chuẩn hóa + tạo styleCss ngay khi push (đối xứng với events/lineCss)
 				// - validateAndNormalizeStyle: fix bug forEach, cho phép name rỗng
 				// - trùng tên: last wins (Aegisub ghi đè) → thay thế entry cũ để styles[i] ↔ styleCss[i] luôn đồng bộ
 				if (!validateAndNormalizeStyle(style)) {
@@ -330,7 +327,6 @@ export function parser(tagProcessLevel = 0, rawText) {
 					utils.log(`${parserLogPrefix} Phát hiện style lỗi, bỏ qua.`,style);
 					continue;
 				}
-				// Map name → index để xử lý trùng tên (trừ trường hợp name rỗng thì luôn push mới)
 				// last-wins cho mọi style, kể cả name=""
 				const existingIdx = parsedData.styles.findIndex(s => s.name === style.name);
 				if (existingIdx !== -1) {
@@ -395,27 +391,18 @@ export function parser(tagProcessLevel = 0, rawText) {
 				parsedData._lastRawDialogue = orgline; // Lưu tham chiếu dòng dialogue mới nhất
 				parsedData.events.push(orgline);
 				// segments của dòng ghi vào lineCss (cùng chỉ số với events), KHÔNG thay đổi orgline
-				parsedData.lineCss.push({ segments: segmentsFromTokens(tokenizeLineText(orgline.text ?? '')) });
-				// to-do: có thể phải sửa dòng lineCss.push này.
+				parsedData.lineCss.push(tagProcess(tagProcessLevel, orgline.text))
     		}
 		}
 	}
-	// 31aug26 (Chú ý 1 pipeline): info đã chuẩn hóa ngay trong loop (seed mặc định + chuẩn hóa khi lưu)
-	// → styleCss đã push đúng từ đầu, KHÔNG còn re-map sau file nữa.
-	utils.log(`${parserLogPrefix} Đã xử lí thô.`, parsedData);
-	// Phần xử lí chuyển đổi sang CSS. Sử dụng globalCss, styleCss và lineCss.
-	// Phần globalCss (từ các giá trị trong info)
-	// 31aug26 (Chú ý 2 pipeline): globalCss làm CHUẨN — tách thành globalCssFromInfo(),
-	// giữ parsedData.globalCss làm bản chuẩn để renderer tham chiếu cho lớp gốc;
-	// đồng thời bộ props này được nhúng sẵn vào container của từng styleCss (styleParsedToCss).
 	parsedData.globalCss = globalCssFromInfo(parsedData.info);
-	// Phần styleCss: đã tạo ĐÚNG NGAY khi push Style trong loop (29aug26 validation + dedup last-wins;
-	// 31aug26 Chú ý 1: info chuẩn hóa trước đó trong loop nên không cần re-map cuối file;
-	// 31aug26 Chú ý 2: container của mỗi style đã chứa sẵn globalCss làm chuẩn).
-
+	utils.log(`${parserLogPrefix} Đã xử lí xong.`, parsedData);	
 	return parsedData;
 }
-/** [arena.ai] 31aug26 (Chú ý 2 pipeline) — globalCss làm CHUẨN, suy từ info (đã chuẩn hóa).
+function tagProcess(level, text) {
+	return { segments: segmentsFromTokens(tokenizeLineText(text ?? '')) };
+}
+/** [arena.ai] globalCss làm CHUẨN, suy từ info (đã chuẩn hóa).
  * Bộ props dùng chung cho MỌI dòng của file sub. Parser nhúng thẳng bộ này vào container
  * của từng styleCss (styleParsedToCss) → renderer áp container 1 chỗ là đủ, không cần
  * merge globalCss riêng theo từng style. parsedData.globalCss vẫn giữ làm bản chuẩn
@@ -478,7 +465,7 @@ function globalCssFromInfo(info = {}) {
 export function styleParsedToCss (style, info = {}) {
 	const playResX = info.PlayResX ?? 640;
 	const playResY = info.PlayResY ?? 480;
-	const scaled = info.ScaledBorderAndShadow ?? false;
+	const doScaleOutlines = info.ScaledBorderAndShadow ?? false;
 
 	const alignment = style.alignment;
 	// hAlign: 1,4,7 → left; 2,5,8 → center; 3,6,9 → right
@@ -503,7 +490,7 @@ export function styleParsedToCss (style, info = {}) {
 		'display': 'inline-block',
 		'position': 'absolute', // renderer sẽ set left/top/right/bottom theo an + margin + pos/move
 		'text-align': hAlign,
-		// 'line-height': (sửa ở đây: ${style.fontSize}px)
+		'line-height': `${style.fontSize}px`,
 		...globalCss, // globalCssFromInfo(info): chuẩn wrap/khung dòng, renderer không cần merge riêng
 		...(isBox ? {
 			// borderStyle 3: opaque box — theo spec Aegisub, outlineColour là màu nền box,
@@ -577,7 +564,7 @@ export function styleParsedToCss (style, info = {}) {
 		encoding: style.encoding,
 		playResX,
 		playResY,
-		scaledBorderAndShadow: scaled,
+		scaledBorderAndShadow: doScaleOutlines,
 	};
 
 	return { container, text, data };
