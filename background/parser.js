@@ -50,8 +50,8 @@ import * as utils from './utils.js';
  * @property {Array<parsedDataFormat.event>} events lưu các events (dialogue) của file sub
  * @property {object} globalCss định dạng các thuộc tính info (có thể chuyển) thành CSS
  * @property {Array} styleCss định dạng các style thành CSS ({container, text, data} — data chứa cả styleIndex, 02sep26)
- * @property {Array} lineCss mỗi phần tử { base } cùng chỉ số với events — base là danh sách segment tag-text
- *   (02sep26: đổi tên segments → base; classify bước 4-7 sẽ ghi runs trực tiếp vào base + thêm collision, clip)
+ * @property {Array} lineCss mỗi phần tử { base } cùng chỉ số với events — base là danh sách mục base tag-text
+ *   (02sep26: đổi tên segments → base; classify bước 4-7 sẽ ghi trực tiếp vào base + thêm collision, clip)
  */
 /** Định nghĩa/chú thích object parsedData.info sau xử lí 
  * @typedef {object} parsedDataFormat.info
@@ -206,16 +206,16 @@ function validateAndNormalizeStyle(style) {
  *   + tag {...} bị xóa hết (kể cả tag comment thuần {abc} — tokenizer đã bỏ);
  *   + marker \h/\N/\n đứng NGOÀI tag GIỮ NGUYÊN VĂN trong text (Aegisub strip chỉ xóa {...});
  *   + '{' không đóng giữ nguyên văn như text; \{ \} giữ nguyên văn (renderer unescape tầng cuối);
- *   + kết quả gộp thành 1 segment duy nhất { tags: [], text }; text rỗng/toàn tag → base = [].
+ *   + kết quả gộp thành 1 mục base duy nhất { tags: [], text }; text rỗng/toàn tag → base = [].
  *
  * @param {boolean} doStripTags truthy = như Aegisub strip tags, falsy = ko strip, xử lí tất cả.
  * @param {string} text line.text dạng raw.
- * @returns {{base: Array<parsedDataFormat.segment>}} Entry lineCss: { base } (02sep26 — đổi tên
- *   segments → base; classify bước 4-7 sau này ghi runs trực tiếp vào base + thêm collision, clip).
+ * @returns {{base: Array<parsedDataFormat.baseItem>}} Entry lineCss: { base } (02sep26 — đổi tên
+ *   segments → base; classify bước 4-7 sau này ghi trực tiếp vào base + thêm collision, clip).
  */
 function tagProcess(doStripTags, text) {
 	const tokens = tokenizeLineText(text ?? '');
-	if (!doStripTags) return { base: segmentsFromTokens(tokens) }; // falsy → xử lí tất cả
+	if (!doStripTags) return { base: baseFromTokens(tokens) }; // falsy → xử lí tất cả
 	// truthy → strip: nối text token + marker nguyên văn, bỏ mọi tag token.
 	let stripped = '';
 	for (const tok of tokens) {
@@ -450,7 +450,7 @@ export function parser(doStripTags = false, rawText) {
 				orgline.raw = line; // Lưu lại chuỗi gốc đề phòng dòng tiếp theo bị ngắt
 				parsedData._lastRawDialogue = orgline; // Lưu tham chiếu dòng dialogue mới nhất
 				parsedData.events.push(orgline);
-				// base (segment tag-text) của dòng ghi vào lineCss (cùng chỉ số với events), KHÔNG thay đổi orgline
+				// base (mục base tag-text) của dòng ghi vào lineCss (cùng chỉ số với events), KHÔNG thay đổi orgline
 				parsedData.lineCss.push(tagProcess(doStripTags, orgline.text))
     		}
 		}
@@ -477,9 +477,9 @@ function cachedGlobalCss(info) {
 }
 /** [arena.ai] Chuyển đổi style đã chuẩn hóa thành object CSS.
  * 29aug26 — bước 3: phân tích kĩ container / text / data
- * 31aug26 — Chú ý 2 pipeline: container chứa sẵn globalCss (chuẩn); delta segment theo
- *           mức node {container, text, data} cho classify (bước 4-7) — xem typedef
- *           parsedDataFormat.segmentDelta bên dưới segmentsFromTokens.
+ * 31aug26 — Chú ý 2 pipeline: container chứa sẵn globalCss (chuẩn); delta theo mức node
+ *           {container, text, data} cho classify (bước 4-7) — xem typedef
+ *           parsedDataFormat.baseItemDelta bên dưới baseFromTokens.
  *
  * Triết lý:
  * - Parser KHÔNG đo chữ thật, KHÔNG scale sang video thật. Mọi px giữ theo PlayRes.
@@ -632,6 +632,49 @@ export function isStandaloneToken(tok) {
 	return tok === '{\\h}' || tok === '{\\N}' || tok === '{\\n}';
 }
 /** [arena.ai] Tokenize + làm sạch nội dung dòng (tiền xử lí tag override).
+ *
+ * Mục tiêu: biến line.text thô (một chuỗi đan xen text thường và tag {...}) thành một mảng
+ * token ĐÃ LÀM SẠCH — để bước sau (baseFromTokens) chỉ việc ghép tag + text thành base
+ * mà không cần bận tâm các "lỗi đánh máy" hay gặp: tag rỗng, tag comment thuần, 2 tag liền
+ * nhau, tag bắt đầu bằng comment lẫn '\', \{ \}, '{' không đóng, '}' thừa...
+ *
+ * CÁCH HOẠT ĐỘNG (phần lõi là 1 vòng quét regex + 2 biến trạng thái):
+ * - Quét text bằng 1 regex duy nhất chia thành các nhánh:
+ *     /\\\{|\\\}|\{|\}|\\h|\\n|\\N/g
+ * - Giữ 2 biến trạng thái trong lúc quét:
+ *     + endIndex: vị trí BẮT ĐẦU của đoạn text chưa xử lí (phần text thường chưa đẩy).
+ *     + tagStartIndex: vị trí '{' của tag đang mở; -1 khi KHÔNG nằm trong tag nào.
+ * - Với mỗi match, hành vi rẽ nhánh theo ký tự khớp được:
+ *
+ *   1) \{  hoặc  \}   (dấu ngoặc được escape):
+ *        Bỏ qua (continue) — nó nằm lại trong phần text thường, KHÔNG tạo token riêng.
+ *        Renderer sẽ unescape \{ \} ở tầng cuối (khi không còn cần phân biệt text/tag).
+ *
+ *   2) \h / \N / \n   (marker đứng riêng, ngoài tag):
+ *        Nếu ĐANG NGOÀI tag (tagStartIndex === -1): đẩy đoạn text trước nó, rồi đẩy marker
+ *        được BỌC thành {\h} / {\N} / {\n} như 1 token riêng (để renderer quyết định ngữ nghĩa
+ *        dấu cách / xuống dòng theo WrapStyle / \q), cuối cùng cập nhật endIndex vượt qua nó.
+ *        Nếu ĐANG TRONG tag: bỏ qua (marker nằm nguyên trong tag token, không bọc riêng).
+ *
+ *   3) {   (mở tag):
+ *        Nếu ĐANG NGOÀI tag: đẩy đoạn text trước nó, đặt tagStartIndex = match.index,
+ *        endIndex = match.index (giữ nguyên '{' — nếu tag không đóng thì '{' thành text,
+ *        tránh nhân đôi). Nếu ĐANG TRONG tag: bỏ qua ('{' lồng nhau chỉ là text của tag).
+ *
+ *   4) }   (đóng tag):
+ *        Nếu ĐANG TRONG tag (tagStartIndex > -1): đẩy token là đoạn
+ *        text.slice(tagStartIndex, regex.lastIndex) (từ '{' đến VỊ TRÍ SAU '}'), cập nhật
+ *        endIndex, reset tagStartIndex = -1 (hết tag). '}' THỪA (không có '{' trước): bỏ qua.
+ *
+ * - SAU KHI quét hết, nếu còn text sót lại (endIndex < text.length):
+ *     + Nếu token cuối của result KHÔNG kết thúc bằng '}' (tức là text thường / còn '{' không
+ *       đóng) → NỐI đoạn còn lại vào token đó (gộp text liền mạch — xử lí ca '{' không đóng).
+ *     + Ngược lại (token cuối là 1 tag/marker đóng bằng '}') → đẩy đoạn còn lại thành token mới.
+ *
+ * - TOKEN ĐẦU RA có 2 loại, phân biệt bằng việc có bao ngoặc {} hay không:
+ *     + TEXT token: không có ngoặc — text thường (kể cả '{' không đóng, \{ \}).
+ *     + TAG token: có ngoặc {...}, chứa 1+ tag đơn bắt đầu bằng '\' (đã strip phần trước '\' đầu).
+ *
  * @param {string} text line.text dạng raw (chưa stringify).
  * @returns {Array<string>} tokens: text (không bao ngoặc) và tag (có bao ngoặc {}).
  *   - \h / \N / \n đứng NGOÀI tag → wrap thành {\h} / {\N} / {\n} riêng biệt, GIỮ NGUYÊN để
@@ -647,6 +690,27 @@ export function tokenizeLineText(text) {
 	let tagStartIndex = -1;
 	let match;
 
+	/**
+	 * Đẩy 1 token vào result, áp quy tắc làm sạch / hợp nhất RIÊNG cho tag.
+	 *
+	 * Các nhánh (kiểm tra theo thứ tự):
+	 * 1. tok rỗng ('') → bỏ qua.
+	 * 2. Không phải tag (không vừa bắt đầu '{' vừa kết thúc '}') → đẩy NGUYÊN text token.
+	 * 3. Là tag nhưng không có '\' ở vị trí >= 1 (VD {abc} — tag comment thuần) → bỏ qua.
+	 * 4. Là tag có '\' → strip hết phần trước '\' ĐẦU TIÊN (bỏ '{' và phần comment dẫn đầu),
+	 *    rồi bọc lại trong { } thành cleaned (VD {abc\b1} → {\b1}).
+	 * 5. cleaned là marker đứng riêng {\h}/{\N}/{\n} → đẩy NGAY, không bao giờ merge.
+	 * 6. Ngược lại, nếu token trước trong result cũng là tag (không phải marker, không có
+	 *    karaoke) → HỢP NHẤT 2 tag: bỏ '}' của token trước và '{' của cleaned, ghép thành 1 tag
+	 *    liền (VD {\b1} + {\i1} → {\b1\i1}). Chỉ KHÔNG hợp nhất khi cleaned chứa tag karaoke
+	 *    (\k/\K/\kf/\ko) — karaoke phải đứng riêng để đo thời lượng từng syl.
+	 * 7. Còn lại → đẩy cleaned như 1 tag mới.
+	 *
+	 * Lưu ý: chỉ TAG mới được sửa/merge; TEXT luôn đẩy nguyên (như nhánh 2).
+	 *
+	 * @param {string} tok Chuỗi con cắt từ text: có thể là text thường hoặc 1 tag {...}.
+	 * @returns {void}
+	 */
 	const pushToken = (tok) => {
 		if (tok === '') return;
 		// Text → đẩy nguyên (merge chỉ áp cho tag).
@@ -713,35 +777,35 @@ export function tokenizeLineText(text) {
 }
 
 // ==========================================================================
-// ==== TÁCH TAG TRONG TOKEN → SEGMENT (bước ngay sau tokenizeLineText) ====
+// ==== TÁCH TAG TRONG TOKEN → MỤC BASE (bước ngay sau tokenizeLineText) ====
 // ==========================================================================
-// Thứ tự xử lí: tokenizeLineText (token + clean) → segmentsFromTokens (tách các tag đơn
-// trong tag token, ghép với text token kế tiếp thành segment).
+// Thứ tự xử lí: tokenizeLineText (token + clean) → baseFromTokens (tách các tag đơn
+// trong tag token, ghép với text token kế tiếp thành 1 mục base).
 // Phân loại/phân cấp tag (nhóm 2.4 → 2.3 → 2.2 → 2.1) là bước SAU, chưa viết ở bản này.
 //
-// Segment model (theo pipeline): mỗi tag token kết hợp với text token tạo thành 1 segment:
-//   segment = { tags: [...các tag đơn tách từ (các) tag token, raw nguyên văn], text: '...' }
+// BASE MODEL (theo pipeline): mỗi tag token kết hợp với text token tạo thành 1 mục base:
+//   base item = { tags: [...các tag đơn tách từ (các) tag token, raw nguyên văn], text: '...' }
 // - Nhiều tag token đứng LIỀN TIẾP (vd {\b1}{\k25} — tokenizer giữ riêng tag chứa karaoke)
-//   → gộp chung vào tags của 1 segment.
-// - Text token đứng TRƯỚC mọi tag token → segment { tags: [], text }.
-// - Marker {\h}/{\N}/{\n} → flush NGAY thành segment RIÊNG tại đúng vị trí
+//   → gộp chung vào tags của 1 mục base.
+// - Text token đứng TRƯỚC mọi tag token → mục base { tags: [], text }.
+// - Marker {\h}/{\N}/{\n} → flush NGAY thành mục base RIÊNG tại đúng vị trí
 //   { tags: [marker], text: '' }; tag đang pending vẫn chờ text kế tiếp (marker không ăn mất pending).
-// - Tag token THƯỜNG đứng CUỐI dòng (không còn text theo sau) → BỎ (không tạo segment);
-//   marker đứng cuối dòng thì VẪN GIỮ (đã flush thành segment riêng từ lúc gặp).
+// - Tag token THƯỜNG đứng CUỐI dòng (không còn text theo sau) → BỎ (không tạo mục base);
+//   marker đứng cuối dòng thì VẪN GIỮ (đã flush thành mục base riêng từ lúc gặp).
 
-/** Định nghĩa/chú thích object segment sau khi tách
- * @typedef {object} parsedDataFormat.segment Đơn vị nhỏ nhất: 1 cụm tag + 1 đoạn text.
+/** Định nghĩa/chú thích object mục base sau khi tách
+ * @typedef {object} parsedDataFormat.baseItem Đơn vị nhỏ nhất trong base: 1 cụm tag + 1 đoạn text.
  * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
  * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm tầng cuối).
  */
-/** Định nghĩa/chú thích delta theo mức node của segment/run (31aug26 — Chú ý 2 pipeline).
- * ĐỊNH HƯỚNG cho classify (bước 4-7): parser xử lí đến segment thì mỗi segment/run mang
+/** Định nghĩa/chú thích delta theo mức node của mục base (31aug26 — Chú ý 2 pipeline).
+ * ĐỊNH HƯỚNG cho classify (bước 4-7): parser xử lí đến base thì mỗi mục base mang
  * delta tách theo 3 mức giống styleParsedToCss (container / text / data).
- * Renderer chuyển segment thành node container-text TÙY MỨC ĐỘ DELTA:
+ * Renderer chuyển mục base thành node container-text TÙY MỨC ĐỘ DELTA:
  * - delta có container → phải sinh CẶP node container+text MỚI (delta chạm vỏ dòng).
  * - delta chỉ có text  → chỉ sinh node text bên trong container hiện có (đổi ruột chữ).
  * - delta chỉ có data  → không sinh node, chỉ là số liệu cho đo chữ / collision / karaoke.
- * @typedef {object} parsedDataFormat.segmentDelta
+ * @typedef {object} parsedDataFormat.baseItemDelta
  * @property {Object} [container] Tag chạm vỏ dòng (vd \bord/\4c khi borderStyle==3, \clip) → renderer tách container mới.
  * @property {Object} [text] Tag đổi ruột chữ (\fs, \c, \b, \fr...) → renderer chỉ thêm node text.
  * @property {Object} [data] Chỉ số liệu đo/collision (không có CSS tương ứng) → không sinh node.
@@ -769,31 +833,31 @@ export function splitOverrideTags(content) {
 	return tags;
 }
 
-/** [arena.ai] Đổi tokens (đầu ra của tokenizeLineText) thành danh sách segment.
+/** [arena.ai] Đổi tokens (đầu ra của tokenizeLineText) thành danh sách base.
  * @param {Array<string>} tokens Tokens từ tokenizeLineText (text không bao ngoặc / tag có bao ngoặc {}).
- * @returns {Array<parsedDataFormat.segment>} Danh sách segment theo thứ tự trong dòng.
+ * @returns {Array<parsedDataFormat.baseItem>} Danh sách mục base theo thứ tự trong dòng.
  */
-export function segmentsFromTokens(tokens) {
-	const segments = [];
-	if (!Array.isArray(tokens)) return segments;
+export function baseFromTokens(tokens) {
+	const base = [];
+	if (!Array.isArray(tokens)) return base;
 	/** Các tag đơn đang chờ text token kế tiếp. @type {string[]} */
 	let pendingTags = [];
 	for (const tok of tokens) {
 		if (tok.startsWith('{') && tok.endsWith('}')) {
-			// Marker {\h}/{\N}/{\n} → segment RIÊNG tại đúng vị trí (text rỗng); pending giữ nguyên.
+			// Marker {\h}/{\N}/{\n} → mục base RIÊNG tại đúng vị trí (text rỗng); pending giữ nguyên.
 			if (isStandaloneToken(tok)) {
-				segments.push({ tags: [tok.slice(1, -1)], text: '' });
+				base.push({ tags: [tok.slice(1, -1)], text: '' });
 				continue;
 			}
-			// Tag token thường → tách thành các tag đơn, gộp vào pending (các tag token liền nhau chung 1 segment).
+			// Tag token thường → tách thành các tag đơn, gộp vào pending (các tag token liền nhau chung 1 mục base).
 			pendingTags.push(...splitOverrideTags(tok.slice(1, -1)));
 			continue;
 		}
-		// Text token → đóng 1 segment với mọi tag đang chờ.
-		segments.push({ tags: pendingTags, text: tok });
+		// Text token → đóng 1 mục base với mọi tag đang chờ.
+		base.push({ tags: pendingTags, text: tok });
 		pendingTags = [];
 	}
-	// Tag token THƯỜNG cuối dòng không có text theo sau → BỎ (không tạo segment — chốt 27aug26).
-	// Marker không rơi vào đây vì đã flush thành segment riêng ngay khi gặp.
-	return segments;
+	// Tag token THƯỜNG cuối dòng không có text theo sau → BỎ (không tạo mục base — chốt 27aug26).
+	// Marker không rơi vào đây vì đã flush thành mục base riêng ngay khi gặp.
+	return base;
 }
