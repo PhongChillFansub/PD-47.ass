@@ -103,6 +103,13 @@ Object.freeze(FALLBACK_DEFAULT_STYLE); // Khóa chỉ đọc
 const REQUIRED_STYLE_KEYS = Object.keys(FALLBACK_DEFAULT_STYLE);
 /** LogPrefix của parser (utils.logger đã tự thêm "[PD-47.ass] " nên chỉ cần "parser:"). */
 const parserLogPrefix = "parser:";
+/** [arena.ai] Map \an (1-9) → transform-origin, hoisted ra module scope
+ * (tối ưu: không tạo lại object mỗi lần gọi styleParsedToCss). */
+const TRANSFORM_ORIGIN_MAP = Object.freeze({
+	1: '0% 100%', 2: '50% 100%', 3: '100% 100%',
+	4: '0% 50%',  5: '50% 50%',  6: '100% 50%',
+	7: '0% 0%',   8: '50% 0%',   9: '100% 0%',
+});
 /** Chuyển tên trường từ định dạng ASS sang camelCase để sử dụng làm key JavaScript.
  * Ví dụ: "Fontname" -> "fontName", "PrimaryColour" -> "primaryColour".
  *
@@ -191,6 +198,54 @@ function validateAndNormalizeStyle(style) {
 		}
 	}
 	return true;
+}
+/** [arena.ai] Xử lí text của 1 dòng Dialogue theo doStripTags → entry cho lineCss[i]
+ * 
+ * - Chú ý: Strip (truthy — như Aegisub strip tags): đi qua CHUNG tokenizeLineText (không regex raw)
+ *   để edge case đồng nhất 2 chế độ:
+ *   + tag {...} bị xóa hết (kể cả tag comment thuần {abc} — tokenizer đã bỏ);
+ *   + marker \h/\N/\n đứng NGOÀI tag GIỮ NGUYÊN VĂN trong text (Aegisub strip chỉ xóa {...});
+ *   + '{' không đóng giữ nguyên văn như text; \{ \} giữ nguyên văn (renderer unescape tầng cuối);
+ *   + kết quả gộp thành 1 segment duy nhất { tags: [], text }; text rỗng/toàn tag → base = [].
+ *
+ * @param {boolean} doStripTags truthy = như Aegisub strip tags, falsy = ko strip, xử lí tất cả.
+ * @param {string} text line.text dạng raw.
+ * @returns {{base: Array<parsedDataFormat.segment>}} Entry lineCss: { base } (02sep26 — đổi tên
+ *   segments → base; classify bước 4-7 sau này ghi runs trực tiếp vào base + thêm collision, clip).
+ */
+function tagProcess(doStripTags, text) {
+	const tokens = tokenizeLineText(text ?? '');
+	if (!doStripTags) return { base: segmentsFromTokens(tokens) }; // falsy → xử lí tất cả
+	// truthy → strip: nối text token + marker nguyên văn, bỏ mọi tag token.
+	let stripped = '';
+	for (const tok of tokens) {
+		if (isStandaloneToken(tok)) { stripped += tok.slice(1, -1); continue; } // {\N} → '\N' nguyên văn
+		if (tok.startsWith('{') && tok.endsWith('}')) continue; // tag token → xóa
+		stripped += tok; // text token (kể cả '{' không đóng, \{ \})
+	}
+	return { base: stripped === '' ? [] : [{ tags: [], text: stripped }] };
+}
+/** [arena.ai] globalCss làm CHUẨN, suy từ info (đã chuẩn hóa).
+ * Bộ props dùng chung cho MỌI dòng của file sub. Parser nhúng thẳng bộ này vào container
+ * của từng styleCss (styleParsedToCss) → renderer áp container 1 chỗ là đủ, không cần
+ * merge globalCss riêng theo từng style. parsedData.globalCss vẫn giữ làm bản chuẩn
+ * để renderer tham chiếu cho lớp gốc (root layer) của phụ đề.
+ *
+ * Phân mức: toàn bộ props hiện tại đều thuộc mức CONTAINER (wrap/khung dòng).
+ * Nếu sau này có prop mức text thì nhúng vào phần text của styleParsedToCss tương ứng.
+ *
+ * @param {parsedDataFormat.info} [info] Info đã (hoặc chưa) chuẩn hóa — chỉ đọc WrapStyle.
+ * @returns {Object} Bộ props CSS chuẩn: white-space/word-break/overflow-wrap/text-wrap/max-width.
+ */
+function globalCssFromInfo(info = {}) {
+	const wrapStyle = Number(info.WrapStyle ?? 0); // chống string khi info chưa chuẩn hóa
+	return {
+		'white-space': (wrapStyle === 2 ? 'pre' : 'pre-wrap'), // WrapStyle 2: không word wrap
+		'word-break': 'keep-all',
+		'overflow-wrap': 'break-word',
+		'text-wrap': (wrapStyle === 3 ? 'balance' : wrapStyle === 1 ? 'wrap' : 'pretty'),
+		'max-width': '100%',
+	};
 }
 /** Hàm đọc text của file Aegisub.
  * @param {boolean} doStripTags Chế độ xử lí tag cho tagProcess() (chốt 02sep26, bản 2 — boolean):
@@ -404,67 +459,6 @@ export function parser(doStripTags = false, rawText) {
 	utils.log(`${parserLogPrefix} Đã xử lí xong.`, parsedData);	
 	return parsedData;
 }
-/** Xử lí text của 1 dòng Dialogue theo doStripTags → entry cho lineCss[i] (02sep26, bản 2 — boolean).
- * PRIVATE (chốt 02sep26): không export; tests đi qua parser(doStripTags, rawText).
- *
- * Chuẩn hóa doStripTags theo truthy/falsy (chốt 02sep26 bản 2 — đảo từ level số sang boolean):
- * - falsy (false, 0, undefined, null, NaN, ''...) → KHÔNG strip: xử lí đầy đủ như cũ (mặc định an toàn);
- * - truthy → STRIP hết tag.
- *
- * - Không strip (falsy): base = segmentsFromTokens(tokenizeLineText(text)) như trước.
- * - Strip (truthy — như Aegisub strip tags): đi qua CHUNG tokenizeLineText (không regex raw)
- *   để edge case đồng nhất 2 chế độ:
- *   + tag {...} bị xóa hết (kể cả tag comment thuần {abc} — tokenizer đã bỏ);
- *   + marker \h/\N/\n đứng NGOÀI tag GIỮ NGUYÊN VĂN trong text (Aegisub strip chỉ xóa {...});
- *   + '{' không đóng giữ nguyên văn như text; \{ \} giữ nguyên văn (renderer unescape tầng cuối);
- *   + kết quả gộp thành 1 segment duy nhất { tags: [], text }; text rỗng/toàn tag → base = [].
- *
- * @param {boolean} doStripTags truthy = strip, falsy = xử lí tất cả (xem chuẩn hóa ở trên).
- * @param {string} text line.text dạng raw.
- * @returns {{base: Array<parsedDataFormat.segment>}} Entry lineCss: { base } (02sep26 — đổi tên
- *   segments → base; classify bước 4-7 sau này ghi runs trực tiếp vào base + thêm collision, clip).
- */
-function tagProcess(doStripTags, text) {
-	const tokens = tokenizeLineText(text ?? '');
-	if (!doStripTags) return { base: segmentsFromTokens(tokens) }; // falsy → xử lí tất cả
-	// truthy → strip: nối text token + marker nguyên văn, bỏ mọi tag token.
-	let stripped = '';
-	for (const tok of tokens) {
-		if (isStandaloneToken(tok)) { stripped += tok.slice(1, -1); continue; } // {\N} → '\N' nguyên văn
-		if (tok.startsWith('{') && tok.endsWith('}')) continue; // tag token → xóa
-		stripped += tok; // text token (kể cả '{' không đóng, \{ \})
-	}
-	return { base: stripped === '' ? [] : [{ tags: [], text: stripped }] };
-}
-/** [arena.ai] globalCss làm CHUẨN, suy từ info (đã chuẩn hóa).
- * Bộ props dùng chung cho MỌI dòng của file sub. Parser nhúng thẳng bộ này vào container
- * của từng styleCss (styleParsedToCss) → renderer áp container 1 chỗ là đủ, không cần
- * merge globalCss riêng theo từng style. parsedData.globalCss vẫn giữ làm bản chuẩn
- * để renderer tham chiếu cho lớp gốc (root layer) của phụ đề.
- *
- * Phân mức: toàn bộ props hiện tại đều thuộc mức CONTAINER (wrap/khung dòng).
- * Nếu sau này có prop mức text thì nhúng vào phần text của styleParsedToCss tương ứng.
- *
- * @param {parsedDataFormat.info} [info] Info đã (hoặc chưa) chuẩn hóa — chỉ đọc WrapStyle.
- * @returns {Object} Bộ props CSS chuẩn: white-space/word-break/overflow-wrap/text-wrap/max-width.
- */
-function globalCssFromInfo(info = {}) {
-	const wrapStyle = Number(info.WrapStyle ?? 0); // chống string khi info chưa chuẩn hóa
-	return {
-		'white-space': (wrapStyle === 2 ? 'pre' : 'pre-wrap'), // WrapStyle 2: không word wrap
-		'word-break': 'keep-all',
-		'overflow-wrap': 'break-word',
-		'text-wrap': (wrapStyle === 3 ? 'balance' : wrapStyle === 1 ? 'wrap' : 'pretty'),
-		'max-width': '100%',
-	};
-}
-/** [arena.ai 02sep26] Map \an (1-9) → transform-origin, hoisted ra module scope
- * (tối ưu: không tạo lại object mỗi lần gọi styleParsedToCss). */
-const TRANSFORM_ORIGIN_MAP = Object.freeze({
-	1: '0% 100%', 2: '50% 100%', 3: '100% 100%',
-	4: '0% 50%',  5: '50% 50%',  6: '100% 50%',
-	7: '0% 0%',   8: '50% 0%',   9: '100% 0%',
-});
 /** [arena.ai 02sep26] Cache globalCss theo WrapStyle (chỉ 0..3 → tối đa 4 entry).
  * CHỈ dùng nội bộ styleParsedToCss để spread vào container (frozen → an toàn chia sẻ);
  * parsedData.globalCss vẫn lấy object MỚI từ globalCssFromInfo (pure) để renderer tự do dùng.
@@ -503,8 +497,18 @@ function cachedGlobalCss(info) {
  *   - Nhiệm vụ: typography gốc của dòng, làm base cho delta tag \b,\i,\fn,\fs,\fsc,\fsp,\fr,\c...
  *   - Chứa: font-family, font-size (PlayRes px), color (primaryColour),
  *           font-weight/style, text-decoration (u/s), letter-spacing (fsp),
- *           transform: scaleX/Y + rotate (fscx/fscy/fr), transform-origin từ \an,
+ *           transform (02sep26 — review từ hàm cũ styleObjToCss): CHỈ emit khi khác identity
+ *             (R3 — scaleX/Y=100 và angle=0 thì KHÔNG có key transform, tránh compositing thừa);
+ *             thứ tự chuỗi: rotate TRƯỚC scale (R1 — CSS áp phải→trái: scale trước, xoay sau,
+ *             khớp VSFilter scale glyph rồi mới xoay) và rotate(-angle) (R1 — \frz dương của ASS
+ *             quay NGƯỢC chiều kim đồng hồ, CSS rotate dương quay THUẬN → phải đổi dấu).
+ *             transform-origin từ \an LUÔN emit (vô hại, sẵn cho tag \fr override sau).
  *           outline/shadow: nếu borderStyle==1 dùng -webkit-text-stroke + text-shadow,
+ *             (02sep26 — chốt Chromium 131+): stroke-width = outline * 2 vì -webkit-text-stroke
+ *             vẽ viền CÂN GIỮA đường bao glyph (nửa trong nửa ngoài) còn \bord của Aegisub vẽ
+ *             HOÀN TOÀN ra ngoài; nhân đôi + paint-order stroke fill (Chromium 123+ mới áp dụng
+ *             cho HTML text) → nửa trong bị fill che, nửa ngoài đúng outline px như Aegisub.
+ *             --outline-width vẫn giữ giá trị GỐC outline (số liệu thô cho tag override/renderer).
  *           nếu borderStyle==3 thì không stroke (box lo chứa background).
  *   - Kèm CSS variables --primary/--secondary/--outline/--back để tag \1c..\4c override nhanh.
  *
@@ -557,6 +561,15 @@ export function styleParsedToCss (style, info = {}, styleIndex = -1) {
 
 	const decoration = [style.underline ? 'underline' : '', style.strikeOut ? 'line-through' : ''].filter(Boolean).join(' ') || 'none';
 
+	// transform (02sep26 — R1+R3, review từ hàm cũ styleObjToCss):
+	// R3: chỉ emit key transform khi KHÁC identity (đa số style thường sẽ không có key này).
+	// R1: rotate đứng TRƯỚC trong chuỗi (CSS áp phải→trái = scale trước, xoay sau — khớp VSFilter)
+	//     và rotate(-angle) vì \frz dương của ASS quay ngược chiều kim đồng hồ, CSS thì thuận.
+	const transformParts = [];
+	if (style.angle !== 0) transformParts.push(`rotate(${-style.angle}deg)`);
+	if (style.scaleX !== 100) transformParts.push(`scaleX(${style.scaleX / 100})`);
+	if (style.scaleY !== 100) transformParts.push(`scaleY(${style.scaleY / 100})`);
+
 	// text: typography + base transform + outline/shadow
 	const text = {
 		'font-family': `"${style.fontName}", sans-serif`,
@@ -566,7 +579,8 @@ export function styleParsedToCss (style, info = {}, styleIndex = -1) {
 		'font-style': style.italic ? 'italic' : 'normal',
 		'text-decoration': decoration,
 		'letter-spacing': `${style.spacing}px`,
-		'transform': `scaleX(${style.scaleX / 100}) scaleY(${style.scaleY / 100}) rotate(${style.angle}deg)`,
+		// R3 (02sep26): không có transform identity — key chỉ xuất hiện khi thật sự cần
+		...(transformParts.length ? { 'transform': transformParts.join(' ') } : {}),
 		'transform-origin': transformOrigin,
 		'paint-order': 'stroke fill markers', // để stroke không che fill khi dùng -webkit-text-stroke
 		// CSS variables cho tag override nhanh (\c, \2c, \3c, \4c, \bord, \shad)
@@ -578,10 +592,17 @@ export function styleParsedToCss (style, info = {}, styleIndex = -1) {
 		'--shadow-depth': `${style.shadow}px`,
 		'--font-size': `${style.fontSize}px`,
 		...(isBox ? {
+			// R2 (02sep26 — adopt từ hàm cũ styleObjToCss): reset ĐỦ BỘ khi box —
+			// thêm stroke-color transparent + paint-order normal (đè 'stroke fill markers' phía trên)
+			// để renderer reuse node không dính cache style của nhánh outline.
 			'-webkit-text-stroke-width': '0px',
+			'-webkit-text-stroke-color': 'transparent',
+			'paint-order': 'normal',
 			'text-shadow': 'none',
 		} : {
-			'-webkit-text-stroke-width': style.outline ? `${style.outline}px` : '0px',
+			// 02sep26 (chốt Chromium 131+): outline * 2 — stroke vẽ cân giữa, fill che nửa trong
+			// (paint-order stroke fill, HTML text cần Chromium 123+) → viền ngoài đúng outline px như \bord.
+			'-webkit-text-stroke-width': style.outline ? `${style.outline * 2}px` : '0px',
 			'-webkit-text-stroke-color': style.outlineColour,
 			'text-shadow': style.shadow ? `${style.shadow}px ${style.shadow}px ${style.backColour}` : 'none',
 		}),

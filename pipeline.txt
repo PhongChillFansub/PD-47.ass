@@ -1,4 +1,4 @@
-29aug26
+02sep26
 popup:
     popup.html
     popup.js
@@ -405,6 +405,43 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
         - data spread đủ field + styleIndex đúng (kể cả last-wins giữ index cũ);
         - container/text không đổi hành vi sau tối ưu, output parser vẫn mutate được (cache frozen
           không lộ ra ngoài).
+
+    5. Baseline Chromium 131+ (chốt 02sep26 — extension luôn chạy Chromium 131+):
+        - Rà toàn bộ key CSS của styleParsedToCss/globalCssFromInfo: KHÔNG key nào cần đổi.
+          Key "trẻ" nhất: paint-order trên HTML text (Chromium 123+ — trước đó chỉ SVG),
+          text-wrap: balance (114) / pretty (117); shorthand text-wrap vẫn hợp lệ sau khi
+          Chromium 130 tách text-wrap-mode/text-wrap-style. → baseline thực tế của bộ CSS
+          hiện tại là 123, dưới 131 → dư an toàn. text-box-trim (133+) CHƯA dùng được.
+        - ÁP DỤNG stroke ×2 (chốt): -webkit-text-stroke-width = outline * 2 khi borderStyle==1,
+          vì -webkit-text-stroke vẽ viền CÂN GIỮA đường bao glyph (nửa trong nửa ngoài) còn
+          \bord của Aegisub/libass vẽ HOÀN TOÀN ra ngoài fill; nhân đôi + paint-order stroke fill
+          → nửa trong bị fill che, nửa ngoài còn đúng outline px (khớp Aegisub).
+          CHỈ đổi GIÁ TRỊ stroke-width; --outline-width và data.outline vẫn giữ số GỐC outline
+          (số liệu thô cho tag override \bord và renderer scale ScaledBorderAndShadow).
+          Box (borderStyle==3) không đổi: padding = outline px (không nhân đôi), stroke = 0.
+
+    6. Review hàm cũ styleObjToCss (02sep26 — user đưa bản v0.0.x "ChatGPT vibe" để đối chiếu):
+        - Hàm cũ XÁC NHẬN stroke ×2 (điểm 5) — hai bản độc lập cùng kết luận.
+        - R1 (ĐÃ LÀM 02sep26 — hàm cũ giúp phát hiện 2 bug transform của bản hiện tại):
+            + rotate(-angle): \frz dương của ASS quay NGƯỢC chiều kim đồng hồ, CSS rotate dương
+              quay THUẬN → phải đổi dấu (trước đó phát rotate(angle) — ngược chiều Aegisub).
+            + Thứ tự chuỗi: rotate TRƯỚC scaleX/scaleY — CSS áp phải→trái nên scale chạy trước,
+              xoay sau (khớp VSFilter: scale glyph rồi mới xoay; trước đó 'scale... rotate' làm
+              scale không đều méo chữ đã xoay).
+        - R2 (ĐÃ LÀM — adopt): box (borderStyle==3) reset ĐỦ BỘ: -webkit-text-stroke-width 0px
+          + stroke-color transparent + paint-order normal + text-shadow none (chống lỗi cache
+          style khi renderer reuse node; trước chỉ reset width + text-shadow).
+        - R3 (ĐÃ LÀM — adopt): CHỈ emit key transform khi khác identity (scaleX/Y ≠ 100 hoặc
+          angle ≠ 0) — đa số style thường không còn key transform → tránh compositing thừa.
+          transform-origin vẫn LUÔN emit (vô hại, sẵn cho \fr override).
+        - KHÔNG adopt từ hàm cũ (trái kiến trúc đã chốt hoặc bug):
+            + container full-screen flex overlay + định vị bằng padding/align — kiến trúc mình:
+              renderer set left/top theo an+margin+pos, parser thuần PlayRes;
+            + cssConfig (globalCss) spread vào TEXT — mình đã chốt nhúng vào CONTAINER (Chú ý 2);
+            + font-size nhân CSSResize tại parser — mình chốt renderer mới scale;
+            + bug của hàm cũ: textTransforms.push thiếu overrideState. + biến angle chưa khai báo
+              (ReferenceError khi angle ≠ 0), line-height không nhân CSSResize trong khi font-size
+              có, outlinePx là string toFixed, text.textAlign camelCase nhét metadata vào CSS obj.
 
     Next steps checklist (bổ sung vào checklist 29aug26):
     [x] 9. Chế độ strip trong tagProcess (bản 2: boolean doStripTags, truthy=strip/falsy=all) + đổi lineCss { segments } → { base } — ĐÃ LÀM 02sep26
