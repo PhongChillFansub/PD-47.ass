@@ -215,7 +215,7 @@ function validateAndNormalizeStyle(style) {
  */
 function tagProcess(doStripTags, text) {
 	const tokens = tokenizeLineText(text ?? '');
-	if (!doStripTags) return { base: segmentsFromTokens(tokens) }; // falsy → xử lí tất cả
+	if (!doStripTags) return { base: baseFromTokens(tokens) }; // falsy → xử lí tất cả
 	// truthy → strip: nối text token + marker nguyên văn, bỏ mọi tag token.
 	let stripped = '';
 	for (const tok of tokens) {
@@ -479,7 +479,7 @@ function cachedGlobalCss(info) {
  * 29aug26 — bước 3: phân tích kĩ container / text / data
  * 31aug26 — Chú ý 2 pipeline: container chứa sẵn globalCss (chuẩn); delta theo mức node
  *           {container, text, data} cho classify (bước 4-7) — xem typedef
- *           parsedDataFormat.baseItemDelta bên dưới segmentsFromTokens.
+ *           parsedDataFormat.baseItemDelta bên dưới baseFromTokens.
  *
  * Triết lý:
  * - Parser KHÔNG đo chữ thật, KHÔNG scale sang video thật. Mọi px giữ theo PlayRes.
@@ -634,7 +634,7 @@ export function isStandaloneToken(tok) {
 /** [arena.ai] Tokenize + làm sạch nội dung dòng (tiền xử lí tag override).
  *
  * Mục tiêu: biến line.text thô (một chuỗi đan xen text thường và tag {...}) thành một mảng
- * token ĐÃ LÀM SẠCH — để bước sau (segmentsFromTokens) chỉ việc ghép tag + text thành base
+ * token ĐÃ LÀM SẠCH — để bước sau (baseFromTokens) chỉ việc ghép tag + text thành base
  * mà không cần bận tâm các "lỗi đánh máy" hay gặp: tag rỗng, tag comment thuần, 2 tag liền
  * nhau, tag bắt đầu bằng comment lẫn '\', \{ \}, '{' không đóng, '}' thừa...
  *
@@ -779,7 +779,7 @@ export function tokenizeLineText(text) {
 // ==========================================================================
 // ==== TÁCH TAG TRONG TOKEN → MỤC BASE (bước ngay sau tokenizeLineText) ====
 // ==========================================================================
-// Thứ tự xử lí: tokenizeLineText (token + clean) → segmentsFromTokens (tách các tag đơn
+// Thứ tự xử lí: tokenizeLineText (token + clean) → baseFromTokens (tách các tag đơn
 // trong tag token, ghép với text token kế tiếp thành 1 mục base).
 // Phân loại/phân cấp tag (nhóm 2.4 → 2.3 → 2.2 → 2.1) là bước SAU, chưa viết ở bản này.
 //
@@ -837,7 +837,7 @@ export function splitOverrideTags(content) {
  * @param {Array<string>} tokens Tokens từ tokenizeLineText (text không bao ngoặc / tag có bao ngoặc {}).
  * @returns {Array<parsedDataFormat.baseItem>} Danh sách mục base theo thứ tự trong dòng.
  */
-export function segmentsFromTokens(tokens) {
+export function baseFromTokens(tokens) {
 	const base = [];
 	if (!Array.isArray(tokens)) return base;
 	/** Các tag đơn đang chờ text token kế tiếp. @type {string[]} */
