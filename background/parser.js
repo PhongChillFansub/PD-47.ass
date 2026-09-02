@@ -459,6 +459,7 @@ export function parser(doStripTags = false, rawText) {
 	utils.log(`${parserLogPrefix} Đã xử lí xong.`, parsedData);	
 	return parsedData;
 }
+
 /** [arena.ai 02sep26] Cache globalCss theo WrapStyle (chỉ 0..3 → tối đa 4 entry).
  * CHỈ dùng nội bộ styleParsedToCss để spread vào container (frozen → an toàn chia sẻ);
  * parsedData.globalCss vẫn lấy object MỚI từ globalCssFromInfo (pure) để renderer tự do dùng.
