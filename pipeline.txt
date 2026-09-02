@@ -149,15 +149,17 @@ parser.js — xử lí tag override (kế hoạch + ĐÃ LÀM 27-29aug26)
 
     Quyết định / ràng buộc:
     - Run model = hybrid: mỗi run/syl lưu style gốc của dòng (từ \r) + danh sách delta tag.
-    - parser là NAMED export (chốt 27aug26, cập nhật 31aug26): `export function parser(tagProcessLevel = 0, rawText)`
-      — tagProcessLevel để dành cho tagProcess() sau này (xem comment ở parser.js); tests gọi parser(0, rawText);
+    - parser là NAMED export (chốt 27aug26, cập nhật 31aug26 + 02sep26 bản 2): `export function parser(doStripTags = false, rawText)`
+      — doStripTags (boolean, 02sep26 bản 2: truthy = strip tags, falsy = xử lí tất cả) dùng cho tagProcess();
+      tests gọi parser(false, rawText) / parser(true, rawText);
       background viết: import { parser } from './parser.js' (đồng bộ fetcher/storage, KHÔNG dùng default).
     - Parser KHÔNG đo kích thước chữ thật, KHÔNG dùng OffscreenCanvas: mọi tọa độ (pos/move)
       giữ nguyên theo PlayResX/PlayResY trong file sub. Renderer mới scale sang kích thước thật,
       đo kích thước chữ thật và xử lí collision.
-    - parser() KHÔNG đụng orgline/parsedData.events. Segments ghi vào
-      parsedData.lineCss[i] = { segments } với i CÙNG CHỈ SỐ với parsedData.events
-      (push cùng lúc events.push; Dialogue ngắt dòng/continuation → lineCss.pop() theo events.pop()).
+    - parser() KHÔNG đụng orgline/parsedData.events. Base (segment tag-text) ghi vào
+      parsedData.lineCss[i] = { base } với i CÙNG CHỈ SỐ với parsedData.events
+      (02sep26: đổi tên key segments → base — xem mục 02sep26 cuối file;
+      push cùng lúc events.push; Dialogue ngắt dòng/continuation → lineCss.pop() theo events.pop()).
     - \t / \move: defer — parser chỉ lưu nguyên văn tag, KHÔNG resolve theo thời gian.
       Renderer resolve trong JS ở mỗi tick rvfc (dùng metadata.mediaTime), KHÔNG dùng CSS
       transition/animation (để khi end-user pause video, rvfc ngừng bắn → transform tự đứng yên).
@@ -223,7 +225,8 @@ parser.js — xử lí tag override (kế hoạch + ĐÃ LÀM 27-29aug26)
           - Raw: fontName, fontSize, primary/secondary/outline/backColour (rgba), bold, italic, underline, strikeOut,
                  scaleX/Y, spacing, angle, borderStyle, isBox (borderStyle==3), outline, shadow,
                  alignment, hAlign (left/center/right), transformOrigin, marginL/R/V, encoding,
-          - Info: playResX/Y, scaledBorderAndShadow (từ info) để renderer quyết định outline/shadow có scale theo video không.
+          - Info: (BỎ 02sep26 bản 3) playResX/Y, scaledBorderAndShadow KHÔNG còn duplicate vào data —
+            renderer đọc thẳng từ parsedData.info (hằng số toàn file, 1 nguồn sự thật, tránh stale).
           - Dùng cho: đo chữ, collision, karaoke (\2c), tag override \bord/\shad/\c...
 
         Ví dụ output (PlayRes 1280x720, an=7, borderStyle=3, outline=5, shadow=3, WrapStyle=0):
@@ -231,7 +234,7 @@ parser.js — xử lí tag override (kế hoạch + ĐÃ LÀM 27-29aug26)
                       white-space:pre-wrap, word-break:keep-all, overflow-wrap:break-word, text-wrap:pretty, max-width:100%,   // = globalCss chuẩn (Chú ý 2)
                       background-color:rgba(255,255,0,1), padding:5px, box-shadow:3px 3px rgba(0,0,0,1)}
           text: {font-family:"Arial", font-size:30px, color:rgba(255,255,255,1), font-weight:700, transform:scaleX(1.2) scaleY(0.8) rotate(15deg), transform-origin:0% 0%, ...}
-          data: {name:BoxStyle, fontSize:30, alignment:7, hAlign:left, isBox:true, playResX:1280, playResY:720, scaledBorderAndShadow:true, ...}
+          data: {name:BoxStyle, fontSize:30, alignment:7, hAlign:left, isBox:true, styleIndex:0, ...}   // 02sep26 bản 3: không còn playResX/Y, scaledBorderAndShadow (đọc từ info)
 
     TIẾP THEO: hàm phân loại tag (classify) đọc segments → tách run theo nhóm 2.4 (layout local),
       rồi 2.3 (decoration), 2.2 (collision), 2.1 (clip). Xem chi tiết 29aug26 notes bên dưới.
@@ -265,6 +268,9 @@ Câu hỏi: có nên viết styleCss trước khi xử lí tag?
   - ĐÃ LÀM 29aug26: implement styleParsedToCss chi tiết như trên, với container/text/data tách bạch.
 
 Đề xuất struct lineCss sau classify (tương lai):
+    (CẬP NHẬT 02sep26 — xem mục 02sep26 cuối file: BỎ styleName/styleIndex khỏi lineCss
+     (styleIndex chuyển vào styleCss[i].data, name đã có trong data); segments đổi tên → base;
+     runs sẽ ghi TRỰC TIẾP vào base thay vì lưu song song → struct đích: { base, collision, clip }.)
     parsedData.lineCss[i] = {
         styleName: orgline.style, // tên style gốc
         styleIndex: index trong styles (lookup nhanh, fallback về 0/Default nếu không tìm thấy)
@@ -322,7 +328,7 @@ Next steps checklist (29aug26, cập nhật 31aug26):
           Chú ý 2 — globalCssFromInfo(info) làm CHUẨN; giữ parsedData.globalCss làm bản chuẩn cho renderer,
           đồng thời nhúng toàn bộ props (hiện đều mức container) vào container của styleParsedToCss.
           Struct delta segment đã chốt (xem "Cập nhật 31aug26" bên trên). Tests mới: "Chú ý 2".
-          Kèm theo: tests gọi parser(0, rawText) theo chữ ký parser(tagProcessLevel = 0, rawText).
+          Kèm theo: tests gọi parser(false, rawText) theo chữ ký parser(doStripTags = false, rawText) (02sep26 bản 2; trước đó là parser(0, rawText)).
     [x] 1. Chuyển style chuẩn hóa + styleCss vào push (line 304) + fix bug validate + last-wins — ĐÃ LÀM 29aug26
     [x] 2. Dọn pipeline line 192+ — gộp 27aug26 notes lên trên, xóa đoạn trùng — ĐÃ LÀM 29aug26
     [x] 3. Viết styleParsedToCss chi tiết: container/text/data tách bạch, map ASS → CSS, transform-origin từ \an, box vs outline — ĐÃ LÀM 29aug26 (bước 3)
@@ -344,3 +350,63 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
       toàn bộ props hiện tại (đều mức container) nhúng sẵn vào container của styleParsedToCss.
       Phần delta segment: đã chốt mô hình (typedef parsedDataFormat.segmentDelta trong parser.js +
       mục "Cập nhật 31aug26" trong struct lineCss), thực hiện khi viết classify (bước 4-7).
+
+02sep26 — tagProcess strip mode + đổi shape lineCss + tối ưu styleParsedToCss (đã hỏi/chốt từng điểm với chủ repo)
+
+    1. tagProcess(doStripTags, text) — chế độ xử lí (chốt; BẢN 2 cùng ngày: đổi từ level số 0/1
+       sang boolean doStripTags — truthy = STRIP, falsy = xử lí tất cả):
+        - Chuẩn hóa: theo truthy/falsy thuần JS. falsy (false, 0, undefined, null, NaN, '')
+          → xử lí đầy đủ như cũ (mặc định an toàn, default = false); truthy (true, 1, 'x', {}...)
+          → strip hết tag.
+        - Không strip (falsy): base = segmentsFromTokens(tokenizeLineText(text)) — như trước.
+        - Strip (truthy — như Aegisub strip tags): đi qua CHUNG tokenizeLineText (chốt: KHÔNG regex raw)
+          để edge case đồng nhất 2 chế độ:
+            + tag {...} xóa hết (kể cả tag comment thuần {abc} — tokenizer đã bỏ sẵn);
+            + marker \h/\N/\n đứng NGOÀI tag GIỮ NGUYÊN VĂN trong text (đúng Aegisub strip:
+              chỉ xóa {...}, không đụng \N) — renderer xử lí ngữ nghĩa sau;
+            + '{' không đóng giữ nguyên văn như text; \{ \} giữ nguyên văn (renderer unescape tầng cuối);
+            + kết quả gộp 1 segment duy nhất { tags: [], text: stripped };
+              text rỗng/dòng toàn tag → base = [] (chốt: rỗng, không segment thừa).
+        - tagProcess giữ PRIVATE (chốt: không export) — tests đi qua parser(doStripTags, rawText).
+
+    2. lineCss[i] đổi shape (chốt 02sep26 — THAY THẾ struct đề xuất 29aug26):
+        - Hiện tại: lineCss[i] = { base } (đổi tên key segments → base).
+        - Tương lai (classify bước 4-7): runs ghi TRỰC TIẾP vào base (không lưu song song
+          segments/runs) + thêm key collision, clip → struct đích: { base, collision, clip }.
+        - BỎ styleName/styleIndex khỏi lineCss:
+            + name đã có sẵn trong styleCss[i].data.name;
+            + styleIndex chuyển vào styleCss[i].data.styleIndex (gán lúc push trong parser;
+              last-wins trùng tên giữ NGUYÊN chỉ số cũ → styles[i] ↔ styleCss[i] vẫn đồng bộ);
+            + line tra style qua events[i].style (tên) → renderer lookup index qua styleCss data.
+
+    3. Tối ưu styleParsedToCss (chốt: hiệu năng + gọn data, đổi shape nhẹ phần data):
+        - Hoist TRANSFORM_ORIGIN_MAP ra module scope (frozen — không tạo lại object mỗi call).
+        - GLOBAL_CSS_CACHE: cache globalCss theo WrapStyle (tối đa 4 entry, frozen), CHỈ dùng
+          nội bộ để spread vào container; globalCssFromInfo vẫn PURE (object mới) cho
+          parsedData.globalCss → renderer mutate bản của mình thoải mái, không lây giữa các parse.
+        - data = { ...style, isBox, hAlign, transformOrigin, styleIndex } — spread thay cho
+          liệt kê tay 20+ field; field style mới tự theo. Bộ key ra không mất field STYLE nào
+          so với bản cũ, chỉ THÊM styleIndex.
+          (BẢN 3 cùng ngày — chốt với chủ repo): BỎ playResX/playResY/scaledBorderAndShadow
+          khỏi data — 3 giá trị này là hằng số TOÀN FILE, đã có trong parsedData.info
+          (renderer nhận cả parsedData nên đọc info trực tiếp); duplicate theo từng style
+          vừa thừa vừa rủi ro stale (file dị dạng đặt [V4+ Styles] trước [Script Info] →
+          data chụp fallback 640x480 lúc push, info sau đó mới cập nhật giá trị thật).
+          info trong chữ ký giờ CHỈ dùng lấy globalCss (WrapStyle) nhúng vào container.
+        - Chữ ký mới: styleParsedToCss(style, info = {}, styleIndex = -1)
+          (-1 = gọi rời không biết chỉ số; parser luôn truyền chỉ số thật).
+
+    4. Tests (tests/parser.test.mjs): đổi .segments → .base toàn bộ; thêm block "02sep26"
+       (bản 2: viết theo boolean doStripTags):
+        - doStripTags=true strip + marker nguyên văn + orgline không bị đụng;
+        - truthy (true, 1, 2, 'x', {}) đều strip; falsy (false, 0, undefined, null, NaN, '')
+          đều xử lí đầy đủ (mặc định an toàn);
+        - dòng toàn tag → base = []; edge case '{' không đóng / comment {abc} / \{ \};
+        - data spread đủ field + styleIndex đúng (kể cả last-wins giữ index cũ);
+        - container/text không đổi hành vi sau tối ưu, output parser vẫn mutate được (cache frozen
+          không lộ ra ngoài).
+
+    Next steps checklist (bổ sung vào checklist 29aug26):
+    [x] 9. Chế độ strip trong tagProcess (bản 2: boolean doStripTags, truthy=strip/falsy=all) + đổi lineCss { segments } → { base } — ĐÃ LÀM 02sep26
+    [x] 10. styleIndex vào styleCss[i].data + tối ưu styleParsedToCss (hoist map, cache globalCss, spread data) — ĐÃ LÀM 02sep26
+    [ ] 11. Khi viết classify (bước 4-7): runs ghi trực tiếp vào base, thêm collision/clip theo struct đích { base, collision, clip }
