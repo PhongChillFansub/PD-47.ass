@@ -460,7 +460,7 @@ export function parser(doStripTags = false, rawText) {
 	return parsedData;
 }
 
-/** [arena.ai 02sep26] Cache globalCss theo WrapStyle (chỉ 0..3 → tối đa 4 entry).
+/** [arena.ai] Cache globalCss theo WrapStyle (chỉ 0..3 → tối đa 4 entry).
  * CHỈ dùng nội bộ styleParsedToCss để spread vào container (frozen → an toàn chia sẻ);
  * parsedData.globalCss vẫn lấy object MỚI từ globalCssFromInfo (pure) để renderer tự do dùng.
  * @type {Map<number, Object>} */
@@ -475,7 +475,7 @@ function cachedGlobalCss(info) {
 	}
 	return cached;
 }
-/** Chuyển đổi style đã chuẩn hóa thành object CSS.
+/** [arena.ai] Chuyển đổi style đã chuẩn hóa thành object CSS.
  * 29aug26 — bước 3: phân tích kĩ container / text / data
  * 31aug26 — Chú ý 2 pipeline: container chứa sẵn globalCss (chuẩn); delta segment theo
  *           mức node {container, text, data} cho classify (bước 4-7) — xem typedef
