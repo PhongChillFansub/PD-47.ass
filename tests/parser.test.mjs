@@ -420,8 +420,81 @@ test('02sep26 tối ưu KHÔNG đổi hành vi: container vẫn nhúng đủ glo
 	assert.equal(container['background-color'], 'transparent'); // borderStyle 1
 	assert.equal(text['font-family'], '"Arial", sans-serif');
 	assert.equal(text['font-size'], '20px');
-	assert.equal(text['-webkit-text-stroke-width'], '2px');
+	// 02sep26 (Chromium 131+): stroke ×2 — outline=2 → stroke-width 4px, nửa ngoài đúng 2px như \bord
+	assert.equal(text['-webkit-text-stroke-width'], '4px');
+	assert.equal(text['paint-order'], 'stroke fill markers'); // cần Chromium 123+ cho HTML text
+	assert.equal(text['--outline-width'], '2px'); // var giữ giá trị GỐC outline (số liệu thô)
 	// globalCss cache (frozen) chỉ để spread — object trả về của parser vẫn mutate được bình thường
 	assert.doesNotThrow(() => { parsed.globalCss['max-width'] = '99%'; });
 	assert.doesNotThrow(() => { container['max-width'] = '99%'; });
+});
+
+test('02sep26 Chromium 131+: stroke ×2 chỉ áp cho -webkit-text-stroke-width, outline=0 và box không stroke', () => {
+	// outline=0 → stroke-width 0px (không thành '0px' nhân đôi kiểu NaN)
+	const assNoOutline = MINI_ASS.replace(
+		'Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1',
+		'Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,2,2,10,10,10,1'
+	);
+	const noOutline = parser(false, assNoOutline);
+	assert.equal(noOutline.styleCss[0].text['-webkit-text-stroke-width'], '0px');
+	// borderStyle=3 (box): không stroke, outline làm padding của box (KHÔNG nhân đôi)
+	const assBox = MINI_ASS.replace(
+		'Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1',
+		'Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,3,2,2,2,10,10,10,1'
+	);
+	const box = parser(false, assBox);
+	assert.equal(box.styleCss[0].text['-webkit-text-stroke-width'], '0px');
+	assert.equal(box.styleCss[0].container['padding'], '2px');
+	// data.outline vẫn là số GỐC (2), không bị nhân đôi
+	assert.equal(box.styleCss[0].data.outline, 2);
+	assert.equal(noOutline.styleCss[0].data.outline, 0);
+});
+
+// ======================================================================
+// 02sep26 — R1/R2/R3 (review từ hàm cũ styleObjToCss)
+// R1: rotate(-angle), rotate đứng TRƯỚC scale trong chuỗi transform
+// R2: box reset đủ bộ (stroke-color transparent + paint-order normal)
+// R3: chỉ emit transform khi khác identity
+// ======================================================================
+
+test('02sep26 R3: style thường (scale 100/100, angle 0) → KHÔNG có key transform, vẫn có transform-origin', () => {
+	const parsed = parser(false, MINI_ASS);
+	const text = parsed.styleCss[0].text;
+	assert.equal(text['transform'], undefined);
+	assert.equal(text['transform-origin'], '50% 100%'); // an=2 vẫn giữ (sẵn cho \fr override)
+});
+
+test('02sep26 R1: angle/scale ≠ mặc định → rotate(-angle) đứng TRƯỚC scaleX/scaleY', () => {
+	// Angle=15, ScaleX=120, ScaleY=80
+	const ass = MINI_ASS.replace(
+		'Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1',
+		'Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,120,80,0,15,1,2,2,2,10,10,10,1'
+	);
+	const parsed = parser(false, ass);
+	// CSS áp phải→trái: scaleY → scaleX → rotate (scale trước, xoay sau — khớp VSFilter);
+	// dấu ÂM vì \frz dương quay ngược chiều kim đồng hồ còn CSS rotate dương quay thuận.
+	assert.equal(parsed.styleCss[0].text['transform'], 'rotate(-15deg) scaleX(1.2) scaleY(0.8)');
+});
+
+test('02sep26 R1: angle âm → rotate dương; chỉ 1 thành phần khác mặc định thì chỉ emit thành phần đó', () => {
+	const ass = MINI_ASS.replace(
+		'Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1',
+		'Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,-30,1,2,2,2,10,10,10,1'
+	);
+	const parsed = parser(false, ass);
+	assert.equal(parsed.styleCss[0].text['transform'], 'rotate(30deg)');
+});
+
+test('02sep26 R2: box (borderStyle=3) reset đủ bộ — stroke-color transparent, paint-order normal', () => {
+	const ass = MINI_ASS.replace(
+		'Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1',
+		'Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,3,2,2,2,10,10,10,1'
+	);
+	const parsed = parser(false, ass);
+	const text = parsed.styleCss[0].text;
+	assert.equal(text['-webkit-text-stroke-width'], '0px');
+	assert.equal(text['-webkit-text-stroke-color'], 'transparent');
+	assert.equal(text['paint-order'], 'normal');
+	assert.equal(text['text-shadow'], 'none');
+	// nhánh thường (test khác đã cover): paint-order vẫn 'stroke fill markers'
 });
