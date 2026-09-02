@@ -49,8 +49,9 @@ import * as utils from './utils.js';
  * @property {Array<parsedDataFormat.style>} styles lưu các style của file sub (nếu style không được chuẩn thì fallback cả style về FALLBACK_DEFAULT_STYLE resize)
  * @property {Array<parsedDataFormat.event>} events lưu các events (dialogue) của file sub
  * @property {object} globalCss định dạng các thuộc tính info (có thể chuyển) thành CSS
- * @property {Array} styleCss định dạng các style thành CSS
- * @property {Array} lineCss danh sách các style cho node span của chữ và viền v.v.
+ * @property {Array} styleCss định dạng các style thành CSS ({container, text, data} — data chứa cả styleIndex, 02sep26)
+ * @property {Array} lineCss mỗi phần tử { base } cùng chỉ số với events — base là danh sách segment tag-text
+ *   (02sep26: đổi tên segments → base; classify bước 4-7 sẽ ghi runs trực tiếp vào base + thêm collision, clip)
  */
 /** Định nghĩa/chú thích object parsedData.info sau xử lí 
  * @typedef {object} parsedDataFormat.info
@@ -192,11 +193,13 @@ function validateAndNormalizeStyle(style) {
 	return true;
 }
 /** Hàm đọc text của file Aegisub.
- * @param {number} tagProcessLevel Mức độ xử lí tag (0: xử lí tất cả, 1: chỉ xử lí style = strip tags), dùng cho tagProcess()
+ * @param {boolean} doStripTags Chế độ xử lí tag cho tagProcess() (chốt 02sep26, bản 2 — boolean):
+ *   truthy (true, 1, 'x'...) → STRIP: xóa hết tag trong text (như Aegisub strip tags, marker \N/\h/\n giữ nguyên văn);
+ *   falsy (false, 0, undefined, null, NaN, ''...) → xử lí tất cả tag như bình thường (mặc định an toàn).
  * @param {string} rawText Nội dung file ASS đầu vào dưới dạng text.
  * @returns {parsedDataFormat.global} Object chứa dữ liệu parser đã chuẩn hóa và CSS tương ứng.
  */
-export function parser(tagProcessLevel = 0, rawText) {
+export function parser(doStripTags = false, rawText) {
 	/** Dữ liệu tệp phụ đề.
 	 * 
 	 * Info lưu dưới dạng obj do file sub có cấu trúc key: value
@@ -331,11 +334,13 @@ export function parser(tagProcessLevel = 0, rawText) {
 				const existingIdx = parsedData.styles.findIndex(s => s.name === style.name);
 				if (existingIdx !== -1) {
 				parsedData.styles[existingIdx] = style;
-				parsedData.styleCss[existingIdx] = styleParsedToCss(style, parsedData.info);
+				// 02sep26: last-wins giữ NGUYÊN chỉ số cũ → styleIndex = existingIdx
+				parsedData.styleCss[existingIdx] = styleParsedToCss(style, parsedData.info, existingIdx);
 				continue;
 				}
 				parsedData.styles.push(style);
-				parsedData.styleCss.push(styleParsedToCss(style, parsedData.info));
+				// 02sep26: style vừa push nằm cuối → styleIndex = length - 1 (lưu vào data.styleIndex)
+				parsedData.styleCss.push(styleParsedToCss(style, parsedData.info, parsedData.styles.length - 1));
 			}
 		} else if (currentSection === '[Events]') {
 			// Trong đoạn Events, cấu trúc cũng tương tự đoạn Styles.
@@ -390,8 +395,8 @@ export function parser(tagProcessLevel = 0, rawText) {
 				orgline.raw = line; // Lưu lại chuỗi gốc đề phòng dòng tiếp theo bị ngắt
 				parsedData._lastRawDialogue = orgline; // Lưu tham chiếu dòng dialogue mới nhất
 				parsedData.events.push(orgline);
-				// segments của dòng ghi vào lineCss (cùng chỉ số với events), KHÔNG thay đổi orgline
-				parsedData.lineCss.push(tagProcess(tagProcessLevel, orgline.text))
+				// base (segment tag-text) của dòng ghi vào lineCss (cùng chỉ số với events), KHÔNG thay đổi orgline
+				parsedData.lineCss.push(tagProcess(doStripTags, orgline.text))
     		}
 		}
 	}
@@ -399,8 +404,37 @@ export function parser(tagProcessLevel = 0, rawText) {
 	utils.log(`${parserLogPrefix} Đã xử lí xong.`, parsedData);	
 	return parsedData;
 }
-function tagProcess(level, text) {
-	return { segments: segmentsFromTokens(tokenizeLineText(text ?? '')) };
+/** Xử lí text của 1 dòng Dialogue theo doStripTags → entry cho lineCss[i] (02sep26, bản 2 — boolean).
+ * PRIVATE (chốt 02sep26): không export; tests đi qua parser(doStripTags, rawText).
+ *
+ * Chuẩn hóa doStripTags theo truthy/falsy (chốt 02sep26 bản 2 — đảo từ level số sang boolean):
+ * - falsy (false, 0, undefined, null, NaN, ''...) → KHÔNG strip: xử lí đầy đủ như cũ (mặc định an toàn);
+ * - truthy → STRIP hết tag.
+ *
+ * - Không strip (falsy): base = segmentsFromTokens(tokenizeLineText(text)) như trước.
+ * - Strip (truthy — như Aegisub strip tags): đi qua CHUNG tokenizeLineText (không regex raw)
+ *   để edge case đồng nhất 2 chế độ:
+ *   + tag {...} bị xóa hết (kể cả tag comment thuần {abc} — tokenizer đã bỏ);
+ *   + marker \h/\N/\n đứng NGOÀI tag GIỮ NGUYÊN VĂN trong text (Aegisub strip chỉ xóa {...});
+ *   + '{' không đóng giữ nguyên văn như text; \{ \} giữ nguyên văn (renderer unescape tầng cuối);
+ *   + kết quả gộp thành 1 segment duy nhất { tags: [], text }; text rỗng/toàn tag → base = [].
+ *
+ * @param {boolean} doStripTags truthy = strip, falsy = xử lí tất cả (xem chuẩn hóa ở trên).
+ * @param {string} text line.text dạng raw.
+ * @returns {{base: Array<parsedDataFormat.segment>}} Entry lineCss: { base } (02sep26 — đổi tên
+ *   segments → base; classify bước 4-7 sau này ghi runs trực tiếp vào base + thêm collision, clip).
+ */
+function tagProcess(doStripTags, text) {
+	const tokens = tokenizeLineText(text ?? '');
+	if (!doStripTags) return { base: segmentsFromTokens(tokens) }; // falsy → xử lí tất cả
+	// truthy → strip: nối text token + marker nguyên văn, bỏ mọi tag token.
+	let stripped = '';
+	for (const tok of tokens) {
+		if (isStandaloneToken(tok)) { stripped += tok.slice(1, -1); continue; } // {\N} → '\N' nguyên văn
+		if (tok.startsWith('{') && tok.endsWith('}')) continue; // tag token → xóa
+		stripped += tok; // text token (kể cả '{' không đóng, \{ \})
+	}
+	return { base: stripped === '' ? [] : [{ tags: [], text: stripped }] };
 }
 /** [arena.ai] globalCss làm CHUẨN, suy từ info (đã chuẩn hóa).
  * Bộ props dùng chung cho MỌI dòng của file sub. Parser nhúng thẳng bộ này vào container
@@ -423,6 +457,28 @@ function globalCssFromInfo(info = {}) {
 		'text-wrap': (wrapStyle === 3 ? 'balance' : wrapStyle === 1 ? 'wrap' : 'pretty'),
 		'max-width': '100%',
 	};
+}
+/** [arena.ai 02sep26] Map \an (1-9) → transform-origin, hoisted ra module scope
+ * (tối ưu: không tạo lại object mỗi lần gọi styleParsedToCss). */
+const TRANSFORM_ORIGIN_MAP = Object.freeze({
+	1: '0% 100%', 2: '50% 100%', 3: '100% 100%',
+	4: '0% 50%',  5: '50% 50%',  6: '100% 50%',
+	7: '0% 0%',   8: '50% 0%',   9: '100% 0%',
+});
+/** [arena.ai 02sep26] Cache globalCss theo WrapStyle (chỉ 0..3 → tối đa 4 entry).
+ * CHỈ dùng nội bộ styleParsedToCss để spread vào container (frozen → an toàn chia sẻ);
+ * parsedData.globalCss vẫn lấy object MỚI từ globalCssFromInfo (pure) để renderer tự do dùng.
+ * @type {Map<number, Object>} */
+const GLOBAL_CSS_CACHE = new Map();
+/** [arena.ai 02sep26] Lấy globalCss từ cache theo WrapStyle (tạo + freeze nếu chưa có). */
+function cachedGlobalCss(info) {
+	const wrapStyle = Number(info?.WrapStyle ?? 0);
+	let cached = GLOBAL_CSS_CACHE.get(wrapStyle);
+	if (!cached) {
+		cached = Object.freeze(globalCssFromInfo(info));
+		GLOBAL_CSS_CACHE.set(wrapStyle, cached);
+	}
+	return cached;
 }
 /** Chuyển đổi style đã chuẩn hóa thành object CSS.
  * 29aug26 — bước 3: phân tích kĩ container / text / data
@@ -453,35 +509,31 @@ function globalCssFromInfo(info = {}) {
  *   - Kèm CSS variables --primary/--secondary/--outline/--back để tag \1c..\4c override nhanh.
  *
  * data (bổ sung — renderer tính toán):
- *   - Raw số: fontSize, scaleX/Y, spacing, angle, outline, shadow, margins, alignment,
- *   - Màu: secondary/outline/back (rgba), primary đã có trong text.color nhưng giữ lại để karaoke,
- *   - Cờ: isBox (borderStyle==3), borderStyle, encoding,
- *   - PlayResX/Y, scaledBorderAndShadow từ info để renderer quyết định outline/shadow có scale theo video không.
+ *   - 02sep26 (tối ưu): data = { ...style } (spread toàn bộ field style gốc — field mới tự theo,
+ *     không liệt kê tay 20+ field) + các field suy ra TỪ STYLE: isBox, hAlign, transformOrigin,
+ *     styleIndex (02sep26 — chỉ số trong parsedData.styles, chuyển từ lineCss vào đây).
+ *   - 02sep26 bản 3: KHÔNG lưu playResX/playResY/scaledBorderAndShadow vào data nữa —
+ *     chúng là hằng số TOÀN FILE, đã có trong parsedData.info (renderer nhận cả parsedData);
+ *     duplicate vào từng style vừa thừa vừa rủi ro stale (file dị dạng đặt [V4+ Styles]
+ *     trước [Script Info] → data chụp fallback, info sau đó mới có giá trị thật).
  *
  * @param {parsedDataFormat.style} style Style đã chuẩn hóa.
- * @param {parsedDataFormat.info} [info] Info đã (hoặc chưa) chuẩn hóa — dùng để lấy PlayRes/ScaledBorderAndShadow.
+ * @param {parsedDataFormat.info} [info] Info đã (hoặc chưa) chuẩn hóa — chỉ dùng lấy globalCss (WrapStyle) nhúng vào container (02sep26 bản 3).
+ * @param {number} [styleIndex=-1] Chỉ số của style trong parsedData.styles (02sep26 — lưu vào data.styleIndex; -1 nếu gọi rời không biết chỉ số).
  * @returns {{container: Object, text: Object, data: Object}}
  */
-export function styleParsedToCss (style, info = {}) {
-	const playResX = info.PlayResX ?? 640;
-	const playResY = info.PlayResY ?? 480;
-	const doScaleOutlines = info.ScaledBorderAndShadow ?? false;
-
+export function styleParsedToCss (style, info = {}, styleIndex = -1) {
 	const alignment = style.alignment;
 	// hAlign: 1,4,7 → left; 2,5,8 → center; 3,6,9 → right
 	const hAlign = alignment % 3 === 1 ? 'left' : alignment % 3 === 2 ? 'center' : 'right';
-	// transform-origin theo anchor \an (để \fr quay quanh đúng điểm neo)
-	const transformOriginMap = {
-		1: '0% 100%', 2: '50% 100%', 3: '100% 100%',
-		4: '0% 50%',  5: '50% 50%',  6: '100% 50%',
-		7: '0% 0%',   8: '50% 0%',   9: '100% 0%',
-	};
-	const transformOrigin = transformOriginMap[alignment] || '50% 50%';
+	// transform-origin theo anchor \an (để \fr quay quanh đúng điểm neo) — map hoisted (02sep26)
+	const transformOrigin = TRANSFORM_ORIGIN_MAP[alignment] || '50% 50%';
 
 	const isBox = style.borderStyle === 3;
 
-	// 31aug26 (Chú ý 2 pipeline): globalCss làm chuẩn → tính 1 lần rồi nhúng thẳng vào container.
-	const globalCss = globalCssFromInfo(info);
+	// 31aug26 (Chú ý 2 pipeline): globalCss làm chuẩn → nhúng thẳng vào container.
+	// 02sep26 (tối ưu): lấy từ GLOBAL_CSS_CACHE theo WrapStyle thay vì tính lại mỗi style.
+	const globalCss = cachedGlobalCss(info);
 
 	// container: định vị, không chứa font
 	// 31aug26 (Chú ý 2 pipeline): nhúng THẲNG bộ globalCss (chuẩn) vào container —
@@ -535,36 +587,16 @@ export function styleParsedToCss (style, info = {}) {
 		}),
 	};
 
+	// data (02sep26 — tối ưu): spread toàn bộ style gốc + field suy ra TỪ STYLE. Field style mới
+	// tự theo, không cần liệt kê tay. styleIndex chuyển từ lineCss vào đây (chốt 02sep26).
+	// 02sep26 bản 3: BỎ playResX/playResY/scaledBorderAndShadow — renderer đọc từ parsedData.info
+	// (hằng số toàn file, 1 nguồn sự thật, tránh stale khi section đặt sai thứ tự).
 	const data = {
-		name: style.name,
-		fontName: style.fontName,
-		fontSize: style.fontSize,
-		primaryColour: style.primaryColour,
-		secondaryColour: style.secondaryColour,
-		outlineColour: style.outlineColour,
-		backColour: style.backColour,
-		bold: style.bold,
-		italic: style.italic,
-		underline: style.underline,
-		strikeOut: style.strikeOut,
-		scaleX: style.scaleX,
-		scaleY: style.scaleY,
-		spacing: style.spacing,
-		angle: style.angle,
-		borderStyle: style.borderStyle,
+		...style,
 		isBox,
-		outline: style.outline,
-		shadow: style.shadow,
-		alignment,
 		hAlign,
 		transformOrigin,
-		marginL: style.marginL,
-		marginR: style.marginR,
-		marginV: style.marginV,
-		encoding: style.encoding,
-		playResX,
-		playResY,
-		scaledBorderAndShadow: doScaleOutlines,
+		styleIndex,
 	};
 
 	return { container, text, data };
