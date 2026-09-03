@@ -1,19 +1,6 @@
-/** v0.1.0 02sep26
- * alpha mode
- * Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS (globalCss, styleCss, lineCss).
-*/
-/** Mẫu text của các line [Events] trong file sub
- * [Events]
- * Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
- * Dialogue: 0,0:00:00.00,0:00:05.00,Default,,0000,0000,0000,,
- * (Chỉnh sửa để dễ đọc hơn):
- * Format:      Layer,  Start,      End,        Style,    Name,   MarginL,  MarginR,  MarginV,  Effect, Text
- * Dialogue:    0,      0:00:00.00, 0:00:05.00, Default,      ,   0000,     0000,     0000,          ,
- * định dạng:	index,  h:mm:ss.cs, h:mm:ss.cs, string,   string, px,       px,       px,       string  string
- * !: Margin có thể là 0000 (undefined chuyển thành) hoặc 0 (defined). Xử lí cả 2 như giá trị 0
- * !: Name trong Aegisub chính là line.actor. Nếu trong line.actor có dấu "," thì sẽ bị lưu thành ";".
- * utils: cung cấp logger(message, type = 'info', ...extra); dùng log/warn bên dưới.
- */
+// v0.1.0 03sep26
+// beta mode (đã viết xong, sửa lỗi khi chạy)
+// Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
 import { classify } from './tagProcess.js'; // 03sep26: classify biến base → lineCss[i] đầy đủ { base, collision, clip }
 /** Định nghĩa/chú thích object FALLBACK_DEFAULT_STYLE (parsedDataFormat.style) 
@@ -327,7 +314,7 @@ function cachedGlobalCss(info) {
  * @param {number} [styleIndex=-1] Chỉ số của style trong parsedData.styles (02sep26 — lưu vào data.styleIndex; -1 nếu gọi rời không biết chỉ số).
  * @returns {{container: Object, text: Object, data: Object}}
  */
-export function styleParsedToCss (style, info = {}, styleIndex = -1) {
+function styleParsedToCss (style, info = {}, styleIndex = -1) {
 	const alignment = style.alignment;
 	// hAlign: 1,4,7 → left; 2,5,8 → center; 3,6,9 → right
 	const hAlign = alignment % 3 === 1 ? 'left' : alignment % 3 === 2 ? 'center' : 'right';
@@ -423,11 +410,11 @@ export function styleParsedToCss (style, info = {}, styleIndex = -1) {
 	return { container, text, data };
 }
 /** [arena.ai] Tag có chứa tag karaoke (\k, \K, \kf, \ko) không? */
-export function hasKaraokeTag(tag) {
+function hasKaraokeTag(tag) {
 	return /\\[kK](?:[fo])?/.test(tag);
 }
 /** [arena.ai] Token là marker đứng riêng {\h} / {\N} / {\n} (renderer quyết định ngữ nghĩa) không? */
-export function isStandaloneToken(tok) {
+function isStandaloneToken(tok) {
 	return tok === '{\\h}' || tok === '{\\N}' || tok === '{\\n}';
 }
 /** [arena.ai] Lấy style ĐÃ CHUẨN HÓA của 1 dòng Dialogue (lookup theo orgline.style — tên style)
@@ -442,6 +429,250 @@ function styleForLine(orgline, parsedData) {
 	const found = parsedData.styles.find(style => style.name === orgline.style);
 	return found ?? FALLBACK_DEFAULT_STYLE;
 }
+// Thứ tự xử lí: tokenizeLineText (token + clean) → baseFromTokens (tách các tag đơn
+// trong tag token, ghép với text token kế tiếp thành 1 mục base). Trong baseFromTokens có splitOverrideTags().
+// Phân loại/phân cấp tag (nhóm 2.4 → 2.3 → 2.2 → 2.1): classify() ở background/tagProcess.js
+// (03sep26 — 2.4 layout + động \t/\k làm thật; 2.3/2.2/2.1 để session sau; xem file đó).
+// Các luật BASE MODEL (tag liền nhau gộp chung, marker flush riêng, tag cuối dòng bỏ...)
+// được ghi trực tiếp trong typedef baseItem + comment inline của từng hàm + test tương ứng.
+/** [arena.ai] Tokenize + làm sạch nội dung dòng (tiền xử lí tag override).
+ *
+ * Mục tiêu: biến line.text thô (một chuỗi đan xen text thường và tag {...}) thành một mảng
+ * token ĐÃ LÀM SẠCH — để bước sau (baseFromTokens) chỉ việc ghép tag + text thành base
+ * mà không cần bận tâm các "lỗi đánh máy" hay gặp: tag rỗng, tag comment thuần, 2 tag liền
+ * nhau, tag bắt đầu bằng comment lẫn '\', \{ \}, '{' không đóng, '}' thừa...
+ *
+ * CÁCH HOẠT ĐỘNG (phần lõi là 1 vòng quét regex + 2 biến trạng thái):
+ * - Quét text bằng 1 regex duy nhất chia thành các nhánh:
+ *     /\\\{|\\\}|\{|\}|\\h|\\n|\\N/g
+ * - Giữ 2 biến trạng thái trong lúc quét:
+ *     + endIndex: vị trí BẮT ĐẦU của đoạn text chưa xử lí (phần text thường chưa đẩy).
+ *     + tagStartIndex: vị trí '{' của tag đang mở; -1 khi KHÔNG nằm trong tag nào.
+ * - Với mỗi match, hành vi rẽ nhánh theo ký tự khớp được:
+ *
+ *   1) \{  hoặc  \}   (dấu ngoặc được escape):
+ *        Bỏ qua (continue) — nó nằm lại trong phần text thường, KHÔNG tạo token riêng.
+ *        Renderer sẽ unescape \{ \} ở tầng cuối (khi không còn cần phân biệt text/tag).
+ *
+ *   2) \h / \N / \n   (marker đứng riêng, ngoài tag):
+ *        Nếu ĐANG NGOÀI tag (tagStartIndex === -1): đẩy đoạn text trước nó, rồi đẩy marker
+ *        được BỌC thành {\h} / {\N} / {\n} như 1 token riêng (để renderer quyết định ngữ nghĩa
+ *        dấu cách / xuống dòng theo WrapStyle / \q), cuối cùng cập nhật endIndex vượt qua nó.
+ *        Nếu ĐANG TRONG tag: bỏ qua (marker nằm nguyên trong tag token, không bọc riêng).
+ *
+ *   3) {   (mở tag):
+ *        Nếu ĐANG NGOÀI tag: đẩy đoạn text trước nó, đặt tagStartIndex = match.index,
+ *        endIndex = match.index (giữ nguyên '{' — nếu tag không đóng thì '{' thành text,
+ *        tránh nhân đôi). Nếu ĐANG TRONG tag: bỏ qua ('{' lồng nhau chỉ là text của tag).
+ *
+ *   4) }   (đóng tag):
+ *        Nếu ĐANG TRONG tag (tagStartIndex > -1): đẩy token là đoạn
+ *        text.slice(tagStartIndex, regex.lastIndex) (từ '{' đến VỊ TRÍ SAU '}'), cập nhật
+ *        endIndex, reset tagStartIndex = -1 (hết tag). '}' THỪA (không có '{' trước): bỏ qua.
+ *
+ * - SAU KHI quét hết, nếu còn text sót lại (endIndex < text.length):
+ *     + Nếu token cuối của result KHÔNG kết thúc bằng '}' (tức là text thường / còn '{' không
+ *       đóng) → NỐI đoạn còn lại vào token đó (gộp text liền mạch — xử lí ca '{' không đóng).
+ *     + Ngược lại (token cuối là 1 tag/marker đóng bằng '}') → đẩy đoạn còn lại thành token mới.
+ *
+ * - TOKEN ĐẦU RA có 2 loại, phân biệt bằng việc có bao ngoặc {} hay không:
+ *     + TEXT token: không có ngoặc — text thường (kể cả '{' không đóng, \{ \}).
+ *     + TAG token: có ngoặc {...}, chứa 1+ tag đơn bắt đầu bằng '\' (đã strip phần trước '\' đầu).
+ *
+ * @param {string} text line.text dạng raw (chưa stringify).
+ * @returns {Array<string>} tokens: text (không bao ngoặc) và tag (có bao ngoặc {}).
+ *   - \h / \N / \n đứng NGOÀI tag → wrap thành {\h} / {\N} / {\n} riêng biệt, GIỮ NGUYÊN để
+ *     renderer quyết định ngữ nghĩa (dấu cách / xuống dòng, theo WrapStyle / \q).
+ *   - Tag {..}: bỏ tag rỗng/comment (không có '\'), strip phần trước '\' đầu tiên, hợp nhất 2 tag
+ *     liền nhau (}{) — TRỪ khi tag sau chứa karaoke (\k/\K/\kf/\ko) và TRỪ marker {\h}/{\N}/{\n}.
+ *   - \{ \} giữ nguyên văn, unescape ở tầng cuối (renderer).
+ */
+function tokenizeLineText(text) {
+	const result = [];
+	const regex = /\\\{|\\\}|\{|\}|\\h|\\n|\\N/g;
+	let endIndex = 0;
+	let tagStartIndex = -1;
+	let match;
+
+	/** Đẩy 1 token vào result, áp quy tắc làm sạch / hợp nhất RIÊNG cho tag.
+	 *
+	 * Các nhánh (kiểm tra theo thứ tự):
+	 * 1. tok rỗng ('') → bỏ qua.
+	 * 2. Không phải tag (không vừa bắt đầu '{' vừa kết thúc '}') → đẩy NGUYÊN text token.
+	 * 3. Là tag nhưng không có '\' ở vị trí >= 1 (VD {abc} — tag comment thuần) → bỏ qua.
+	 * 4. Là tag có '\' → strip hết phần trước '\' ĐẦU TIÊN (bỏ '{' và phần comment dẫn đầu),
+	 *    rồi bọc lại trong { } thành cleaned (VD {abc\b1} → {\b1}).
+	 * 5. cleaned là marker đứng riêng {\h}/{\N}/{\n} → đẩy NGAY, không bao giờ merge.
+	 * 6. Ngược lại, nếu token trước trong result cũng là tag (không phải marker, không có
+	 *    karaoke) → HỢP NHẤT 2 tag: bỏ '}' của token trước và '{' của cleaned, ghép thành 1 tag
+	 *    liền (VD {\b1} + {\i1} → {\b1\i1}). Chỉ KHÔNG hợp nhất khi cleaned chứa tag karaoke
+	 *    (\k/\K/\kf/\ko) — karaoke phải đứng riêng để đo thời lượng từng syl.
+	 * 7. Còn lại → đẩy cleaned như 1 tag mới.
+	 *
+	 * Lưu ý: chỉ TAG mới được sửa/merge; TEXT luôn đẩy nguyên (như nhánh 2).
+	 *
+	 * @param {string} tok Chuỗi con cắt từ text: có thể là text thường hoặc 1 tag {...}.
+	 * @returns {void}
+	 */
+	const pushToken = (tok) => {
+		// tok text trống thì bỏ qua
+		if (tok === '') return;
+		// Text → đẩy nguyên (merge chỉ áp cho tag).
+		if (!(tok.startsWith('{') && tok.endsWith('}'))) {
+			result.push(tok);
+			return;
+		}
+		// Tag: bỏ comment thuần + strip phần trước dấu '\' đầu tiên.
+		const firstSlash = tok.indexOf('\\', 1);
+		if (firstSlash === -1) return; // không có '\' → comment thuần, bỏ
+		const cleaned = '{' + tok.slice(firstSlash);
+		// Marker {\h}/{\N}/{\n} luôn đứng riêng, không merge.
+		if (isStandaloneToken(cleaned)) {
+			result.push(cleaned);
+			return;
+		}
+		const prev = result[result.length - 1];
+		// Nếu token trước là tag (không phải marker, không có karaoke) → merge 2 tag liền nhau
+		if (prev !== undefined && prev.startsWith('{') && prev.endsWith('}')
+			&& !isStandaloneToken(prev) && !hasKaraokeTag(cleaned)) {
+			result[result.length - 1] = prev.slice(0, -1) + cleaned.slice(1);
+		} else { // Nếu ko thì push cleaned như 1 tag mới
+			result.push(cleaned);
+		}
+	};
+
+	while ((match = regex.exec(text)) !== null) {
+		const char = match[0];
+		if (char === '\\{' || char === '\\}') continue; // literal brace, unescape sau
+		if (char === '\\h' || char === '\\N' || char === '\\n') {
+			if (tagStartIndex === -1) { // chỉ wrap khi đứng ngoài tag
+				pushToken(text.slice(endIndex, match.index));
+				pushToken(`{${char}}`);
+				endIndex = regex.lastIndex;
+			}
+			continue;
+		}
+		if (char === '{') {
+			if (tagStartIndex === -1) {
+				pushToken(text.slice(endIndex, match.index));
+				tagStartIndex = match.index;
+				endIndex = match.index; // { không đóng → giữ nguyên văn, không nhân đôi
+			}
+			continue;
+		}
+		if (char === '}') {
+			if (tagStartIndex > -1) {
+				pushToken(text.slice(tagStartIndex, regex.lastIndex));
+				endIndex = regex.lastIndex;
+				tagStartIndex = -1;
+			}
+			// } thừa (không có { trước) → bỏ qua
+		}
+	}
+	if (endIndex < text.length) {
+		const lastText = text.slice(endIndex);
+		const last = result[result.length - 1];
+		if (last !== undefined && !last.endsWith('}')) {
+			result[result.length - 1] = last + lastText;
+		} else {
+			pushToken(lastText);
+		}
+	}
+	return result;
+}
+/** Định nghĩa/chú thích object mục base sau khi tách
+ * @typedef {object} parsedDataFormat.baseItem Đơn vị nhỏ nhất trong base: 1 cụm tag + 1 đoạn text.
+ * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
+ * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm tầng cuối).
+ *   (classify KHÔNG xóa tags khi tiêu thụ: nhóm sau 2.3/2.2/2.1 + renderer/debug đọc lại được.)
+ * @property {parsedDataFormat.baseItemDelta} [delta] classify (tagProcess.js) sinh: mức text
+ *   (layout tĩnh \fs\fsc\fsp\fn\b\i) / data (\r → baseStyleName; marker \h\N\n). text không tag thì KHÔNG có delta/anim.
+ * @property {parsedDataFormat.baseItemAnim} [anim] classify sinh metadata nhóm ĐỘNG:
+ *   t (mỗi \t → { t1, t2, easing, to }) + k ({ type, durationMs, startMs }) — renderer resolve.
+ */
+/** Định nghĩa/chú thích delta theo mức node của mục base
+ * ĐỊNH HƯỚNG cho classify (bước 4-7): parser xử lí đến base thì mỗi mục base mang
+ * delta tách theo 3 mức giống styleParsedToCss (container / text / data).
+ * Renderer chuyển mục base thành node container-text TÙY MỨC ĐỘ DELTA:
+ * - delta có container → phải sinh CẶP node container+text MỚI (delta chạm vỏ dòng).
+ * - delta chỉ có text  → chỉ sinh node text bên trong container hiện có (đổi ruột chữ).
+ * - delta chỉ có data  → không sinh node, chỉ là số liệu cho đo chữ / collision / karaoke.
+ * @typedef {object} parsedDataFormat.baseItemDelta
+ * @property {Object} [container] Tag chạm vỏ dòng (vd \bord/\4c khi borderStyle==3, \clip) → renderer tách container mới.
+ * @property {Object} [text] Tag đổi ruột chữ (\fs, \c, \b, \fr...) → renderer chỉ thêm node text.
+ * @property {Object} [data] Chỉ số liệu đo/collision (không có CSS tương ứng) → không sinh node.
+ */
+/** [arena.ai] Tách nội dung 1 tag token (không bao ngoặc) thành các tag đơn theo '\' ở mức ngoặc ngoài cùng.
+ * Theo dõi độ sâu ngoặc '()' nên tag trong \t(...)/\clip(...) không bị tách oan.
+ * @param {string} content Nội dung trong {...} (vd: "\\bord2\\t(\\fs30)\\c&HFF&").
+ * @returns {Array<string>} Các tag đơn, mỗi phần tử bắt đầu bằng '\', raw nguyên văn; content không chứa '\' → [].
+ */
+function splitOverrideTags(content) {
+	/**
+	 * Đẩy 1 tag đã cắt vào tags. BỎ tag rác: tag chỉ có mỗi '\' (length 1 — không có ký tự lệnh
+	 * theo sau). Xảy ra khi content chứa 2 dấu '\' LIỀN NHAU kiểu "\b1\\i1" (file lỗi / double-escape):
+	 * '\' thứ 2 tự nó thành 1 tag "rỗng" → bỏ, không cho lọt vào tags.
+	 * Tag '\' + ký tự bất kỳ (\b, \1c, \fs30, \bord2...) đều là tag thật → KHÔNG lọc thêm.
+	 * @param {string} tagChunk Đoạn tag từ '\' mở đầu (tối thiểu là '\').
+	 * @returns {void}
+	 */
+	const tags = [];
+	function pushTag(tagChunk) {
+		if (tagChunk.length > 1) tags.push(tagChunk);
+	}
+	let depth = 0;
+	let start = -1; // vị trí '\' mở đầu tag đang dở (ngoài ngoặc)
+	for (let i = 0; i < content.length; i++) {
+		const ch = content[i];
+		if (ch === '(') { depth++; }
+		else if (ch === ')') { if (depth > 0) depth--; }
+		else if (ch === '\\' && depth === 0) {
+			if (start !== -1) pushTag(content.slice(start, i));
+			start = i;
+		}
+	}
+	if (start !== -1) pushTag(content.slice(start));
+	return tags;
+}
+/** [arena.ai] Đổi tokens (đầu ra của tokenizeLineText) thành danh sách base.
+ * @param {Array<string>} tokens Tokens từ tokenizeLineText (text không bao ngoặc / tag có bao ngoặc {}).
+ * @returns {Array<parsedDataFormat.baseItem>} Danh sách mục base theo thứ tự trong dòng.
+ */
+function baseFromTokens(tokens) {
+	const base = [];
+	if (!Array.isArray(tokens)) return base;
+	/** Các tag đơn đang chờ text token kế tiếp. @type {string[]} */
+	let pendingTags = [];
+	for (const tok of tokens) {
+		if (tok.startsWith('{') && tok.endsWith('}')) {
+			// Marker {\h}/{\N}/{\n} → mục base RIÊNG tại đúng vị trí (text rỗng); pending giữ nguyên.
+			if (isStandaloneToken(tok)) {
+				base.push({ tags: [tok.slice(1, -1)], text: '' });
+				continue;
+			}
+			// Tag token thường → tách thành các tag đơn, gộp vào pending (các tag token liền nhau chung 1 mục base).
+			pendingTags.push(...splitOverrideTags(tok.slice(1, -1)));
+			continue;
+		}
+		// Text token → đóng 1 mục base với mọi tag đang chờ.
+		base.push({ tags: pendingTags, text: tok });
+		pendingTags = [];
+	}
+	// Tag token THƯỜNG cuối dòng không có text theo sau → BỎ (không tạo mục base — chốt 27aug26).
+	// Marker không rơi vào đây vì đã flush thành mục base riêng ngay khi gặp.
+	return base;
+}
+// Mẫu text của các line [Events] trong file sub
+// [Events]
+// Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+// Dialogue: 0,0:00:00.00,0:00:05.00,Default,,0000,0000,0000,,
+// (Chỉnh sửa để dễ đọc hơn):
+// Format:      Layer,  Start,      End,        Style,    Name,   MarginL,  MarginR,  MarginV,  Effect, Text
+// Dialogue:    0,      0:00:00.00, 0:00:05.00, Default,      ,   0000,     0000,     0000,          ,
+// định dạng:	index,  h:mm:ss.cs, h:mm:ss.cs, string,   string, px,       px,       px,       string  string
+// !: Margin có thể là 0000 (undefined chuyển thành) hoặc 0 (defined). Xử lí cả 2 như giá trị 0
+// !: Name trong Aegisub chính là line.actor. Nếu trong line.actor có dấu "," thì sẽ bị lưu thành ";".
+// utils: cung cấp logger(message, type = 'info', ...extra); dùng log/warn bên dưới.
 /** Hàm đọc text của file Aegisub.
  * @param {boolean} doStripTags Chế độ xử lí tag cho processLineText() (chốt 02sep26, bản 2 — boolean):
  *   truthy (true, 1, 'x'...) → STRIP: xóa hết tag trong text (như Aegisub strip tags, marker \N/\h/\n giữ nguyên văn);
@@ -661,239 +892,7 @@ export function parser(doStripTags = false, rawText) {
 
 
 
-/** [arena.ai] Tokenize + làm sạch nội dung dòng (tiền xử lí tag override).
- *
- * Mục tiêu: biến line.text thô (một chuỗi đan xen text thường và tag {...}) thành một mảng
- * token ĐÃ LÀM SẠCH — để bước sau (baseFromTokens) chỉ việc ghép tag + text thành base
- * mà không cần bận tâm các "lỗi đánh máy" hay gặp: tag rỗng, tag comment thuần, 2 tag liền
- * nhau, tag bắt đầu bằng comment lẫn '\', \{ \}, '{' không đóng, '}' thừa...
- *
- * CÁCH HOẠT ĐỘNG (phần lõi là 1 vòng quét regex + 2 biến trạng thái):
- * - Quét text bằng 1 regex duy nhất chia thành các nhánh:
- *     /\\\{|\\\}|\{|\}|\\h|\\n|\\N/g
- * - Giữ 2 biến trạng thái trong lúc quét:
- *     + endIndex: vị trí BẮT ĐẦU của đoạn text chưa xử lí (phần text thường chưa đẩy).
- *     + tagStartIndex: vị trí '{' của tag đang mở; -1 khi KHÔNG nằm trong tag nào.
- * - Với mỗi match, hành vi rẽ nhánh theo ký tự khớp được:
- *
- *   1) \{  hoặc  \}   (dấu ngoặc được escape):
- *        Bỏ qua (continue) — nó nằm lại trong phần text thường, KHÔNG tạo token riêng.
- *        Renderer sẽ unescape \{ \} ở tầng cuối (khi không còn cần phân biệt text/tag).
- *
- *   2) \h / \N / \n   (marker đứng riêng, ngoài tag):
- *        Nếu ĐANG NGOÀI tag (tagStartIndex === -1): đẩy đoạn text trước nó, rồi đẩy marker
- *        được BỌC thành {\h} / {\N} / {\n} như 1 token riêng (để renderer quyết định ngữ nghĩa
- *        dấu cách / xuống dòng theo WrapStyle / \q), cuối cùng cập nhật endIndex vượt qua nó.
- *        Nếu ĐANG TRONG tag: bỏ qua (marker nằm nguyên trong tag token, không bọc riêng).
- *
- *   3) {   (mở tag):
- *        Nếu ĐANG NGOÀI tag: đẩy đoạn text trước nó, đặt tagStartIndex = match.index,
- *        endIndex = match.index (giữ nguyên '{' — nếu tag không đóng thì '{' thành text,
- *        tránh nhân đôi). Nếu ĐANG TRONG tag: bỏ qua ('{' lồng nhau chỉ là text của tag).
- *
- *   4) }   (đóng tag):
- *        Nếu ĐANG TRONG tag (tagStartIndex > -1): đẩy token là đoạn
- *        text.slice(tagStartIndex, regex.lastIndex) (từ '{' đến VỊ TRÍ SAU '}'), cập nhật
- *        endIndex, reset tagStartIndex = -1 (hết tag). '}' THỪA (không có '{' trước): bỏ qua.
- *
- * - SAU KHI quét hết, nếu còn text sót lại (endIndex < text.length):
- *     + Nếu token cuối của result KHÔNG kết thúc bằng '}' (tức là text thường / còn '{' không
- *       đóng) → NỐI đoạn còn lại vào token đó (gộp text liền mạch — xử lí ca '{' không đóng).
- *     + Ngược lại (token cuối là 1 tag/marker đóng bằng '}') → đẩy đoạn còn lại thành token mới.
- *
- * - TOKEN ĐẦU RA có 2 loại, phân biệt bằng việc có bao ngoặc {} hay không:
- *     + TEXT token: không có ngoặc — text thường (kể cả '{' không đóng, \{ \}).
- *     + TAG token: có ngoặc {...}, chứa 1+ tag đơn bắt đầu bằng '\' (đã strip phần trước '\' đầu).
- *
- * @param {string} text line.text dạng raw (chưa stringify).
- * @returns {Array<string>} tokens: text (không bao ngoặc) và tag (có bao ngoặc {}).
- *   - \h / \N / \n đứng NGOÀI tag → wrap thành {\h} / {\N} / {\n} riêng biệt, GIỮ NGUYÊN để
- *     renderer quyết định ngữ nghĩa (dấu cách / xuống dòng, theo WrapStyle / \q).
- *   - Tag {..}: bỏ tag rỗng/comment (không có '\'), strip phần trước '\' đầu tiên, hợp nhất 2 tag
- *     liền nhau (}{) — TRỪ khi tag sau chứa karaoke (\k/\K/\kf/\ko) và TRỪ marker {\h}/{\N}/{\n}.
- *   - \{ \} giữ nguyên văn, unescape ở tầng cuối (renderer).
- */
-export function tokenizeLineText(text) {
-	const result = [];
-	const regex = /\\\{|\\\}|\{|\}|\\h|\\n|\\N/g;
-	let endIndex = 0;
-	let tagStartIndex = -1;
-	let match;
 
-	/**
-	 * Đẩy 1 token vào result, áp quy tắc làm sạch / hợp nhất RIÊNG cho tag.
-	 *
-	 * Các nhánh (kiểm tra theo thứ tự):
-	 * 1. tok rỗng ('') → bỏ qua.
-	 * 2. Không phải tag (không vừa bắt đầu '{' vừa kết thúc '}') → đẩy NGUYÊN text token.
-	 * 3. Là tag nhưng không có '\' ở vị trí >= 1 (VD {abc} — tag comment thuần) → bỏ qua.
-	 * 4. Là tag có '\' → strip hết phần trước '\' ĐẦU TIÊN (bỏ '{' và phần comment dẫn đầu),
-	 *    rồi bọc lại trong { } thành cleaned (VD {abc\b1} → {\b1}).
-	 * 5. cleaned là marker đứng riêng {\h}/{\N}/{\n} → đẩy NGAY, không bao giờ merge.
-	 * 6. Ngược lại, nếu token trước trong result cũng là tag (không phải marker, không có
-	 *    karaoke) → HỢP NHẤT 2 tag: bỏ '}' của token trước và '{' của cleaned, ghép thành 1 tag
-	 *    liền (VD {\b1} + {\i1} → {\b1\i1}). Chỉ KHÔNG hợp nhất khi cleaned chứa tag karaoke
-	 *    (\k/\K/\kf/\ko) — karaoke phải đứng riêng để đo thời lượng từng syl.
-	 * 7. Còn lại → đẩy cleaned như 1 tag mới.
-	 *
-	 * Lưu ý: chỉ TAG mới được sửa/merge; TEXT luôn đẩy nguyên (như nhánh 2).
-	 *
-	 * @param {string} tok Chuỗi con cắt từ text: có thể là text thường hoặc 1 tag {...}.
-	 * @returns {void}
-	 */
-	const pushToken = (tok) => {
-		if (tok === '') return;
-		// Text → đẩy nguyên (merge chỉ áp cho tag).
-		if (!(tok.startsWith('{') && tok.endsWith('}'))) {
-			result.push(tok);
-			return;
-		}
-		// Tag: bỏ comment thuần + strip phần trước dấu '\' đầu tiên.
-		const firstSlash = tok.indexOf('\\', 1);
-		if (firstSlash === -1) return; // không có '\' → comment thuần, bỏ
-		const cleaned = '{' + tok.slice(firstSlash);
-		// Marker {\h}/{\N}/{\n} luôn đứng riêng, không merge.
-		if (isStandaloneToken(cleaned)) {
-			result.push(cleaned);
-			return;
-		}
-		const prev = result[result.length - 1];
-		if (prev !== undefined && prev.startsWith('{') && prev.endsWith('}')
-			&& !isStandaloneToken(prev) && !hasKaraokeTag(cleaned)) {
-			result[result.length - 1] = prev.slice(0, -1) + cleaned.slice(1);
-		} else {
-			result.push(cleaned);
-		}
-	};
 
-	while ((match = regex.exec(text)) !== null) {
-		const char = match[0];
-		if (char === '\\{' || char === '\\}') continue; // literal brace, unescape sau
-		if (char === '\\h' || char === '\\N' || char === '\\n') {
-			if (tagStartIndex === -1) { // chỉ wrap khi đứng ngoài tag
-				pushToken(text.slice(endIndex, match.index));
-				pushToken(`{${char}}`);
-				endIndex = regex.lastIndex;
-			}
-			continue;
-		}
-		if (char === '{') {
-			if (tagStartIndex === -1) {
-				pushToken(text.slice(endIndex, match.index));
-				tagStartIndex = match.index;
-				endIndex = match.index; // { không đóng → giữ nguyên văn, không nhân đôi
-			}
-			continue;
-		}
-		if (char === '}') {
-			if (tagStartIndex > -1) {
-				pushToken(text.slice(tagStartIndex, regex.lastIndex));
-				endIndex = regex.lastIndex;
-				tagStartIndex = -1;
-			}
-			// } thừa (không có { trước) → bỏ qua
-		}
-	}
-	if (endIndex < text.length) {
-		const lastText = text.slice(endIndex);
-		const last = result[result.length - 1];
-		if (last !== undefined && !last.endsWith('}')) {
-			result[result.length - 1] = last + lastText;
-		} else {
-			pushToken(lastText);
-		}
-	}
-	return result;
-}
 
-// ==========================================================================
-// ==== TÁCH TAG TRONG TOKEN → MỤC BASE (bước ngay sau tokenizeLineText) ====
-// ==========================================================================
-// Thứ tự xử lí: tokenizeLineText (token + clean) → baseFromTokens (tách các tag đơn
-// trong tag token, ghép với text token kế tiếp thành 1 mục base).
-// Phân loại/phân cấp tag (nhóm 2.4 → 2.3 → 2.2 → 2.1): classify() ở background/tagProcess.js
-// (03sep26 — 2.4 layout + động \t/\k làm thật; 2.3/2.2/2.1 để session sau; xem file đó).
-//
-// BASE MODEL (theo pipeline): mỗi tag token kết hợp với text token tạo thành 1 mục base:
-//   base item = { tags: [...các tag đơn tách từ (các) tag token, raw nguyên văn], text: '...' }
-// - Nhiều tag token đứng LIỀN TIẾP (vd {\b1}{\k25} — tokenizer giữ riêng tag chứa karaoke)
-//   → gộp chung vào tags của 1 mục base.
-// - Text token đứng TRƯỚC mọi tag token → mục base { tags: [], text }.
-// - Marker {\h}/{\N}/{\n} → flush NGAY thành mục base RIÊNG tại đúng vị trí
-//   { tags: [marker], text: '' }; tag đang pending vẫn chờ text kế tiếp (marker không ăn mất pending).
-// - Tag token THƯỜNG đứng CUỐI dòng (không còn text theo sau) → BỎ (không tạo mục base);
-//   marker đứng cuối dòng thì VẪN GIỮ (đã flush thành mục base riêng từ lúc gặp).
 
-/** Định nghĩa/chú thích object mục base sau khi tách
- * @typedef {object} parsedDataFormat.baseItem Đơn vị nhỏ nhất trong base: 1 cụm tag + 1 đoạn text.
- * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
- * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm tầng cuối).
- *   (03sep26 — classify KHÔNG xóa tags khi tiêu thụ: nhóm sau 2.3/2.2/2.1 + renderer/debug đọc lại được.)
- * @property {parsedDataFormat.baseItemDelta} [delta] 03sep26 — classify (tagProcess.js) sinh: mức text
- *   (layout tĩnh \fs\fsc\fsp\fn\b\i) / data (\r → baseStyleName; marker \h\N\n). CHỈ có khi có nội dung.
- * @property {parsedDataFormat.baseItemAnim} [anim] 03sep26 — classify sinh metadata nhóm ĐỘNG:
- *   t (mỗi \t → { t1, t2, easing, to }) + k ({ type, durationMs, startMs }) — renderer resolve (Cách 1).
- */
-/** Định nghĩa/chú thích delta theo mức node của mục base (31aug26 — Chú ý 2 pipeline).
- * ĐỊNH HƯỚNG cho classify (bước 4-7): parser xử lí đến base thì mỗi mục base mang
- * delta tách theo 3 mức giống styleParsedToCss (container / text / data).
- * Renderer chuyển mục base thành node container-text TÙY MỨC ĐỘ DELTA:
- * - delta có container → phải sinh CẶP node container+text MỚI (delta chạm vỏ dòng).
- * - delta chỉ có text  → chỉ sinh node text bên trong container hiện có (đổi ruột chữ).
- * - delta chỉ có data  → không sinh node, chỉ là số liệu cho đo chữ / collision / karaoke.
- * @typedef {object} parsedDataFormat.baseItemDelta
- * @property {Object} [container] Tag chạm vỏ dòng (vd \bord/\4c khi borderStyle==3, \clip) → renderer tách container mới.
- * @property {Object} [text] Tag đổi ruột chữ (\fs, \c, \b, \fr...) → renderer chỉ thêm node text.
- * @property {Object} [data] Chỉ số liệu đo/collision (không có CSS tương ứng) → không sinh node.
- */
-
-/** [arena.ai] Tách nội dung 1 tag token (không bao ngoặc) thành các tag đơn theo '\' ở mức ngoặc ngoài cùng.
- * Theo dõi độ sâu ngoặc '()' nên tag trong \t(...)/\clip(...) không bị tách oan.
- * @param {string} content Nội dung trong {...} (vd: "\\bord2\\t(\\fs30)\\c&HFF&").
- * @returns {Array<string>} Các tag đơn, mỗi phần tử bắt đầu bằng '\', raw nguyên văn; content không chứa '\' → [].
- */
-export function splitOverrideTags(content) {
-	const tags = [];
-	let depth = 0;
-	let start = -1; // vị trí '\' mở đầu tag đang dở (ngoài ngoặc)
-	for (let i = 0; i < content.length; i++) {
-		const ch = content[i];
-		if (ch === '(') { depth++; }
-		else if (ch === ')') { if (depth > 0) depth--; }
-		else if (ch === '\\' && depth === 0) {
-			if (start !== -1) tags.push(content.slice(start, i));
-			start = i;
-		}
-	}
-	if (start !== -1) tags.push(content.slice(start));
-	return tags;
-}
-
-/** [arena.ai] Đổi tokens (đầu ra của tokenizeLineText) thành danh sách base.
- * @param {Array<string>} tokens Tokens từ tokenizeLineText (text không bao ngoặc / tag có bao ngoặc {}).
- * @returns {Array<parsedDataFormat.baseItem>} Danh sách mục base theo thứ tự trong dòng.
- */
-export function baseFromTokens(tokens) {
-	const base = [];
-	if (!Array.isArray(tokens)) return base;
-	/** Các tag đơn đang chờ text token kế tiếp. @type {string[]} */
-	let pendingTags = [];
-	for (const tok of tokens) {
-		if (tok.startsWith('{') && tok.endsWith('}')) {
-			// Marker {\h}/{\N}/{\n} → mục base RIÊNG tại đúng vị trí (text rỗng); pending giữ nguyên.
-			if (isStandaloneToken(tok)) {
-				base.push({ tags: [tok.slice(1, -1)], text: '' });
-				continue;
-			}
-			// Tag token thường → tách thành các tag đơn, gộp vào pending (các tag token liền nhau chung 1 mục base).
-			pendingTags.push(...splitOverrideTags(tok.slice(1, -1)));
-			continue;
-		}
-		// Text token → đóng 1 mục base với mọi tag đang chờ.
-		base.push({ tags: pendingTags, text: tok });
-		pendingTags = [];
-	}
-	// Tag token THƯỜNG cuối dòng không có text theo sau → BỎ (không tạo mục base — chốt 27aug26).
-	// Marker không rơi vào đây vì đã flush thành mục base riêng ngay khi gặp.
-	return base;
-}

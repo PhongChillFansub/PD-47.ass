@@ -1,4 +1,5 @@
 /** v0.1.0 03sep26
+ * alpha mode
  * Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] ĐẦY ĐỦ
  * { base, collision, clip } theo struct đích (mục 3 prompt 03sep26).
  *
@@ -52,20 +53,24 @@ const KARAOKE_RE = /^\\(k[fo]?|K)(\d+(?:\.\d+)?)/;
 const NUMERIC_TOKEN_RE = /^[+-]?(\d+\.?\d*|\.\d+)$/;
 /** Tên style fallback khi styleRef thiếu (dùng cho \r rỗng) — khớp FALLBACK_DEFAULT_STYLE.name */
 const FALLBACK_STYLE_NAME = 'Default';
-
 /** [arena.ai] Token có phải số thuần (dùng làm tham số t1/t2/accel của \t) không? */
 function isNumericToken(token) {
 	return NUMERIC_TOKEN_RE.test(token);
 }
-
 /** [arena.ai] Tách nội dung 1 chuỗi tag (không có ngoặc {}) thành các tag đơn theo '\' ở mức
  * ngoặc NGOÀI CÙNG — theo dõi depth '()' nên \clip(...)/\t(...) không bị tách oan.
  * Bản local (KHÔNG import splitOverrideTags từ parser.js để tránh vòng tròn import).
+ * 
+ * note: hàm này giống hàm splitOverrideTags ở parser.js, nhưng nhân bản để dành cho tags trong \t.
  * @param {string} text Chuỗi chứa tag, vd "\\fs30\\t(\\clip(0,0,1,1))\\c&HFF&".
  * @returns {string[]} Các tag đơn, mỗi phần tử bắt đầu bằng '\'.
  */
 function splitStyleModifiers(text) {
 	const tags = [];
+	/** Bỏ tag rác chỉ có mỗi '\' (2 dấu '\' liền nhau) — đồng bộ splitOverrideTags ở parser.js. */
+	function pushTag(tagChunk) {
+		if (tagChunk.length > 1) tags.push(tagChunk);
+	}
 	let depth = 0;
 	let start = -1; // vị trí '\' mở đầu tag đang dở (ngoài ngoặc)
 	for (let i = 0; i < text.length; i++) {
@@ -73,13 +78,15 @@ function splitStyleModifiers(text) {
 		if (ch === '(') { depth++; }
 		else if (ch === ')') { if (depth > 0) depth--; }
 		else if (ch === '\\' && depth === 0) {
-			if (start !== -1) tags.push(text.slice(start, i));
+			if (start !== -1) pushTag(text.slice(start, i));
 			start = i;
 		}
 	}
-	if (start !== -1) tags.push(text.slice(start));
+	if (start !== -1) pushTag(text.slice(start));
 	return tags;
 }
+
+
 
 /** [arena.ai] Map 1 tag LAYOUT TĨNH (2.4) thành CSS-cooked, ghi vào ctx.
  * Chỉ xử lí: \fs \fscx \fscy \fsc (alias fscx) \fsp \fn \b \i.

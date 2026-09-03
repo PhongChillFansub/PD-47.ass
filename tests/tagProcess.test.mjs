@@ -13,6 +13,17 @@ import { classify, classifyLayoutLocal } from '../background/tagProcess.js';
 /** Build base (mảng mục base) thẳng từ text — giống processLineText khi KHÔNG strip. */
 const baseOf = text => baseFromTokens(tokenizeLineText(text));
 
+test('base: 2 dấu \\\\ liền nhau (double-escape) → bỏ tag rác "\\" đơn, không sinh tag lạ', () => {
+	// content (giải mã): \b1\\i1 / \\b1\i1 / \b1\\
+	assert.deepEqual(splitOverrideTags('\\b1\\\\i1'), ['\\b1', '\\i1']); // \\ giữa 2 tag
+	assert.deepEqual(splitOverrideTags('\\\\b1\\i1'), ['\\b1', '\\i1']); // \\ dẫn đầu
+	assert.deepEqual(splitOverrideTags('\\b1\\\\'), ['\\b1']);           // \\ cuối — không tạo '\' thừa
+	assert.deepEqual(splitOverrideTags('\\\\'), []);                     // toàn \\ → rỗng
+	// tag thật không bị ảnh hưởng
+	assert.deepEqual(splitOverrideTags('\\b1\\i1\\b0'), ['\\b1', '\\i1', '\\b0']);
+	assert.deepEqual(splitOverrideTags('\\t(\\fs30)\\c&HFF&'), ['\\t(\\fs30)', '\\c&HFF&']);
+});
+
 /** Style chuẩn tối thiểu của dòng (classify chỉ đọc name/fontName ở bản 2.4). */
 const DEFAULT_STYLE_REF = { name: 'Default', fontName: 'Arial', fontSize: 20, alignment: 2 };
 
