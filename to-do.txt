@@ -7,3 +7,16 @@
 Những giả thiết tạm chấp nhận (sau này test):
 #a1: parser.js: validateAndNormalizeStyle(): Cho phép style.name rỗng (Aegisub vẫn coi là hợp lệ).
 @a2: parser.js: parser(): Không thể chèn xuống dòng \n (ko phải "\n") trong style.name
+
+03sep26 — classify 2.4 (Layout Local) + động \t/\k (ĐÃ LÀM — xem pipeline.txt mục 03sep26)
+- parser.js: tagProcess → processLineText (private, chỉ đổi tên); thêm styleForLine; push lineCss qua classify()
+- tagProcess.js (MỚI): classify + classifyLayoutLocal (2.4 LÀM THẬT) + classifyDecoration/classifyCollision/classifyClip (stub/signal)
+- lineCss[i] = { base, collision, clip } — tags giữ nguyên; base item thêm delta/anim khi có nội dung
+- Tests: parser.test.mjs cập nhật 2 expectation; tagProcess.test.mjs mới — npm test 90 pass
+- CÒN LẠI session sau:
+    * 2.3 classifyDecoration: màu/bord/shad/\fa/\fr — merge delta vào item.delta đã có + bổ sung target
+      nhóm 2.3 vào anim.t[].to (đọc lại tags raw của \t)
+    * 2.2 classifyCollision làm đầy: an (1-9, vẫn tính collision) + pos/move/org (first-wins, renderer tự disable)
+    * 2.1 classifyClip: rawList + effectiveType/effectiveRaw last-wins (kể cả \clip/\iclip nằm trong \t)
+    * Lưu ý renderer: \kf/\K = quét màu (gradient, KHÔNG clip-path); \k/\ko = đổi màu tức thì;
+      \t easing = accel thô; t2 = null = tới hết dòng; karaoke duration file centisecond × 10 = ms

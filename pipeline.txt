@@ -332,11 +332,11 @@ Next steps checklist (29aug26, cập nhật 31aug26):
     [x] 1. Chuyển style chuẩn hóa + styleCss vào push (line 304) + fix bug validate + last-wins — ĐÃ LÀM 29aug26
     [x] 2. Dọn pipeline line 192+ — gộp 27aug26 notes lên trên, xóa đoạn trùng — ĐÃ LÀM 29aug26
     [x] 3. Viết styleParsedToCss chi tiết: container/text/data tách bạch, map ASS → CSS, transform-origin từ \an, box vs outline — ĐÃ LÀM 29aug26 (bước 3)
-    [ ] 4. Viết classify: 2.4 layout local → tách run, xử lý \r, \h, \N, \n, \fs, \fsc, \fsp, \fn, \b, \i
-    [ ] 5. Viết 2.3 decoration: màu, bord, shad, fa, fr
-    [ ] 6. Viết 2.2 collision: an, org, pos, move, t (defer)
-    [ ] 7. Viết 2.1 clip: clip/iclip last-wins
-    [ ] 8. Cập nhật tests/parser.test.mjs cho styleCss + runs
+    [x] 4. Viết classify: 2.4 layout local → tách run, xử lý \r, \h, \N, \n, \fs, \fsc, \fsp, \fn, \b, \i — ĐÃ LÀM 03sep26 (classifyLayoutLocal + động \t/\k metadata; xem mục 03sep26)
+    [ ] 5. Viết 2.3 decoration: màu, bord, shad, fa, fr — stub classifyDecoration ĐÃ DỰNG (no-op) trong tagProcess.js, session sau làm thật
+    [~] 6. Viết 2.2 collision: an, org, pos, move, t (defer) — 03sep26: mới có signal collision.t (tagProcess.js); an/org/pos/move session sau
+    [~] 7. Viết 2.1 clip: clip/iclip last-wins — 03sep26: mới có shape default stub; session sau làm thật
+    [x] 8. Cập nhật tests/parser.test.mjs cho styleCss + runs — ĐÃ LÀM 03sep26 (parser.test.mjs cập nhật expectation + tests/tagProcess.test.mjs mới; npm test 90 pass)
 
 Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug26" ở phần struct lineCss):
  1. Sửa dòng 389-392, chuẩn hóa info ngay trong loop for (dòng 235, cụ thể là đoạn dòng 258-275) thay vì để sau. (để chạy đc ngay styleCss.push dòng 327-328 thay vì phải update lại ở dòng 395)
@@ -446,4 +446,85 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
     Next steps checklist (bổ sung vào checklist 29aug26):
     [x] 9. Chế độ strip trong tagProcess (bản 2: boolean doStripTags, truthy=strip/falsy=all) + đổi lineCss { segments } → { base } — ĐÃ LÀM 02sep26
     [x] 10. styleIndex vào styleCss[i].data + tối ưu styleParsedToCss (hoist map, cache globalCss, spread data) — ĐÃ LÀM 02sep26
-    [ ] 11. Khi viết classify (bước 4-7): runs ghi trực tiếp vào base, thêm collision/clip theo struct đích { base, collision, clip }
+    [x] 11. Khi viết classify (bước 4-7): runs ghi trực tiếp vào base, thêm collision/clip theo struct đích { base, collision, clip } — ĐÃ LÀM 03sep26 (classify trả { base, collision, clip }; 2.3/2.2(an,pos,..)/2.1 vẫn stub — xem mục 03sep26)
+
+
+03sep26 — classify 2.4 (Layout Local) + động \t/\k (bước 4-7, làm theo prompt session mới)
+
+    1. ĐỔI TÊN parser.js: tagProcess (private) → processLineText (chốt: tránh trùng tên module mới
+       background/tagProcess.js; chỉ đổi tên, KHÔNG đổi hành vi; vẫn private — không export).
+       Chỗ gọi trong parser() giờ:
+           parsedData.lineCss.push(classify(processLineText(doStripTags, orgline.text), styleForLine(orgline, parsedData)))
+       styleForLine(orgline, parsedData): styleRef = style ĐÃ CHUẨN HÓA lookup theo orgline.style
+       trong parsedData.styles; không thấy → fallback FALLBACK_DEFAULT_STYLE.
+
+    2. File MỚI background/tagProcess.js (KHÔNG import parser.js — tránh vòng tròn):
+       export classify(entry, styleRef) — entry = { base } (đầu ra processLineText), trả lineCss[i]
+       đầy đủ { base, collision, clip }. Gọi theo ĐÚNG THỨ TỰ 2.4 → 2.3 → 2.2 → 2.1:
+           classifyLayoutLocal (2.4 — LÀM THẬT bản này) → classifyDecoration (2.3 — STUB session sau)
+           → classifyCollision (2.2 — bản này CHỈ signal \t) → classifyClip (2.1 — STUB shape default).
+       Export theo nhóm (classifyLayoutLocal/classifyDecoration/classifyCollision/classifyClip) để test đơn vị.
+
+    3. lineCss[i] (struct đích — đã hỏi/chốt 03sep26 với chủ repo 4 điểm):
+       { base, collision, clip }:
+       - base[i] = { tags, text, delta?, anim? } — tags GIỮ NGUYÊN (không xóa khi tiêu thụ; nhóm sau
+         2.3/2.2/2.1 + debug đọc lại được). delta/anim CHỈ xuất hiện khi có nội dung.
+         delta = { text?, data? }: text = KEY CSS + value CSS-cooked (khớp styleCss.text — renderer
+         Object.assign; \fscx/fscy → 'transform' chứa scale của CHÍNH item, gộp transform với style
+         gốc/rotate là việc renderer). data = số liệu thuần (\r → baseStyleName; marker \h\N\n).
+         anim = { t?: Array, k?: { type, durationMs, startMs } }.
+       - collision = { t: boolean } (2.2 session sau thêm an/pos/move/org). t=true khi dòng có \t.
+       - clip = { rawList: [], effectiveType: null, effectiveRaw: null } (2.1 stub).
+
+    4. Nhóm 2.4 (tĩnh) — map tag → delta (chốt):
+       \fs → text 'font-size' (px) | \fscx/\fscy/\fsc(alias fscx) → text 'transform' scaleX/scaleY
+       (bỏ identity 100 — giống R3) | \fsp → text 'letter-spacing' (px) | \fn → text 'font-family'
+       ("name", sans-serif; \fn rỗng → reset font style dòng) | \b → 'font-weight' 700/400 (regex khóa
+       đuôi: \bord KHÔNG lọt) | \i → 'font-style' italic/normal | \r → data.baseStyleName (rỗng =
+       style dòng; có tên = tên style trong \r — renderer lookup) | marker \h/\N/\n → data.marker
+       (không CSS; renderer quyết ngữ nghĩa theo WrapStyle/\q).
+       Trong CÙNG mục nhiều tag scale: tag sau thắng, gộp 1 chuỗi transform.
+       BẢN 2 (chốt 03sep26): \b/\i (và \u/\s khi 2.3 làm) KHÔNG có số đằng sau → coi như KHÔNG
+       có tag: bỏ qua, không sinh delta, không toggle (parser không giữ state dòng) — tag vẫn nằm
+       trong item.tags, nhóm sau cũng không áp khi thiếu số. \bord/\iclip... không lọt regex.
+
+    5. Nhóm ĐỘNG — metadata nội suy (Cách 1, parser KHÔNG bake snapshot):
+       - \t(...) → base[i].anim.t = [{ t1, t2, easing, to }]:
+           + t1/t2 = ms tương đối đầu dòng (Aegisub: \t dùng ms, KHÔNG nhân 10 — khác \k).
+             t2 = null khi file không ghi (transform tới HẾT dòng, renderer tự lấy line duration).
+           + easing = số accel THÔ (mặc định 1 = linear) — renderer tự map sang easing function.
+           + to = tag target CSS-cooked. Gán theo SỐ token số đứng đầu (Aegisub/ASSv5 4 form):
+             0 số → toàn dòng; 1 số → accel; 2 số → t1,t2; 3+ → t1,t2,accel.
+           + ⚠️ \t KHÔNG animate \pos/\move/\org → BỎ QUA (không vào to; không còn target → không
+             tạo entry anim). \clip/\iclip trong \t cũng bỏ qua (2.1 đọc lại từ tags raw).
+           + to CHỈ map tag layout tĩnh; tag 2.3 (\c, \bord, \fr...) bổ sung khi viết 2.3
+             (tags raw còn nguyên trên item để đối chiếu).
+       - \k/\K/\kf/\ko → base[i].anim.k = { type, durationMs, startMs }:
+           + durationMs = file × 10 (file ghi CENTISECOND — \k100 = 1s → 1000ms; chốt 03sep26).
+           + startMs = parser CỘNG DỒN theo thứ tự base của CÙNG dòng (syl trước + duration).
+           + type giữ nguyên: \kf/\K = hiệu ứng QUÉT (renderer: -webkit-background-clip:text +
+             linear-gradient + -webkit-text-fill-color:transparent, P% theo tick — KHÔNG clip-path);
+             \k/\ko = chuyển màu TỨC THÌ (secondary↔primary). Karaoke chỉ đổi màu hiển thị qua
+             --primary-color/--secondary-color, KHÔNG đổi size/box/position → không ảnh hưởng collision.
+           + nhiều \k trong CÙNG mục ({\k25}{\k30}na): anim.k = syl CUỐI, startMs vẫn cộng dồn đủ
+             (mục sau lấy mốc đúng) — ca hiếm, ghi chú trong code.
+       - collision KHÔNG lặp payload \t (chỉ signal t). \pos/\move/\org là line-level → khi 2.2 làm
+         thật, renderer gặp là tự disable collision (không cần signal riêng).
+
+    6. Tests:
+       - tests/parser.test.mjs: import classify; 2 expectation cập nhật theo classify (marker {\N} →
+         delta.data.marker; \b1 → delta.text 'font-weight':'700'). Các test cũ còn lại giữ nguyên.
+       - tests/tagProcess.test.mjs (MỚI): block test cho 2.4 — delta.text map CSS; \r baseStyleName
+         (style dòng / style tên); marker \h/\N/\n delta.data; \t → anim.t { t1,t2,easing,to } +
+         collision.t; \t chứa \pos/\move/\org → BỎ QUA; \k/\K/\kf/\ko durationMs ×10 + startMs cộng
+         dồn chính xác; shape lineCss { base, collision, clip }; tích hợp qua parser().
+       - npm test (node --test): 90 pass / 0 fail (03sep26).
+
+    Next steps checklist (bổ sung vào checklist 29aug26 + 02sep26):
+    [x] 12. processLineText (rename) + classify entry { base, collision, clip } + styleForLine — ĐÃ LÀM 03sep26
+    [x] 13. tagProcess.js: classifyLayoutLocal 2.4 + động \t/\k (metadata) + tests — ĐÃ LÀM 03sep26
+    [ ] 14. Session sau — 2.3 classifyDecoration (màu/bord/shad/\fa/\fr): merge delta vào item.delta đã có,
+            bổ sung target 2.3 vào anim.t[].to của \t (đọc lại từ tags raw)
+    [ ] 15. Session sau — 2.2 classifyCollision làm đầy an/pos/move/org (first-wins; \an vẫn tính collision;
+            pos/move/org → renderer tự disable)
+    [ ] 16. Session sau — 2.1 classifyClip: rawList + effectiveType/effectiveRaw last-wins (kể cả \clip trong \t)

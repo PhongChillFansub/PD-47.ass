@@ -161,7 +161,7 @@ test('parser: base (mục base tag-text) ghi vào lineCss (cùng chỉ số vớ
 		[
 			{ tags: ['\\pos(320,240)', '\\an5'], text: 'Xin ' },
 			{ tags: ['\\c&HFF&'], text: 'chào' },
-			{ tags: ['\\N'], text: '' }, // marker → mục base riêng
+			{ tags: ['\\N'], text: '', delta: { data: { marker: '\\N' } } }, // marker → mục base riêng (classify 2.4: delta.data.marker)
 			{ tags: [], text: 'các bạn' },
 		]
 	);
@@ -216,7 +216,7 @@ test('parser: pop/merge continuation đúng — đứt 3 lần vẫn gộp 1 eve
 	assert.equal(parsed.lineCss.length, 3);
 	assert.equal(parsed.events[1].text, '{\\b1}Đứt lần 1\nlần 2\nlần 3'); // gộp từ chuỗi gốc
 	assert.equal(parsed.events[1].startTime, 3000);
-	assert.deepEqual(parsed.lineCss[1].base, [{ tags: ['\\b1'], text: 'Đứt lần 1\nlần 2\nlần 3' }]);
+	assert.deepEqual(parsed.lineCss[1].base, [{ tags: ['\\b1'], text: 'Đứt lần 1\nlần 2\nlần 3', delta: { text: { 'font-weight': '700' } } }]);
 	assert.deepEqual(parsed.lineCss[2].base, [{ tags: [], text: 'Dòng kế' }]); // dòng sau không bị dính
 });
 
