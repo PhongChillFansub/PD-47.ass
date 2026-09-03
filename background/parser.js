@@ -15,6 +15,7 @@
  * utils: cung cấp logger(message, type = 'info', ...extra); dùng log/warn bên dưới.
  */
 import * as utils from './utils.js';
+import { classify } from './tagProcess.js'; // 03sep26: classify biến base → lineCss[i] đầy đủ { base, collision, clip }
 /** Định nghĩa/chú thích object FALLBACK_DEFAULT_STYLE (parsedDataFormat.style) 
  * @typedef {object} parsedDataFormat.style Kiểu style nguyên bản 
  * 
@@ -50,8 +51,10 @@ import * as utils from './utils.js';
  * @property {Array<parsedDataFormat.event>} events lưu các events (dialogue) của file sub
  * @property {object} globalCss định dạng các thuộc tính info (có thể chuyển) thành CSS
  * @property {Array} styleCss định dạng các style thành CSS ({container, text, data} — data chứa cả styleIndex, 02sep26)
- * @property {Array} lineCss mỗi phần tử { base } cùng chỉ số với events — base là danh sách mục base tag-text
- *   (02sep26: đổi tên segments → base; classify bước 4-7 sẽ ghi trực tiếp vào base + thêm collision, clip)
+ * @property {Array} lineCss mỗi phần tử { base, collision, clip } cùng chỉ số với events.
+ *   (02sep26: đổi tên segments → base; classify ghi trực tiếp vào base + thêm collision, clip.
+ *   03sep26: lineCss[i] = classify(processLineText(...)) — { base, collision, clip }; 2.4 layout +
+ *   động \t/\k làm thật, 2.3/2.2/2.1 để session sau — xem background/tagProcess.js)
  */
 /** Định nghĩa/chú thích object parsedData.info sau xử lí 
  * @typedef {object} parsedDataFormat.info
@@ -211,9 +214,9 @@ function validateAndNormalizeStyle(style) {
  * @param {boolean} doStripTags truthy = như Aegisub strip tags, falsy = ko strip, xử lí tất cả.
  * @param {string} text line.text dạng raw.
  * @returns {{base: Array<parsedDataFormat.baseItem>}} Entry lineCss: { base } (02sep26 — đổi tên
- *   segments → base; classify bước 4-7 sau này ghi trực tiếp vào base + thêm collision, clip).
+ *   segments → base; classify 03sep26 ghi trực tiếp vào base + thêm collision, clip).
  */
-function tagProcess(doStripTags, text) {
+function processLineText(doStripTags, text) {
 	const tokens = tokenizeLineText(text ?? '');
 	if (!doStripTags) return { base: baseFromTokens(tokens) }; // falsy → xử lí tất cả
 	// truthy → strip: nối text token + marker nguyên văn, bỏ mọi tag token.
@@ -427,8 +430,20 @@ export function hasKaraokeTag(tag) {
 export function isStandaloneToken(tok) {
 	return tok === '{\\h}' || tok === '{\\N}' || tok === '{\\n}';
 }
+/** [arena.ai] Lấy style ĐÃ CHUẨN HÓA của 1 dòng Dialogue (lookup theo orgline.style — tên style)
+ * trong parsedData.styles. Dùng làm styleRef cho classify() (base style cho \r / \fn rỗng...).
+ * Không tìm thấy (thiếu style, name rỗng lạ, style lỗi bị loại khi push) → fallback
+ * FALLBACK_DEFAULT_STYLE (const frozen — chỉ đọc, an toàn chia sẻ). @type {function}
+ * @param {Object} orgline Dòng Dialogue đã parse (có trường style = tên style).
+ * @param {parsedDataFormat.global} parsedData parsedData đang xây (styles đã push từ [V4+ Styles]).
+ * @returns {parsedDataFormat.style} Style chuẩn của dòng (hoặc fallback).
+ */
+function styleForLine(orgline, parsedData) {
+	const found = parsedData.styles.find(style => style.name === orgline.style);
+	return found ?? FALLBACK_DEFAULT_STYLE;
+}
 /** Hàm đọc text của file Aegisub.
- * @param {boolean} doStripTags Chế độ xử lí tag cho tagProcess() (chốt 02sep26, bản 2 — boolean):
+ * @param {boolean} doStripTags Chế độ xử lí tag cho processLineText() (chốt 02sep26, bản 2 — boolean):
  *   truthy (true, 1, 'x'...) → STRIP: xóa hết tag trong text (như Aegisub strip tags, marker \N/\h/\n giữ nguyên văn);
  *   falsy (false, 0, undefined, null, NaN, ''...) → xử lí tất cả tag như bình thường (mặc định an toàn).
  * @param {string} rawText Nội dung file ASS đầu vào dưới dạng text.
@@ -630,8 +645,12 @@ export function parser(doStripTags = false, rawText) {
 				orgline.raw = line; // Lưu lại chuỗi gốc đề phòng dòng tiếp theo bị ngắt
 				parsedData._lastRawDialogue = orgline; // Lưu tham chiếu dòng dialogue mới nhất
 				parsedData.events.push(orgline);
-				// base (mục base tag-text) của dòng ghi vào lineCss (cùng chỉ số với events), KHÔNG thay đổi orgline
-				parsedData.lineCss.push(tagProcess(doStripTags, orgline.text))
+				// base (mục base tag-text) của dòng ghi vào lineCss (cùng chỉ số với events), KHÔNG thay đổi orgline.
+				// 03sep26: qua classify() → lineCss[i] = { base, collision, clip } — cần styleRef của dòng
+				// (style đã chuẩn hóa, lookup theo orgline.style) để \r biết reset về style nào.
+				parsedData.lineCss.push(
+					classify(processLineText(doStripTags, orgline.text), styleForLine(orgline, parsedData))
+				)
     		}
 		}
 	}
@@ -792,7 +811,8 @@ export function tokenizeLineText(text) {
 // ==========================================================================
 // Thứ tự xử lí: tokenizeLineText (token + clean) → baseFromTokens (tách các tag đơn
 // trong tag token, ghép với text token kế tiếp thành 1 mục base).
-// Phân loại/phân cấp tag (nhóm 2.4 → 2.3 → 2.2 → 2.1) là bước SAU, chưa viết ở bản này.
+// Phân loại/phân cấp tag (nhóm 2.4 → 2.3 → 2.2 → 2.1): classify() ở background/tagProcess.js
+// (03sep26 — 2.4 layout + động \t/\k làm thật; 2.3/2.2/2.1 để session sau; xem file đó).
 //
 // BASE MODEL (theo pipeline): mỗi tag token kết hợp với text token tạo thành 1 mục base:
 //   base item = { tags: [...các tag đơn tách từ (các) tag token, raw nguyên văn], text: '...' }
@@ -808,6 +828,11 @@ export function tokenizeLineText(text) {
  * @typedef {object} parsedDataFormat.baseItem Đơn vị nhỏ nhất trong base: 1 cụm tag + 1 đoạn text.
  * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
  * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm tầng cuối).
+ *   (03sep26 — classify KHÔNG xóa tags khi tiêu thụ: nhóm sau 2.3/2.2/2.1 + renderer/debug đọc lại được.)
+ * @property {parsedDataFormat.baseItemDelta} [delta] 03sep26 — classify (tagProcess.js) sinh: mức text
+ *   (layout tĩnh \fs\fsc\fsp\fn\b\i) / data (\r → baseStyleName; marker \h\N\n). CHỈ có khi có nội dung.
+ * @property {parsedDataFormat.baseItemAnim} [anim] 03sep26 — classify sinh metadata nhóm ĐỘNG:
+ *   t (mỗi \t → { t1, t2, easing, to }) + k ({ type, durationMs, startMs }) — renderer resolve (Cách 1).
  */
 /** Định nghĩa/chú thích delta theo mức node của mục base (31aug26 — Chú ý 2 pipeline).
  * ĐỊNH HƯỚNG cho classify (bước 4-7): parser xử lí đến base thì mỗi mục base mang
