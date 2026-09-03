@@ -371,6 +371,7 @@ const matchSubtitle = (name, searchKey) => {
  *     id: string,
  *     fileName: string,
  *     fetchUrl: string,
+ *     cdnUrl?: string,
  *     folderUrl: string,
  *     sourceType: string,
  *     groupName: string
@@ -381,6 +382,7 @@ const matchSubtitle = (name, searchKey) => {
  *   id: string,
  *   fileName: string,
  *   fetchUrl: string,
+ *   cdnUrl?: string,
  *   folderUrl: string,
  *   sourceType: string,
  *   groupName: string,
@@ -428,16 +430,18 @@ export async function searchSubtitleFile(sources, searchKey) {
   return candidates;
 }
 
-/** [arena.ai] Tải toàn bộ text một file sub từ candidate.fetchUrl.
+/** [arena.ai] Tải toàn bộ text một file sub từ candidate.fetchUrl / cdnUrl.
  *
  * Dùng loggedFetch (timeout, HTTP, validate chữ ký ASS). Lỗi → null
  * + utils.warn, không throw. File > 10MB chỉ cảnh báo, vẫn trả text.
  * Dung lượng đo bằng UTF-8 của text đã tải (không phụ thuộc Content-Length).
+ * Ưu tiên cdnUrl (jsDelivr) nếu có, fallback fetchUrl (raw / gdrive).
  *
  * @param {{
  *   id?: string,
  *   fileName?: string,
- *   fetchUrl?: string
+ *   fetchUrl?: string,
+ *   cdnUrl?: string
  * }} candidate file trong chỉ mục / kết quả fetchSubtitleFile
  * @returns {Promise<string|null>} text file .ass, hoặc null nếu thất bại
  */
@@ -445,14 +449,24 @@ export async function fetchSubtitleText(candidate) {
   const id = candidate?.id ?? 'undefined';
   const fileName = candidate?.fileName ?? 'undefined';
 
-  if (!candidate?.fetchUrl) {
+  // Ưu tiên cdnUrl (GitHub -> jsDelivr), fallback fetchUrl (raw / gdrive)
+  const primaryUrl = candidate?.cdnUrl || candidate?.fetchUrl;
+  const fallbackUrl = candidate?.cdnUrl ? candidate?.fetchUrl : null;
+
+  if (!primaryUrl) {
     utils.warn(
-      `fetcher: fetchSubtitleText(): thiếu fetchUrl (${id}, ${fileName}).`
+      `fetcher: fetchSubtitleText(): thiếu fetchUrl/cdnUrl (${id}, ${fileName}).`
     );
     return null;
   }
 
-  const text = await loggedFetch(candidate.fetchUrl, id, 'file');
+  let text = await loggedFetch(primaryUrl, id, 'file');
+
+  // cdn fail (cache trễ, 404, bị chặn) -> thử lại raw
+  if (!text && fallbackUrl && fallbackUrl !== primaryUrl) {
+    utils.warn(`fetcher: fetchSubtitleText(): cdnUrl fail, fallback raw ${id}.`);
+    text = await loggedFetch(fallbackUrl, id, 'file');
+  }
 
   if (!text) {
     utils.warn(
@@ -521,6 +535,7 @@ const normalizeGDriveUrl = url => {
  *     id: string,
  *     fileName: string,
  *     fetchUrl: string,
+ *     cdnUrl?: string,
  *     folderUrl: string,
  *     sourceType: 'gdrive',
  *     groupName: string
@@ -660,6 +675,7 @@ const normalizeGitHubUrl = url => {
  *     id: string,
  *     fileName: string,
  *     fetchUrl: string,
+ *     cdnUrl: string,
  *     folderUrl: string,
  *     sourceType: 'github',
  *     groupName: string
@@ -719,14 +735,22 @@ async function scanGitHub(source) {
     const decodedPath = pathSegments.map(utils.decodeURISegment).join('/');
     source.name = decodedPath ? `${repo}/${decodedPath}` : repo;
 
+    // Chuẩn bị cdnUrl (jsDelivr) - dùng cho fetchSubtitleText ưu tiên
+    // branch có thể chứa '/' (VD: feat/new) -> encode từng đoạn, giữ '/'
+    const encodedBranch = branch.split('/').map(encodePathSegment).join('/');
     for (const item of items) {
       if (item.type !== 'file') continue; // Bỏ qua thư mục con và submodule
       if (!item.name.toLowerCase().endsWith('.ass')) continue;
+
+      const encodedFileName = encodePathSegment(item.name);
+      const cdnPath = encodedPath ? `${encodedPath}/${encodedFileName}` : encodedFileName;
+      const cdnUrl = `https://cdn.jsdelivr.net/gh/${owner}/${repo}@${encodedBranch}/${cdnPath}`;
 
       source.fileList.push({
         id: item.sha,
         fileName: item.name,
         fetchUrl: item.download_url,
+        cdnUrl,
         folderUrl: source.url,
         sourceType: 'github',
         groupName: source.name
@@ -770,6 +794,7 @@ async function scanGitHub(source) {
  *     id: string,
  *     fileName: string,
  *     fetchUrl: string,
+ *     cdnUrl?: string,
  *     folderUrl: string,
  *     sourceType: 'gdrive'|'github',
  *     groupName: string
