@@ -1,111 +1,16 @@
-// Tests cho parser.js: tokenizeLineText + baseFromTokens + parser().
+// Tests cho parser.js — QUA parser() (API công khai duy nhất được export).
+// 03sep26 (chủ ý): tokenizeLineText + baseFromTokens là PRIVATE — hành vi của chúng
+// được quan sát qua parsedData.lineCss[i].base (tags + text giữ nguyên sau classify;
+// delta/anim do classify gắn có test riêng ở tagProcess.test.mjs).
 // Chữ ký (chốt 02sep26, bản 2): parser(doStripTags = false, rawText) — truthy = strip tags,
 // falsy = xử lí tất cả → test gọi parser(false, rawText) / parser(true, rawText).
 // Chạy: npm test (node --test)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parser, tokenizeLineText, baseFromTokens } from '../background/parser.js';
+import { parser } from '../background/parser.js';
 
 // ======================================================================
-// tokenizeLineText
-// ======================================================================
-
-test('tokenize: gộp 2 tag liền nhau, bỏ tag comment thuần', () => {
-	assert.deepEqual(tokenizeLineText('{\\b1}{\\i1}x{chỉ comment}y'), ['{\\b1\\i1}', 'xy']);
-});
-
-test('tokenize: \\N/\\h đứng ngoài tag → wrap thành marker đứng riêng', () => {
-	assert.deepEqual(tokenizeLineText('lorem\\Nipsum\\hx'), ['lorem', '{\\N}', 'ipsum', '{\\h}', 'x']);
-});
-
-test('tokenize: \\{ \\} giữ nguyên văn trong text (unescape ở renderer)', () => {
-	assert.deepEqual(tokenizeLineText('\\{gin\\}'), ['\\{gin\\}']);
-});
-
-test('tokenize: tag sau chứa karaoke thì KHÔNG được gộp vào tag trước', () => {
-	assert.deepEqual(tokenizeLineText('{\\b1}{\\k25}na'), ['{\\b1}', '{\\k25}', 'na']);
-});
-
-test('tokenize: { không đóng → giữ nguyên văn như text', () => {
-	assert.deepEqual(tokenizeLineText('abc{def'), ['abc{def']);
-});
-
-// ======================================================================
-// baseFromTokens (tách tag trong token → mục base)
-// Thứ tự: tokenizeLineText xong → mới tách tag trong token → ghép text token thành mục base
-// ======================================================================
-
-test('base: text thuần không có tag → 1 mục base { tags: [], text }', () => {
-	assert.deepEqual(baseFromTokens(tokenizeLineText('xin chào')), [{ tags: [], text: 'xin chào' }]);
-});
-
-test('base: 1 tag token + text token = 1 mục base, tag tách thành các tag đơn', () => {
-	assert.deepEqual(
-		baseFromTokens(tokenizeLineText('{\\bord2\\t(\\fs30)\\c&HFF&}x')),
-		[{ tags: ['\\bord2', '\\t(\\fs30)', '\\c&HFF&'], text: 'x' }] // \t(...) không bị tách oan
-	);
-});
-
-test('base: text trước mọi tag → mục base { tags: [] }; mỗi tag token mở mục base mới', () => {
-	assert.deepEqual(
-		baseFromTokens(tokenizeLineText('abc{\\b1}de{\\i}f')),
-		[
-			{ tags: [], text: 'abc' },
-			{ tags: ['\\b1'], text: 'de' },
-			{ tags: ['\\i'], text: 'f' },
-		]
-	);
-});
-
-test('base: nhiều tag token liền nhau (karaoke) → gộp chung tags của 1 mục base', () => {
-	assert.deepEqual(
-		baseFromTokens(tokenizeLineText('{\\b1}{\\k25}na')),
-		[{ tags: ['\\b1', '\\k25'], text: 'na' }]
-	);
-});
-
-test('base: marker {\\N} → mục base RIÊNG tại đúng vị trí, không ăn mất tag pending', () => {
-	assert.deepEqual(
-		baseFromTokens(tokenizeLineText('a{\\N}b')),
-		[
-			{ tags: [], text: 'a' },
-			{ tags: ['\\N'], text: '' },
-			{ tags: [], text: 'b' },
-		]
-	);
-	// \N đứng trước 1 tag thay vì text: marker flush riêng, \i1 vẫn chờ text kế tiếp
-	assert.deepEqual(
-		baseFromTokens(tokenizeLineText('a{\\N}{\\i1}b')),
-		[
-			{ tags: [], text: 'a' },
-			{ tags: ['\\N'], text: '' },
-			{ tags: ['\\i1'], text: 'b' },
-		]
-	);
-});
-
-test('base: marker đứng CUỐI dòng vẫn giữ (đã flush thành mục base riêng)', () => {
-	assert.deepEqual(
-		baseFromTokens(tokenizeLineText('text{\\N}')),
-		[
-			{ tags: [], text: 'text' },
-			{ tags: ['\\N'], text: '' },
-		]
-	);
-});
-
-test('base: tag token cuối dòng không có text theo sau → BỎ (không tạo mục base)', () => {
-	assert.deepEqual(baseFromTokens(tokenizeLineText('text{\\i}')), [{ tags: [], text: 'text' }]);
-});
-
-test('base: tokens rỗng → mảng rỗng; input không phải array → mảng rỗng', () => {
-	assert.deepEqual(baseFromTokens(tokenizeLineText('')), []);
-	assert.deepEqual(baseFromTokens([]), []);
-	assert.deepEqual(baseFromTokens(null), []);
-});
-
-// ======================================================================
-// parser() — parse thô không đổi, không gắn gì thêm vào orgline
+// Fixture + helper
 // ======================================================================
 
 const MINI_ASS = [
@@ -125,6 +30,128 @@ const MINI_ASS = [
 	'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
 	'Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\\pos(320,240)\\an5}Xin {\\c&HFF&}chào{\\N}các bạn',
 ].join('\n');
+
+/** Text gốc của dòng Dialogue trong MINI_ASS — mỏ neo để thay text khi test. */
+const DLG_TEXT = '{\\pos(320,240)\\an5}Xin {\\c&HFF&}chào{\\N}các bạn';
+
+/** MINI_ASS với text Dialogue được thay thế (replacer function — '$' trong text không bị diễn giải). */
+const assWithText = text => MINI_ASS.replace(DLG_TEXT, () => text);
+
+/** Base của dòng ĐẦU qua parser() — chiếu còn { tags, text }: classify (2.4) có gắn
+ *  delta/anim vào item, nhưng cấu trúc tags + text là phần tokenizer/baseFromTokens quyết định. */
+const baseOfLine = text =>
+	parser(false, assWithText(text)).lineCss[0].base.map(({ tags, text: itemText }) => ({ tags, text: itemText }));
+
+// ======================================================================
+// tokenizeLineText + baseFromTokens — quan sát qua lineCss[0].base (hàm private theo chủ ý)
+// ======================================================================
+
+test('tokenize: gộp 2 tag liền nhau, bỏ tag comment thuần', () => {
+	assert.deepEqual(baseOfLine('{\\b1}{\\i1}x{chỉ comment}y'), [{ tags: ['\\b1', '\\i1'], text: 'xy' }]);
+});
+
+test('tokenize: \\N/\\h đứng ngoài tag → wrap thành marker, thành mục base riêng', () => {
+	assert.deepEqual(baseOfLine('lorem\\Nipsum\\hx'), [
+		{ tags: [], text: 'lorem' },
+		{ tags: ['\\N'], text: '' },
+		{ tags: [], text: 'ipsum' },
+		{ tags: ['\\h'], text: '' },
+		{ tags: [], text: 'x' },
+	]);
+});
+
+test('tokenize: \\{ \\} giữ nguyên văn trong text (unescape ở renderer)', () => {
+	assert.deepEqual(baseOfLine('\\{gin\\}'), [{ tags: [], text: '\\{gin\\}' }]);
+});
+
+test('tokenize: { không đóng → giữ nguyên văn như text', () => {
+	assert.deepEqual(baseOfLine('abc{def'), [{ tags: [], text: 'abc{def' }]);
+});
+
+test('tokenize: double-escape \\\\ — bỏ tag rác "\\" đơn, không sinh tag lạ', () => {
+	// content (giải mã): \b1\\i1 / \\b1\i1 (nguyên test splitOverrideTags cũ — hàm private, test qua parser)
+	assert.deepEqual(baseOfLine('{\\b1\\\\i1}x'), [{ tags: ['\\b1', '\\i1'], text: 'x' }]); // \\ giữa 2 tag
+	assert.deepEqual(baseOfLine('{\\\\b1\\i1}x'), [{ tags: ['\\b1', '\\i1'], text: 'x' }]); // \\ dẫn đầu
+	assert.deepEqual(baseOfLine('x{\\\\b1}y'), [
+		{ tags: [], text: 'x' },
+		{ tags: ['\\b1'], text: 'y' },
+	]); // \\ dẫn đầu giữa dòng vẫn là tag hợp lệ
+	// \ NGAY TRƯỚC } (\\} hoặc \}): regex tokenizer bắt cặp escape \} → tag KHÔNG bao giờ
+	// đóng → toàn cụm giữ nguyên văn như text (hành vi thật của code — không phải tag rác bị bỏ)
+	assert.deepEqual(baseOfLine('{\\b1\\\\}x'), [{ tags: [], text: '{\\b1\\\\}x' }]);
+	assert.deepEqual(baseOfLine('{\\\\}x'), [{ tags: [], text: '{\\\\}x' }]); // toàn \\ → không tag nào
+});
+
+test('base: text thuần không có tag → 1 mục base { tags: [], text }', () => {
+	assert.deepEqual(baseOfLine('xin chào'), [{ tags: [], text: 'xin chào' }]);
+});
+
+test('base: 1 tag token + text token = 1 mục base, tag tách thành các tag đơn', () => {
+	assert.deepEqual(
+		baseOfLine('{\\bord2\\t(\\fs30)\\c&HFF&}x'),
+		[{ tags: ['\\bord2', '\\t(\\fs30)', '\\c&HFF&'], text: 'x' }] // \t(...) không bị tách oan
+	);
+});
+
+test('base: text trước mọi tag → mục base { tags: [] }; mỗi tag token mở mục base mới', () => {
+	assert.deepEqual(
+		baseOfLine('abc{\\b1}de{\\i}f'),
+		[
+			{ tags: [], text: 'abc' },
+			{ tags: ['\\b1'], text: 'de' },
+			{ tags: ['\\i'], text: 'f' },
+		]
+	);
+});
+
+test('base: nhiều tag token liền nhau (karaoke) → gộp chung tags của 1 mục base', () => {
+	assert.deepEqual(
+		baseOfLine('{\\b1}{\\k25}na'),
+		[{ tags: ['\\b1', '\\k25'], text: 'na' }]
+	);
+});
+
+test('base: marker {\\N} → mục base RIÊNG tại đúng vị trí, không ăn mất tag pending', () => {
+	assert.deepEqual(
+		baseOfLine('a{\\N}b'),
+		[
+			{ tags: [], text: 'a' },
+			{ tags: ['\\N'], text: '' },
+			{ tags: [], text: 'b' },
+		]
+	);
+	// \N đứng trước 1 tag thay vì text: marker flush riêng, \i1 vẫn chờ text kế tiếp
+	assert.deepEqual(
+		baseOfLine('a{\\N}{\\i1}b'),
+		[
+			{ tags: [], text: 'a' },
+			{ tags: ['\\N'], text: '' },
+			{ tags: ['\\i1'], text: 'b' },
+		]
+	);
+});
+
+test('base: marker đứng CUỐI dòng vẫn giữ (đã flush thành mục base riêng)', () => {
+	assert.deepEqual(
+		baseOfLine('text{\\N}'),
+		[
+			{ tags: [], text: 'text' },
+			{ tags: ['\\N'], text: '' },
+		]
+	);
+});
+
+test('base: tag token cuối dòng không có text theo sau → BỎ (không tạo mục base)', () => {
+	assert.deepEqual(baseOfLine('text{\\i}'), [{ tags: [], text: 'text' }]);
+});
+
+test('base: text rỗng → base rỗng', () => {
+	assert.deepEqual(baseOfLine(''), []);
+});
+
+// ======================================================================
+// parser() — parse thô không đổi, không gắn gì thêm vào orgline
+// ======================================================================
 
 test('parser: named export, parse info/styles/events như cũ', () => {
 	assert.equal(typeof parser, 'function');
@@ -149,8 +176,8 @@ test('parser: KHÔNG gắn base/classify vào orgline (tách tag là bước r�
 	assert.equal(line.collision, undefined);
 	assert.equal(line.clip, undefined);
 	assert.equal(line.segments, undefined);
-	// text token hóa + tách tag ngay tại chỗ khi cần (thứ tự: token → tách tag → phân loại)
-	assert.deepEqual(baseFromTokens(tokenizeLineText(line.text)).length, 4);
+	// text đã được token → tách tag → classify vào lineCss (thứ tự: token → tách tag → phân loại)
+	assert.equal(parsed.lineCss[0].base.length, 4);
 });
 
 test('parser: base (mục base tag-text) ghi vào lineCss (cùng chỉ số với events), KHÔNG đụng orgline', () => {
