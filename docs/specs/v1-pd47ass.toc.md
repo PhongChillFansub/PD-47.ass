@@ -11,7 +11,7 @@
 - **Mục tiêu**: Hoàn thiện content script renderer + các phần classify còn lại (2.3, 2.2 an/pos/move/org, 2.1) + popup.js + options page, để extension v0.1.0 chạy được end-to-end trên YouTube.
 - **Phạm vi (scope)**: xem Out of Scope.
 - **Nguồn kiến trúc**: `pipeline.txt` (primary source cho đến khi `CONTEXT.md` được tạo).
-- **Nguồn spec hội thoại**: 64 câu Q&A trong session `/grilling` arena/01a06dcc.
+- **Nguồn spec hội thoại**: 16 round Q&A trong session `/grilling` arena/01a06dcc. Phụ lục cuối file truy vết được **63** câu (range `Q1–Q47` rồi `Q49–Q64` — **thiếu Q48**); transcript không persist nên không khôi phục được. Các chỗ khác ghi "64 câu" là theo số đếm lúc grilling.
 
 ---
 
@@ -19,8 +19,8 @@
 
 - Extension PD-47.ass (Chrome MV3, chromium 131+, tự host qua GitHub Releases) là bản viết lại gần như toàn bộ ASS-CEE cũ.
 - Tính năng chính: cho phép **người xem phim/sub fansub trên YouTube** cài extension, add nguồn file `.ass` (Google Drive folder / GitHub folder / upload local), khi mở video YouTube có sub Aegisub thì extension tự render sub đè lên player, bám sát chuẩn Aegisub (V4+ Styles, libass-ish: text style, karaoke, \t, \move, vector…).
-- Trạng thái hiện tại (03sep26): đã có `fetcher.js` (beta), `parser.js` (beta, đã xử lý 2.4 + động \t/\k), `storage.js` (alpha, đã có 11 export, 11 key), `tagProcess.js` (classify 2.4 thật, 2.3/2.2-an-pos-move-org/2.1 còn stub), `background/background.js` (alpha, hầu như rỗng), `popup.html` (đã thiết kế xong 4 cột, `popup.js` rỗng), chưa có content script, chưa có options page, chưa có message bus BG ↔ CS, chưa có renderer.
-- Người dùng cuối (end-user / viewer) hiện chưa thể dùng extension vì thiếu renderer + content script + options page + popup.js.
+- Trạng thái hiện tại (03sep26): đã có `fetcher.js` (beta), `parser.js` (beta, đã xử lý 2.4 + động \t/\k), `storage.js` (alpha, đã có 11 export, **5 key**: `ASSCEE_sourceList`, `ASSCEE_subData_<videoId>`, `ASSCEE_subIndex`, `ASSCEE_config`, `ASSCEE_renderData`), `tagProcess.js` (classify 2.4 thật, 2.3/2.2-an-pos-move-org/2.1 còn stub), `background/background.js` (alpha, hầu như rỗng), `popup.html` (đã thiết kế xong 4 cột, `popup.js` rỗng), chưa có content script, chưa có options page, chưa có message bus BG ↔ CS, chưa có renderer.
+- Viewer hiện chưa thể dùng extension vì thiếu renderer + content script + options page + popup.js. (Glossary `CONTEXT.md` chốt term `viewer`, tránh "end-user".)
 
 ---
 
@@ -50,7 +50,7 @@ Hoàn thiện extension v0.1.0 đạt **v1** theo nghĩa:
 10. As a viewer, I want the popup to show: 3 stats (FPS, NPS, DFPS), the sub's Script Info Title, the sub extension's log, and 2 buttons (reload renderer, open options page).
 11. As a viewer, I want the renderer to **auto-hide** when the current YouTube video has no matching sub in any source, so that I'm not paying for a renderer that has nothing to do.
 12. As a viewer, I want the renderer to NOT conflict technically with YouTube's built-in CC (it injects a separate DOM node), so that toggling either is independent.
-13. As a sub provider (fansub author), I want to keep the `.ass` file in **plain Aegisub V4+ format** (Aegisub v3.4.2 keys only in [Script Info]: Title, Original Script, Original Translation, Original Editing, Original Timing, Synch Point, Script Updated By, Update Details), so that the file opens in Aegisub without warnings; the extension reads those keys for display + future offset feature.
+13. As a sub provider, I want to keep the `.ass` file in **plain Aegisub V4+ format** (Aegisub v3.4.2 keys only in [Script Info]: Title, Original Script, Original Translation, Original Editing, Original Timing, Synch Point, Script Updated By, Update Details), so that the file opens in Aegisub without warnings; the extension reads those keys for display + future offset feature.
 14. As a sub provider, I want to name files with `#<videoId>` tag anywhere in the name (case-insensitive) so the extension auto-maps; if no tag, the viewer's fuzzy search still finds them.
 15. As a viewer, I want options page to manage all sources (add/remove/re-fetch), per-video sub cache, config keys.
 16. As a viewer, I want source list fetch to be **manual** (only when I click "Refresh sources" in options page), with **60-second per-source cooldown** to avoid hammering Drive/GitHub.
@@ -69,13 +69,13 @@ Hoàn thiện extension v0.1.0 đạt **v1** theo nghĩa:
 - `background/tagProcess.js` (partial) — viết tiếp `classifyDecoration` (2.3), `classifyCollision` (2.2 an/org/pos/move), `classifyClip` (2.1).
 - `background/storage.js` (alpha) — ổn; thêm config keys khi cần (không liệt kê trong spec này).
 - `background/background.js` (alpha) — viết message bus BG ↔ CS ↔ options page.
-- `background/options.html` + `background/options.js` — **MỚI**, viết mới.
+- `options.html` + `options.js` (**repo root**) — **MỚI**, viết mới. `manifest.json` đang khai `"options_page": "options.html"` (root).
 - `content/overlay.js` (hoặc tên tương đương) — **MỚI**, content script renderer.
 - `content/adapters/youtube.js` — **MỚI**, YouTube `PlayerAdapter`.
 - `content/adapters/index.js` — registry; Bilibili stub cho tương lai.
-- `popup/popup.js` — **MỚI**; đã có `popup.html` (thiết kế cố định).
+- `popup.js` (**repo root**) — **MỚI**; đã có `popup.html` ở root (thiết kế cố định, dòng 42 có `<script src="popup.js">`; `manifest.json` khai `"default_popup": "popup.html"`).
 - `popup-only-ui-theme/*` — giữ nguyên.
-- Tests mới: `tests/tagProcess.test.mjs` (mở rộng 2.3/2.2/2.1), `tests/renderer.test.mjs` (mới — low-level, deterministic, không cần browser).
+- Tests mới: `tests/tagProcess.test.mjs` (mở rộng 2.3/2.2/2.1), `tests/renderer.test.mjs` (mới — **mid-level**, deterministic, không cần browser; xem §5.1 — bản TOC này trước đó ghi nhầm "low-level").
 
 ### 4.2 Data contracts
 - `parsedData` (đã chốt ở `parser.js`, typedef `parsedDataFormat`): `info, styles, events, globalCss, styleCss, lineCss[i]={base,collision,clip}`. BG gửi nguyên object này cho CS 1 lần, không gửi theo frame.
@@ -135,7 +135,7 @@ Hoàn thiện extension v0.1.0 đạt **v1** theo nghĩa:
 - Phần 2.4 (đã làm) + động `\t`/`\k` (đã làm) + tagProcess strip mode (đã làm) → giữ nguyên.
 
 ### 4.7 Background ↔ Content Script ↔ Options page
-- **CS chỉ làm renderer** (xem §4.5). CS **không bao giờ cần source data** (đúng Q54).
+- **CS chỉ làm renderer** (xem §4.5). CS **không bao giờ cần source data** (đúng Q54). *Đính chính 05sep26: phụ lục cuối file mô tả Q54 là "BG chỉ fetch on options page action"; mệnh đề này được chốt lại theo lý do **content-side vs background-side** — xem ADR 0001.*
 - **BG giao tiếp** với cả CS lẫn options page.
 - **Options ↔ CS** (nếu cần) **thông qua BG**, không trực tiếp.
 - **CS gọi BG qua message** (parser, fetcher, storage đều ở BG).
@@ -154,7 +154,7 @@ Hoàn thiện extension v0.1.0 đạt **v1** theo nghĩa:
 - **Per-source cooldown 60s** ở BG để tránh spam Drive/GitHub.
 - **Source refresh**: chỉ khi viewer bấm "Refresh sources" trong options page (manual).
 - **Fetch error policy**: storage trả `""` (thành công) / chuỗi lỗi (fail input/nghiệp vụ) / `throw` (lỗi lập trình) — giữ quy ước hiện tại.
-- **Rate limiting**: cooldown per source 60s; retry với backoff khi fail (1s, 2s, 4s, 8s, max 3 lần) — **chưa chốt**, có thể không cần vì cooldown đã đủ.
+- **Rate limiting**: cooldown per source 60s; retry với backoff khi fail (1s, 2s, 4s, 8s, max 3 lần) — **chưa chốt**, có thể không cần vì cooldown đã đủ. *ĐÃ CHỐT 05sep26: KHÔNG làm retry backoff — ADR 0003.*
 
 ### 4.10 Manifest / permissions
 - Giữ nguyên: `storage, activeTab, scripting, unlimitedStorage` + `host_permissions` (Drive, GitHub raw, api.github.com) + `optional_host_permissions` (YouTube, Bilibili).
@@ -189,7 +189,7 @@ Hoàn thiện extension v0.1.0 đạt **v1** theo nghĩa:
 - **Quy tắc test** (theo skill `/to-spec`): chỉ test external behavior, không test implementation details. Mỗi test phải có thể đọc được như user story.
 
 ### 5.2 Coverage mục tiêu
-- Parser + classify: ≥ 90% statement (giữ vì đã pass 90/90 tests ở 03sep26).
+- Parser + classify: ≥ 90% statement (toàn suite `npm test` = **91/91 pass** tại 05sep26; `pipeline.txt` ghi 90 pass tại 03sep26).
 - Storage: ≥ 90% branch (test race condition, cooldown, error).
 - Fetcher: tăng coverage cho `searchSubtitleFile` (chỉ happy path ở hiện tại).
 - Renderer: chưa chốt %; ưu tiên edge case (video pause, tab switch, race với reload).
@@ -226,7 +226,7 @@ Hoàn thiện extension v0.1.0 đạt **v1** theo nghĩa:
 - **Open question cần chốt trước khi viết spec chính thức** (chưa hỏi trong grilling):
   1. Schema message BG ↔ CS ↔ Options cụ thể — sẽ dùng file `background.js` cũ của ASS-CEE mà chủ repo sẽ gửi.
   2. `host_permissions` cho YouTube: giữ `optional_host_permissions` hay chuyển sang `host_permissions`? (cần cho `chrome.scripting.executeScript` dynamic).
-  3. Retry policy với backoff có cần không (cooldown 60s đã có thể đủ).
+  3. Retry policy với backoff có cần không (cooldown 60s đã có thể đủ). *Đã chốt 05sep26: KHÔNG làm — ADR 0003; không còn là open question trong spec §7.1 (danh sách còn 6 mục).*
   4. Tên file content script (đề xuất `content/overlay.js`).
   5. Tên file `PlayerAdapter` interface (đề xuất `content/adapters/player-adapter.js`).
 
@@ -251,7 +251,7 @@ Hoàn thiện extension v0.1.0 đạt **v1** theo nghĩa:
 
 ---
 
-## Phụ lục: Tổng hợp Q&A đã chốt (16 round, 64 câu)
+## Phụ lục: Tổng hợp Q&A đã chốt (16 round — 63 câu truy vết được, thiếu Q48)
 
 Xem các round trong session grilling arena/01a06dcc-pd-47-ass để tra cứu. Tóm tắt nhanh:
 - R1 (Q1–Q4): primary actor = viewer; YouTube trước; Drive+GitHub+upload; to-spec + publish.
@@ -264,8 +264,8 @@ Xem các round trong session grilling arena/01a06dcc-pd-47-ass để tra cứu. 
 - R8 (Q28–Q30): best-effort perf; popup giữ nguyên `popup.html` (3 stat, title, log); tự host, định hướng Chrome+Firefox.
 - R9 (Q31–Q34): chỉ 3 stat; theo chuẩn Aegisub v3.4.2; không cần OOS; test low+mid level.
 - R10 (Q35–Q38): chỉ Chromium 131+ MVP; sub overlap chuẩn Aegisub; UI VN; publish issue + label.
-- R11 (Q39–Q43): grill tiếp implementation decisions — DOM/CSS+canvas fallback, error policy, rvfc only, message bus chưa chốt.
-- R12 (Q44–Q47): tóm tắt search; spec VN; file ở `docs/specs/v1-renderer.md`; full flow file+issue.
+- R11 (Q39–Q43): grill tiếp implementation decisions — DOM/CSS+canvas fallback, error policy, rvfc only, message bus chưa chốt. *(5 số câu nhưng chỉ 4 ý được ghi lại — 1 ý chưa được tóm tắt, transcript không persist.)*
+- R12 (Q44–Q47): tóm tắt search; spec VN; file ở `docs/specs/v1-renderer.md` *(tên đề xuất lúc grilling — sau đổi thành `docs/specs/v1-pd47ass.md`, xem §8; file `v1-renderer.md` chưa từng tồn tại)*; full flow file+issue.
 - R13 (Q49–Q52): empty state; self-host; cleanup như ASS-CEE; permission thêm khi cần.
 - R14 (Q53–Q56): dynamic inject; BG chỉ fetch on options page action; migration on-demand; cooldown 60s/source.
 - R15 (Q57–Q60): options↔CS qua BG; CS gọi BG qua message; spec không liệt kê config keys; không telemetry.

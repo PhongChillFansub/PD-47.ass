@@ -14,11 +14,11 @@ Dùng 5 nhãn triage mặc định của mattpocock/skills, tên nhãn trùng t�
 
 ### Domain docs
 
-Single-context: một `CONTEXT.md` + `docs/adr/` ở repo root (tạo lười khi cần, chưa có sẵn). See `docs/agents/domain.md`.
+Single-context: một `CONTEXT.md` (glossary, 40 term) + `docs/adr/` (7 ADR: 0001–0007) ở repo root — **đã có** từ 05sep26, tạo lười theo skill `/domain-modeling`. See `docs/agents/domain.md`.
 
 ### Installed skills
 
-25 skill từ [mattpocock/skills](https://github.com/mattpocock/skills) (MIT — bản quyền xem `LICENSE` trong thư mục) đã cài sẵn vào `.agents/skills/` — bucket engineering + productivity; bucket `deprecated`/`misc`/`in-progress` của repo nguồn KHÔNG cài. Nguồn cài: commit `3cca18b` (05sep26).
+25 skill từ [mattpocock/skills](https://github.com/mattpocock/skills) (MIT — bản quyền xem `LICENSE` trong thư mục) đã cài sẵn vào `.agents/skills/` — bucket engineering + productivity; bucket `deprecated`/`misc`/`in-progress` của repo nguồn KHÔNG cài. Nguồn cài: commit `3cca18b` của repo `mattpocock/skills` (commit đó đề ngày 04sep26; cài vào repo này 04sep26).
 
 Cách dùng cho mọi agent session (Arena, Claude Code, Codex, Cursor...):
 

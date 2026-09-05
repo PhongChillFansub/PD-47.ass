@@ -1,7 +1,7 @@
 # Code Review — branch `arena/01a06dcc-pd-47-ass` vs empty tree
 
 > **Skill**: `/code-review` (xem `.agents/skills/code-review/SKILL.md`).
-> **Fixed point**: empty tree (`$(git hash-object -t tree /dev/null)`). Diff = 99 files, 8301 insertions, 0 deletions.
+> **Fixed point**: empty tree (`$(git hash-object -t tree /dev/null)`), đo trên **baseline `ab3b264`** (trước khi session này thêm artifact) = **99 files, 8301 insertions, 0 deletions**. Tại thời điểm merge (PR #26 → `editor`, commit `99c5fc8`) cây là **111 files / 10104 insertions**; 12 file chênh lệch chính là artifact của session (spec 842 + TOC 272 + báo cáo này 227 + `CONTEXT.md` 154 + 7 ADR 49 + handoff 260 = 1804 dòng). Tức review này **không** bao gồm các artifact mới — chỉ review code.
 > **Scope lọc** (bỏ `.agents/`, `docs/`, `popup-only-ui-theme/`, `skills-lock.json`): ~4400 dòng code, 16 file (6 source + 4 test + 1 HTML + 1 JS rỗng + 1 manifest + 1 package.json + 1 README + 1 AGENTS.md).
 > **Spec source**: [`docs/specs/v1-pd47ass.md`](./v1-pd47ass.md).
 > **Standards sources**:
@@ -18,19 +18,21 @@ Repo này **không có** file `CODING_STANDARDS.md` / `CONTRIBUTING.md`. Coding 
 
 ### A. Hard violations (code mâu thuẫn với `pipeline.txt` — đã chốt trước đó)
 
-1. **`background/background.js` rỗng** — chỉ 2 dòng (`// v0.1.0 20aug26` + `// alpha mode` + `"use strict"`). Spec §4.7 + `pipeline.txt` đã chốt BG phải có **message bus + lifecycle + cooldown wrapper**. Đây là thiếu sót lớn nhất, không phải smell — là **thiếu implementation theo spec đã chốt**.
+1. **`background/background.js` rỗng** — chỉ 3 dòng (`// v0.1.0 20aug26` + `// alpha mode` + `"use strict"`; `wc -l` báo 2 vì thiếu newline cuối file). Spec §4.7 + `pipeline.txt` đã chốt BG phải có **message bus + lifecycle + cooldown wrapper**. Đây là thiếu sót lớn nhất, không phải smell — là **thiếu implementation theo spec đã chốt**.
 
-2. **`popup/popup.js` rỗng** (0 dòng). Spec §4.14 đã chốt popup phải đọc `ASSCEE_renderData` + gửi `renderer/reload` + mở options page. `popup.html` đã có sẵn 4 cột, đang chờ JS.
+2. **`popup.js` rỗng** (0 byte, ở **repo root** — không phải `popup/popup.js`; thư mục `popup/` chưa từng tồn tại). Spec §4.14 đã chốt popup phải đọc `ASSCEE_renderData` + gửi `renderer/reload` + mở options page. `popup.html` đã có sẵn 4 cột, đang chờ JS.
 
 3. **Chưa có content script** (`content/overlay.js`, `content/renderer.js`, `content/adapters/*.js`). Spec §4.5 + §4.16 đã chốt cần `PlayerAdapter` interface + YouTube adapter. Toàn bộ thư mục `content/` chưa tồn tại.
 
-4. **Chưa có options page** (`background/options.html`, `background/options.js`). Spec §4.15 đã liệt kê tính năng tối thiểu.
+4. **Chưa có options page** (`options.html`, `options.js` — **repo root**, theo `manifest.json`). Spec §4.15 đã liệt kê tính năng tối thiểu. Xem thêm mục 8 về hệ quả của việc file này chưa tồn tại.
 
 5. **Stub `classifyDecoration` và `classifyClip` trong `tagProcess.js`** (line 340-342, 380-384) — đều có `// TODO 03sep26: implement khi tới session 2.3/2.1`. Spec §4.6 (mục #14 + #16) đã chốt phải implement 2.3 và 2.1. Đây là TODO thật, không phải comment thừa.
 
-6. **`addSubData` (line 144-145, `storage.js`)** có comment `// to-do: sửa lại phần này sau khi viết xong parser.` — parser đã viết xong (90/90 tests), TODO vẫn còn. Nếu logic đã ổn (theo test pass) thì TODO nên xóa; nếu chưa ổn thì đã stale.
+6. **`addSubData` (comment ở line 144, hàm ở line 152 — `storage.js`)** có comment `// to-do: sửa lại phần này sau khi viết xong parser.` — parser đã viết xong (toàn suite 91/91 pass tại 05sep26; `pipeline.txt` ghi 90 pass tại 03sep26), TODO vẫn còn. Nếu logic đã ổn (theo test pass) thì TODO nên xóa; nếu chưa ổn thì đã stale.
 
 7. **`manifest.json` `optional_host_permissions` YouTube + Bilibili** — spec §4.10 (mục "chưa chốt") đã ghi "có thể chuyển sang host_permissions để chrome.scripting.executeScript dynamic work". Code hiện chưa quyết — chưa vi phạm, nhưng blocker cho §4.7.2.
+
+8. **`manifest.json` khai `"options_page": "options.html"` nhưng file KHÔNG tồn tại** *(thêm 05sep26 khi verify lại)* — `find . -name "options*"` = 0 kết quả (không có ở root lẫn `background/`). Chrome validate path này lúc load unpacked → extension **không load được** cho tới khi tạo `options.html`. Chủ repo xác nhận 05sep26: file chưa viết (không phải path sai). Đây là blocker thật, mục 4 ở trên chỉ nói "thiếu tính năng" là chưa đủ nặng. Chưa test được trong sandbox (không có Chromium) — cần xác nhận lại trên máy thật.
 
 ### B. Judgement calls (smell baseline + convention suy ra từ code)
 
@@ -38,7 +40,7 @@ Repo này **không có** file `CODING_STANDARDS.md` / `CONTRIBUTING.md`. Coding 
 
 #### B.1 Mysterious Name
 
-- **`SUBTITLE_DATA_KEY_BASE`** (`storage.js` line 22) — tên hơi dài, nhưng ý nghĩa rõ (base key cho sub data, nối thêm `_videoId`). OK.
+- **`SUBTITLE_DATA_KEY_BASE`** (`storage.js` line 26) — tên hơi dài, nhưng ý nghĩa rõ (base key cho sub data, nối thêm `_videoId`). OK.
 - **`newData`** trong `setRendererStat` (line 343) — hơi generic, nhưng đi với JSDoc giải thích `fps, nps, dfps, subTitle`. OK.
 - **`buildCacheEntry` / `readSubIndex`** — tên nói lên hành vi. OK.
 - **Không có finding đáng kể** về Mysterious Name.
@@ -80,13 +82,13 @@ Repo này **không có** file `CODING_STANDARDS.md` / `CONTRIBUTING.md`. Coding 
   1. Source list management (addSource/getSourceList/removeSource).
   2. Sub data cache (addSubData/getSubDataList/useSubData/removeSubData).
   3. Config + Renderer stat.
-- 3 lý do khác nhau để sửa. **Có thể** tách thành 3 file: `storage-sources.js`, `storage-subdata.js`, `storage-config.js`, cùng dùng chung `enqueueWrite` private. → **Judgement call**, có thể refactor khi scale. Hiện 366 dòng, chưa tới ngưỡng phải tách.
-- **`parser.js`** (898 dòng) chịu nhiều trách nhiệm: tokenizer, validator, CSS generator, classify caller. Đã có `tagProcess.js` tách classify. OK.
+- 3 lý do khác nhau để sửa. **Có thể** tách thành 3 file: `storage-sources.js`, `storage-subdata.js`, `storage-config.js`, cùng dùng chung `enqueueWrite` private. → **Judgement call**, có thể refactor khi scale. Hiện 365 dòng, chưa tới ngưỡng phải tách.
+- **`parser.js`** (898 dòng ✓) chịu nhiều trách nhiệm: tokenizer, validator, CSS generator, classify caller. Đã có `tagProcess.js` tách classify. OK.
 
 #### B.9 Speculative Generality
 
 - **`enqueueWrite`** (`storage.js` line 49) — wrapper cho race-condition. Hiện chỉ `storage.js` dùng, nhưng comment (line 41-46) giải thích "Module khác muốn ghi storage thì gọi qua các hàm export ở đây, không tự viết queue" → giữ private. OK, không speculative.
-- **`crypto.randomUUID()`** (line 99) — chuẩn web, dùng cho `storageId`. Không phải abstraction thừa.
+- **`crypto.randomUUID()`** (line 97) — chuẩn web, dùng cho `storageId`. Không phải abstraction thừa.
 - **`FALLBACK_DEFAULT_STYLE`** trong `parser.js` (chưa đọc chi tiết, đã thấy ref ở `tagProcess.js` classify comment line 384) — fallback khi style không tìm thấy. Có ý nghĩa, không speculative.
 - **Không có finding đáng kể** về Speculative Generality.
 
@@ -117,8 +119,8 @@ Repo này **không có** file `CODING_STANDARDS.md` / `CONTRIBUTING.md`. Coding 
 
 | Loại | Số lượng |
 |---|---|
-| Hard violations (mâu thuẫn với spec/pipeline.txt đã chốt) | 7 (mục A) |
-| Judgement calls (smell baseline) | ~5 (mục B) |
+| Hard violations (mâu thuẫn với spec/pipeline.txt đã chốt) | **8** (mục A.1–A.8; A.8 thêm ngày 05sep26 khi verify lại) |
+| Judgement calls (smell baseline) | ~9 item, rải trong 6/12 mùi (mục B.2, B.4, B.5, B.7, B.8, B.11); 6 mùi còn lại "không có finding đáng kể" |
 | Worst issue (trong trục Standards) | **A.1 — `background.js` rỗng**: BG phải có message bus + lifecycle theo spec §4.7, đây là thiếu sót lớn nhất. |
 
 ---
@@ -132,7 +134,7 @@ Spec source: [`docs/specs/v1-pd47ass.md`](./v1-pd47ass.md). Review code theo t�
 | Spec mục | Code | Đánh giá |
 |---|---|---|
 | §3.1 Story 1-2: Add Drive/GitHub folder | `fetcher.js:805 fetchSubtitleFileList`, `storage.js:82 addSource` | ✅ Đủ |
-| §3.1 Story 4: Auto-map `#<videoId>` trong tên file | `fetcher.js:805+` (chưa đọc chi tiết nhưng đã có regex theo pipeline) | Cần verify code |
+| §3.1 Story 4 + §4.3.1: Auto-map `#<videoId>` trong tên file | **Không có ở đâu cả** — `grep videoId background/fetcher.js` = 0 kết quả; không có regex 11 ký tự nào; `pipeline.txt` không mô tả quy ước này. `fileName` chỉ dùng để chấm điểm search (`fetcher.js:407`), sort, log. `#` trong `parseSearchQuery` (dòng 94–118) là prefix case-sensitive cho **query viewer gõ tay**, không phải tag trong tên file | ❌ **Thiếu** *(đính chính 05sep26: bản đầu ghi "đã có regex theo pipeline / cần verify code" — sai, chưa hề verify)* |
 | §3.1 Story 5: Fuzzy search (Levenshtein, fold, #, \|, ") | `fetcher.js:392 searchSubtitleFile` + `parseSearchQuery` (line 80+) | ✅ Đủ theo pipeline |
 | §3.1 Story 6-8: Render + rVFC + skip-frame | **Chưa có** (content script chưa viết) | ❌ Thiếu |
 | §3.1 Story 9: Re-fetch 3 lựa chọn + dialog 15s | **Chưa có** (options page chưa viết) | ❌ Thiếu |
@@ -178,8 +180,8 @@ Spec source: [`docs/specs/v1-pd47ass.md`](./v1-pd47ass.md). Review code theo t�
 
 | Loại | Số lượng |
 |---|---|
-| Requirements đã implement đúng | ~5/21 user stories + 11 storage exports + 1 parser |
-| Requirements thiếu/một phần | ~14 (toàn bộ content script + popup + options + 3 classify còn lại) |
+| Requirements đã implement đúng | 6/21 user stories (#1, #2, #5, #14, #18, #19) + 1 nửa (#10: `popup.html` có, `popup.js` rỗng) + 11 storage exports + parser |
+| Requirements thiếu/một phần | 14 (toàn bộ content script + popup.js + options page + **auto-map `#<videoId>`** + 3 classify còn lại) |
 | Scope creep | 0 |
 | Implementation looks wrong | 2-3 (validation, type chưa chặt) |
 | Worst issue (trong trục Spec) | **§4.7 BG message bus chưa có**: BG là xương sống của spec v1 (mọi giao tiếp CS↔Options đều qua BG). Không có BG = không thể chạy end-to-end. |
@@ -190,7 +192,7 @@ Spec source: [`docs/specs/v1-pd47ass.md`](./v1-pd47ass.md). Review code theo t�
 
 | Trục | Findings | Worst issue |
 |---|---|---|
-| **Standards** | 7 hard + ~5 judgement | `background/background.js` rỗng — vi phạm spec §4.7 đã chốt |
+| **Standards** | 8 hard + ~9 judgement | `background/background.js` rỗng — vi phạm spec §4.7 đã chốt |
 | **Spec** | ~14/21 user stories thiếu, 0 scope creep, 2-3 chỗ cần chốt type | BG message bus thiếu — chặn toàn bộ end-to-end |
 
 Cả 2 trục đều **fail**. Tuy nhiên 2 trục fail vì cùng 1 lý do: extension v0.1.0 chưa implement phần lớn spec v1 (renderer + BG + popup + options). Spec `v1-pd47ass` mô tả trạng thái đích, code mô tả trạng thái hiện tại. Đây không phải "code sai" mà là "code chưa đến spec".
@@ -198,9 +200,10 @@ Cả 2 trục đều **fail**. Tuy nhiên 2 trục fail vì cùng 1 lý do: exte
 Hành động đề xuất (theo thứ tự ưu tiên):
 1. Implement `background/background.js` (message bus + lifecycle + per-source cooldown 60s).
 2. Implement content script (`content/overlay.js` + `content/renderer.js` + `content/adapters/youtube.js`).
-3. Implement `popup/popup.js`.
-4. Implement `background/options.html` + `background/options.js`.
+3. Implement `popup.js` (repo root — `popup.html:42` đã trỏ sẵn `<script src="popup.js">`).
+4. Implement `options.html` + `options.js` (repo root — `manifest.json` đã trỏ sẵn `"options_page": "options.html"`; xem A.8: thiếu file này thì extension không load).
 5. Hoàn thiện `classifyDecoration` (2.3) + `classifyCollision` (2.2 an/pos/move/org) + `classifyClip` (2.1) trong `tagProcess.js`.
+5b. Implement auto-map `#<videoId>` từ tên file (Story #4 + spec §4.3.1) — hiện chưa có ở bất kỳ đâu; đồng thời chốt việc tách `videoId` chạy lúc scan folder hay lúc lookup (shape `FileEntry` ở spec §4.2.3 chưa có field `videoId`).
 6. Chốt `manifest.json` host_permissions (YouTube sang `host_permissions`?).
 7. Sau khi có 1 module mới, chạy lại `/code-review` với fixed point mới (commit mới nhất) để review diff incremental.
 
@@ -210,18 +213,18 @@ Hành động đề xuất (theo thứ tự ưu tiên):
 
 Đã đọc kĩ:
 - `AGENTS.md`
-- `background/storage.js` (366 dòng — đủ)
-- `background/background.js` (3 dòng)
+- `background/storage.js` (365 dòng — đủ)
+- `background/background.js` (3 dòng nội dung, `wc -l` = 2 vì thiếu newline cuối)
 - `background/utils.js` (80 dòng — ref ở §B.11)
 - `background/tagProcess.js` (stub section 340-395)
 - `pipeline.txt` (mục storage.js + tagProcess.js)
 - `package.json`
 - `manifest.json` (chưa đọc chi tiết, ref qua spec)
 - `popup.html` (43 dòng, đã đọc round grilling trước)
-- `popup.js` (0 dòng)
+- `popup.js` (0 byte, repo root)
 
 Chưa đọc chi tiết (lưu ý khi review lần sau):
-- `background/fetcher.js` (864 dòng) — chỉ xem header + grep function list
+- `background/fetcher.js` (863 dòng) — chỉ xem header + grep function list
 - `background/parser.js` (898 dòng) — chỉ xem header + grep function list
 - `background/tagProcess.js` phần còn lại (line 1-340, 395-405) — chỉ xem classify 2.4 signature
-- 4 test files — verify 90/90 pass theo pipeline
+- 4 test files — **đã chạy thật 05sep26: 91/91 pass** (parser 39, storage 28, tagProcess 22, fetcher 2); `pipeline.txt` ghi "90 pass" tại 03sep26

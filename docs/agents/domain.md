@@ -37,4 +37,4 @@ If your output contradicts an existing ADR, surface it explicitly rather than si
 
 ## Note for this repo
 
-`pipeline.txt` (repo root) is the working architecture doc, written in Vietnamese. Treat it as a primary source for how the modules fit together until `CONTEXT.md` exists.
+`CONTEXT.md` (repo root) now exists — 40 terms, glossary only. `pipeline.txt` (repo root) remains the working architecture doc, written in Vietnamese: treat it as the primary source for how the modules fit together, and `docs/adr/` (0001–0007) as the source for why those decisions were made.
