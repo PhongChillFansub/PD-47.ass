@@ -1,9 +1,9 @@
 # Spec `v1-pd47ass` — Phiên bản 1 của extension PD-47.ass
 
 > **Trạng thái**: Ready for agent.
-> **Nguồn ra quyết định**: Hội thoại `/grilling` session `arena/01a06dcc-pd-47-ass` (64 câu Q&A, 16 round) + `pipeline.txt` + code hiện tại.
+> **Nguồn ra quyết định**: Hội thoại `/grilling` session `arena/01a06dcc-pd-47-ass` (16 round Q&A — phụ lục TOC truy vết được 63 câu, thiếu Q48, transcript không persist) + `pipeline.txt` + code hiện tại.
 > **Phụ lục lịch sử**: [`v1-pd47ass.toc.md`](./v1-pd47ass.toc.md) (outline trước khi viết spec).
-> **Kiến trúc hiện tại (khi viết spec)**: `pipeline.txt` — vì `CONTEXT.md` chưa được tạo, theo `docs/agents/domain.md`.
+> **Kiến trúc hiện tại**: `pipeline.txt` (primary) + `CONTEXT.md` (glossary) + `docs/adr/` (7 ADR) — cả hai đã có từ 05sep26.
 
 ---
 
@@ -37,14 +37,15 @@ ASS-CEE là extension Chrome cũ (đã chết/repo không còn) giải quyết 2
 | `background/utils.js` | ổn | Logger + HTML/URI entity helpers. |
 | `popup.html` | đã thiết kế | 4 cột: logo+setting, 3 stat (FPS/NPS/DFPS), Script Info Title, log. |
 | `popup.js` | rỗng | **Chưa viết** (không phải design choice). |
-| `background/options.html`, `background/options.js` | chưa có | |
+| `options.html`, `options.js` (repo root — theo `manifest.json`) | chưa có | `manifest.json` đã khai sẵn `"options_page": "options.html"` |
 | Content script (renderer) | chưa có | |
 | Message bus BG ↔ CS ↔ Options | chưa có | |
-| `manifest.json` | ổn | MV3, chromium 131+, permissions + host_permissions. |
-| `tests/parser.test.mjs` | 90/90 pass | |
-| `tests/storage.test.mjs` | pass | |
-| `tests/fetcher.test.mjs` | pass | |
-| `tests/tagProcess.test.mjs` | pass | |
+| `manifest.json` | ổn, **1 điểm nghẽn** | MV3, chromium 131+, permissions + host_permissions. **Lưu ý**: đã khai `"options_page": "options.html"` nhưng file chưa viết → Chrome báo lỗi khi load unpacked cho tới khi tạo `options.html` (kể cả placeholder). |
+| `tests/parser.test.mjs` | 39/39 pass | |
+| `tests/storage.test.mjs` | 28/28 pass | |
+| `tests/tagProcess.test.mjs` | 22/22 pass | |
+| `tests/fetcher.test.mjs` | 2/2 pass | chỉ happy path |
+| Toàn suite (`npm test`) | **91/91 pass** (verify 05sep26) | `pipeline.txt` ghi "90 pass" tại 03sep26 — nay là 91 |
 
 **Người dùng cuối (viewer) hiện chưa thể dùng extension** vì thiếu content script renderer, popup.js, options page, message bus.
 
@@ -80,9 +81,7 @@ PD-47.ass/
 │   ├── parser.js              (beta, giữ)
 │   ├── tagProcess.js          (partial, mở rộng 2.3/2.2/2.1)
 │   ├── storage.js             (alpha, ổn)
-│   ├── utils.js               (ổn)
-│   ├── options.html           (MỚI)
-│   └── options.js             (MỚI)
+│   └── utils.js               (ổn)
 ├── content/                   (MỚI TOÀN BỘ)
 │   ├── overlay.js             (entry point của content script)
 │   ├── renderer.js            (DOM build + animation loop)
@@ -93,21 +92,27 @@ PD-47.ass/
 │       ├── player-adapter.js  (interface)
 │       ├── youtube.js         (YouTube adapter)
 │       └── index.js           (registry)
-├── popup/
-│   ├── popup.html             (đã có, giữ nguyên)
-│   └── popup.js               (MỚI)
+├── popup.html                 (đã có ở ROOT — manifest trỏ "popup.html", giữ nguyên)
+├── popup.js                   (MỚI, ở ROOT — popup.html:42 có <script src="popup.js">)
+├── options.html               (MỚI, ở ROOT — manifest đã khai "options_page": "options.html")
+├── options.js                 (MỚI, ở ROOT)
 ├── popup-only-ui-theme/       (giữ nguyên)
 ├── tests/
-│   ├── parser.test.mjs        (mở rộng)
-│   ├── storage.test.mjs       (giữ)
-│   ├── fetcher.test.mjs       (mở rộng)
-│   ├── tagProcess.test.mjs    (mở rộng)
-│   └── renderer.test.mjs      (MỚI - mid-level)
-├── manifest.json              (giữ + điều chỉnh host_permissions nếu cần)
+│   ├── parser.test.mjs        (mở rộng — 39 test)
+│   ├── storage.test.mjs       (giữ — 28 test)
+│   ├── fetcher.test.mjs       (mở rộng — 2 test)
+│   ├── tagProcess.test.mjs    (mở rộng — 22 test)
+│   ├── renderer.test.mjs      (MỚI - mid-level, xem §5.1.2)
+│   └── background.test.mjs    (MỚI - mid-level, xem §5.1.2)
+├── manifest.json              (giữ + điều chỉnh host_permissions nếu cần — xem §4.10)
+├── package.json               (giữ — `npm test` = `node --test`)
 ├── pipeline.txt               (primary architecture doc, cập nhật theo)
+├── CONTEXT.md                 (đã có 05sep26 — glossary; cập nhật khi chốt term mới)
+├── docs/adr/                  (đã có 05sep26 — 7 ADR: 0001..0007)
 └── docs/specs/
     ├── v1-pd47ass.md          (file này)
-    └── v1-pd47ass.toc.md      (phụ lục lịch sử)
+    ├── v1-pd47ass.toc.md      (phụ lục lịch sử)
+    └── v1-pd47ass.codereview.md (báo cáo /code-review 05sep26)
 ```
 
 #### 2.2.2 Luồng dữ liệu
@@ -199,7 +204,7 @@ PD-47.ass/
 13. As a viewer, I want source list fetch to be **manual** (only when I click "Refresh sources" in options page) with **60-second per-source cooldown**, so that the extension doesn't hammer Drive/GitHub.
 14. As a viewer, I want sub data to live in `chrome.storage.local` (unlimitedStorage), with **per-video slots auto-overwritten** when a new sub for the same video ID is fetched, so that I never have stale sub.
 
-### 3.2 Sub provider (fansub author)
+### 3.2 Sub provider
 
 15. As a sub provider, I want to keep the `.ass` file in **plain Aegisub V4+ format** (Aegisub v3.4.2 keys only in `[Script Info]`: Title, Original Script, Original Translation, Original Editing, Original Timing, Synch Point, Script Updated By, Update Details), so that the file opens in Aegisub without warnings; the extension reads those keys for display and future offset feature.
 16. As a sub provider, I want to name files with `#<videoId>` tag anywhere in the name (case-insensitive), so the extension auto-maps sub to video; if I don't add the tag, the viewer's fuzzy search can still find the file by name.
@@ -236,7 +241,7 @@ parsedData = {
 
 lineCss[i].base[j] = {
   tags: Array<string>,            // tag raw nguyên văn (giữ lại, không xóa khi consume)
-  text: string,                   // text segment
+  text: string,                   // text của mục base
   delta?: { text?: CSSObject, data?: object },  // delta tag 2.4
   anim?: { t?: Array, k?: { type, durationMs, startMs } }
 }
@@ -255,7 +260,7 @@ Dự kiến:
 |---|---|---|---|
 | CS → BG | `sub/request` | `{ videoId }` | Yêu cầu sub cho video hiện tại. |
 | CS → BG | `renderer/reload` | (none) | Yêu cầu BG gửi lại `parsedData` cho tab hiện tại. |
-| CS → BG | `renderer/stat` | `{ fps, nps, dfps, title }` | Update stat lên storage ~1 lần/giây. |
+| CS → BG | `renderer/stat` | `{ fps, nps, dfps, subTitle }` | Update stat lên storage ~1 lần/giây. Field tên là `subTitle` — khớp JSDoc `storage.js` (`getRendererStat`/`setRendererStat`). |
 | BG → CS | `sub/parsed` | `{ parsedData }` | Gửi sub đã parse. |
 | BG → CS | `sub/none` | `{ videoId }` | Thông báo video hiện tại không có sub → renderer auto-hide. |
 
@@ -325,6 +330,12 @@ Tên file `.ass` **nên chứa** `#<videoId>` ở bất kỳ vị trí nào, cas
 - **Có tag** → auto-map với video có cùng `videoId`.
 - **Không có tag** → viewer dùng fuzzy search (xem §4.4).
 
+> **Trạng thái 05sep26: CHƯA implement ở bất kỳ đâu.** `grep videoId background/fetcher.js` = 0 kết quả; `pipeline.txt` không hề mô tả quy ước `#<videoId>`; `fileName` trong `fetcher.js` hiện chỉ dùng để chấm điểm search (`matchSubtitle`, dòng ~407), sort và log. `storage.addSubData(videoId, …)` đã có nhưng **bắt caller biết sẵn videoId**, và hiện chưa có caller nào (`background.js` rỗng).
+>
+> **Phân biệt với `#` của search** (điểm dễ nhầm): trong `parseSearchQuery` (`fetcher.js` dòng 94–118), `#` là **prefix báo token phân biệt hoa-thường** cho query viewer gõ tay (`raw.charAt(0) === '#'`) — nó KHÔNG đọc tên file và không auto-map.
+>
+> **Chưa chốt**: tách `videoId` lúc scan folder (`scanGDrive`/`scanGitHub` → thêm field `videoId` vào `FileEntry`; lưu ý shape `FileEntry` ở §4.2.3 **hiện chưa có field này**) hay lúc BG lookup. Sẽ chốt khi viết `background.js`.
+
 #### 4.3.2 `[Script Info]` keys
 
 Sub provider **chỉ được sửa** các key mà Aegisub v3.4.2 cho phép edit trong `[Script Info]` (8 key):
@@ -382,7 +393,7 @@ Spec **không** thay đổi thuật toán; chỉ tóm tắt + link `pipeline.txt
 
 #### 4.5.1 Content script (CS) là pure renderer
 
-CS **không bao giờ cần source data** (xem Q54 đã chốt). CS chỉ làm:
+CS **không bao giờ cần source data** — CS là phía **content-side** (script chạy trong web page), không phải background-side; source list, file sub và cache đều thuộc BG (chủ repo chốt 05sep26; xem ADR 0001). CS chỉ làm:
 - Mount/unmount sub DOM.
 - Áp dụng CSS từ `styleCss`.
 - Chạy animation loop theo `rVFC`.
@@ -401,7 +412,7 @@ CS **không bao giờ cần source data** (xem Q54 đã chốt). CS chỉ làm:
 - **DOM/CSS** cho phần lớn: text + style + karaoke + `\t` (CSS animation/transition).
 - **Canvas fallback** cho:
   - Vector drawing (`\p` shape).
-  - Complex motion (`\move` với curve, multi-segment).
+  - Complex motion (`\move` với curve, nhiều chặng — "segment" ở đây là chặng của quỹ đạo `\move`, KHÔNG phải `lineCss[i].base[j]`).
   - Effect không thể hiện được bằng CSS (vd SVG path animation).
 - Quyết định "dùng canvas" được quyết ở **runtime**, dựa trên `lineCss[i].clip` (nếu có vector) hoặc `anim.t` (nếu target không map sang CSS) — chưa chốt logic cụ thể, sẽ implement ở session classify.
 
@@ -519,7 +530,7 @@ Phần đã làm (giữ nguyên, không thay đổi):
 | `ASSCEE_subData_<videoId>` | Sub data ĐẦY ĐỦ (parsedData) cho 1 video | SubObj (xem §4.2.4) |
 | `ASSCEE_subIndex` | Chỉ mục NHẸ (không có parsedData) | `{ [videoId]: { ...fileObj, videoId, cachedId, cachedAt } }` |
 | `ASSCEE_config` | Settings (string/number/boolean) | object |
-| `ASSCEE_renderData` | Stat render (fps, nps, dfps, title) + `lastTimeSet` cooldown nội bộ | object |
+| `ASSCEE_renderData` | Stat render (`fps`, `nps`, `dfps`, `subTitle`) + `lastTimeSet` cooldown nội bộ (bị lọc khỏi bản trả về) | object |
 
 (Đã chốt ở `storage.js` xem `pipeline.txt` mục "storage.js".)
 
@@ -553,7 +564,7 @@ Phần đã làm (giữ nguyên, không thay đổi):
 #### 4.9.6 Rate limiting / retry
 
 - **Cooldown per source 60s** đã đủ cho MVP.
-- **Retry với backoff** (1s, 2s, 4s, 8s, max 3 lần): **CHƯA CHỐT**, có thể không cần vì cooldown đã đủ. Nếu implement sau, sẽ là wrapper quanh `loggedFetch` trong `fetcher.js`.
+- **Retry với backoff** (1s, 2s, 4s, 8s, max 3 lần): **ĐÃ CHỐT — KHÔNG làm** (chủ repo xác nhận 05sep26; xem ADR 0003). Cooldown 60s per source là cơ chế chống spam duy nhất; fetch fail thì báo lỗi để viewer tự bấm lại. Nếu thực nghiệm sau này cho thấy cần backoff thì **phải mở lại ADR 0003**, không tự thêm trong implementation.
 
 ### 4.10 Manifest / permissions
 
@@ -569,6 +580,8 @@ Phần đã làm (giữ nguyên, không thay đổi):
   - `https://www.bilibili.tv/*`, `https://www.bilibili.com/*` — OOS cho spec này, có thể bỏ.
 - **Thêm permission sau này** nếu cần (vd `declarativeNetRequest`, `alarms`) — không liệt kê trong spec này.
 - **Content security policy**: `script-src 'self'; object-src 'self'` — giữ.
+- **Path trong manifest (giữ nguyên, KHÔNG đổi)**: `"action"."default_popup": "popup.html"` và `"options_page": "options.html"` — cả 2 đều trỏ **repo root**. Vì vậy `popup.html`, `popup.js`, `options.html`, `options.js` phải nằm ở root (xem §2.2.1); `popup.html` dòng 42 cũng đang có `<script type="module" src="popup.js">` (path tương đối cùng thư mục). Nếu sau này muốn dời vào thư mục con thì **phải sửa cả 3 chỗ** (manifest ×2 + `popup.html`) — spec này không dời.
+- **Việc phải làm ngay**: tạo `options.html` (kể cả placeholder) — manifest đã khai `options_page` trỏ tới file chưa tồn tại.
 
 ### 4.11 Distribution
 
@@ -602,13 +615,13 @@ Phần đã làm (giữ nguyên, không thay đổi):
    - Nếu không có sub → hiển thị "Không có phụ đề." (đúng `popup.html`).
 4. Cột 4 (Log):
    - Đọc log từ storage (BG append mỗi message).
-   - Auto-scroll xuống dòng mới nhất; nút "Mới nhất" hiện khi user scroll lên.
+   - Auto-scroll xuống dòng mới nhất; nút "Mới nhất" hiện khi viewer scroll lên.
 
 CSS theme từ `popup-only-ui-theme/high-density-ai.css` — giữ nguyên.
 
 ### 4.15 Options page (mới)
 
-`background/options.html` + `background/options.js`. UI tiếng Việt. Tính năng tối thiểu:
+`options.html` + `options.js` (**repo root** — `manifest.json` đang khai `"options_page": "options.html"`). UI tiếng Việt. Tính năng tối thiểu:
 
 - **Quản lý sources**: list + add (URL Drive/GitHub) + remove (theo `storageId`) + refresh all.
 - **Quản lý sub cache**: list (đọc `ASSCEE_subIndex`) + re-fetch (1 videoId) + remove (1 videoId).
@@ -663,10 +676,11 @@ Theo skill `/to-spec`: dùng seam cao nhất có thể, ưu tiên seam hiện c�
 
 #### 5.1.1 Low level (đã có, mở rộng)
 
-- `tests/parser.test.mjs` — 90/90 pass (03sep26). Mở rộng tests cho `classifyDecoration` (2.3), `classifyCollision` (2.2 an/pos/move/org), `classifyClip` (2.1).
-- `tests/storage.test.mjs` — pass. Mở rộng tests cho cooldown logic, error policy edge cases.
-- `tests/fetcher.test.mjs` — pass. Mở rộng tests cho `searchSubtitleFile` edge cases (chỉ happy path hiện tại).
-- `tests/tagProcess.test.mjs` — pass. Mở rộng tests cho 2.3/2.2/2.1.
+- `tests/parser.test.mjs` — 39/39 pass (05sep26). Mở rộng tests cho `classifyDecoration` (2.3), `classifyCollision` (2.2 an/pos/move/org), `classifyClip` (2.1).
+- `tests/storage.test.mjs` — 28/28 pass. Mở rộng tests cho cooldown logic, error policy edge cases.
+- `tests/fetcher.test.mjs` — 2/2 pass. Mở rộng tests cho `searchSubtitleFile` edge cases (chỉ happy path hiện tại).
+- `tests/tagProcess.test.mjs` — 22/22 pass. Mở rộng tests cho 2.3/2.2/2.1.
+- Toàn suite: **91/91 pass** (verify 05sep26 bằng `npm test`). `pipeline.txt` dòng 339/521 ghi "90 pass" tại 03sep26 — con số đó là **toàn suite**, không phải riêng `parser.test.mjs`.
 
 #### 5.1.2 Mid level (mới)
 
@@ -690,6 +704,8 @@ Theo skill `/to-spec`: dùng seam cao nhất có thể, ưu tiên seam hiện c�
 
 ### 5.2 Quy tắc test
 
+Chạy test: `npm test` (= `node --test`, khai trong `package.json`, không cần dependency ngoài).
+
 Theo skill `/to-spec`: chỉ test **external behavior**, không test implementation details.
 
 - Mỗi test phải có thể đọc được như user story.
@@ -698,7 +714,7 @@ Theo skill `/to-spec`: chỉ test **external behavior**, không test implementat
 
 ### 5.3 Coverage mục tiêu
 
-- Parser + classify: ≥ 90% statement (giữ vì đã pass 90/90 tests ở 03sep26).
+- Parser + classify: ≥ 90% statement (toàn suite 91/91 pass tại 05sep26; riêng `parser.test.mjs` 39 test).
 - Storage: ≥ 90% branch (test race condition, cooldown, error).
 - Fetcher: tăng coverage cho `searchSubtitleFile` (chỉ happy path ở hiện tại).
 - Renderer (mid level): chưa chốt %; ưu tiên edge case:
@@ -725,7 +741,7 @@ Các OOS cho spec này (cố ý KHÔNG làm):
 1. **Bilibili, Twitch, Vimeo, …** — chỉ YouTube cho v1 (đúng Q22, Q35).
 2. **Firefox Add-ons** — chỉ Chromium 131+ cho MVP (Q35).
 3. **Chrome Web Store publish** — self-host qua GitHub Releases cho MVP (Q30).
-4. **A11y đầy đủ** — chỉ có một số thẻ role/text cơ bản nếu render DOM; nếu canvas thì a11y = 0 (Q25b).
+4. **A11y đầy đủ** — chỉ có một số thẻ role/text cơ bản nếu render DOM; nếu canvas thì a11y = 0 (Q25b — câu hỏi nối tiếp Q25 trong round 7; phụ lục TOC chỉ liệt kê range Q24–Q27 nên không truy vết được chi tiết, transcript không persist).
 5. **Sub editor trong extension** — chỉ render, không edit.
 6. **Auto-translate sub** — không có.
 7. **Sub sync giữa nhiều người** — không có (cộng tác).
@@ -738,7 +754,7 @@ Các OOS cho spec này (cố ý KHÔNG làm):
 14. **Config keys cụ thể** (cho `ASSCEE_config`) — chưa liệt kê, để session sau khi viết options page (Q59).
 15. **AST/parser cho `[Aegisub Project Garbage]` section** — giữ nguyên `pipeline.txt` đã nói "Bỏ qua phần [Aegisub Project Garbage]".
 16. **Shadow DOM injection** — chưa áp dụng, sẽ xét ở session sau nếu cần.
-17. **Retry với exponential backoff** (1s, 2s, 4s, 8s) — chưa chốt, có thể không cần vì cooldown 60s đã đủ.
+17. **Retry với exponential backoff** (1s, 2s, 4s, 8s) — **đã chốt KHÔNG làm** (05sep26, ADR 0003); cooldown 60s per source là đủ.
 18. **Popup log filtering** — log hiển thị tất cả, không filter theo level (info/warn/error).
 19. **Multi-language UI** — chỉ Tiếng Việt.
 20. **E2E test với Playwright/Puppeteer** — chỉ low + mid level test (Q34).
@@ -752,17 +768,18 @@ Các OOS cho spec này (cố ý KHÔNG làm):
 
 1. **Schema message BG ↔ CS ↔ Options cụ thể** — sẽ dùng file `background.js` cũ của ASS-CEE mà chủ repo sẽ gửi. Spec này mới chỉ liệt kê type/payload dự kiến (xem §4.2.2).
 2. **`host_permissions` cho YouTube** — giữ `optional_host_permissions` hay chuyển sang `host_permissions`? Cần cho `chrome.scripting.executeScript` dynamic. Sẽ verify khi viết `background.js`.
-3. **Retry policy với backoff** (1s, 2s, 4s, 8s, max 3 lần) có cần không? Cooldown 60s đã có thể đủ. Nếu thực nghiệm thấy cần, sẽ thêm ở implementation sau.
-4. **Tên file content script** — đề xuất `content/overlay.js` (entry point), `content/renderer.js` (core). Cần chốt để đồng bộ với `manifest.json` (nếu dùng static `content_scripts`).
-5. **Tên file `PlayerAdapter` interface** — đề xuất `content/adapters/player-adapter.js`. Cần JSDoc typedef để IDE check.
-6. **Selector parent div của YouTube player** — đề xuất `#player-container-outer` hoặc `ytd-watch-flexy #player`. Cần verify với YouTube DOM hiện tại.
-7. **Thứ tự dialog 3 nút** — Hủy / Thử lại / Xóa (theo §4.8.2). Cần verify có đúng thứ tự UX không (vd Hủy nên ở góc phải như cancel convention).
+3. **Tên file content script** — đề xuất `content/overlay.js` (entry point), `content/renderer.js` (core). Cần chốt để đồng bộ với `manifest.json` (nếu dùng static `content_scripts`).
+4. **Tên file `PlayerAdapter` interface** — đề xuất `content/adapters/player-adapter.js`. Cần JSDoc typedef để IDE check.
+5. **Selector parent div của YouTube player** — đề xuất `#player-container-outer` hoặc `ytd-watch-flexy #player`. Cần verify với YouTube DOM hiện tại.
+6. **Thứ tự dialog 3 nút** — Hủy / Thử lại / Xóa (theo §4.8.2). Cần verify có đúng thứ tự UX không (vd Hủy nên ở góc phải như cancel convention).
+
+> Mục cũ #3 ("Retry policy với backoff có cần không?") **đã chốt 05sep26: KHÔNG làm** — xem ADR 0003, §4.9.6, OOS #17. Danh sách vì vậy còn **6** open question (đánh số lại 1–6).
 
 ### 7.2 Phụ thuộc upstream
 
 Theo `pipeline.txt` đã chốt, **KHÔNG thay đổi trong spec này**:
 
-- **Algorithm pretext của chenglou** (github.com/chenglou/pretext) — chỉ lấy core (prepare/đo segment một lần + layout thuần toán, kể cả rich-inline), đưa vào repo. KHÔNG bundle như dependency. Parser/bg vẫn thuần PlayRes, pretext chỉ dùng ở renderer.
+- **Algorithm pretext của chenglou** (github.com/chenglou/pretext) — chỉ lấy core (prepare/đo một lần + layout thuần toán, kể cả rich-inline; "segment" trong tài liệu pretext là đơn vị đo chữ của riêng thuật toán đó, KHÔNG phải `lineCss[i].base[j]`), đưa vào repo. KHÔNG bundle như dependency. Parser/bg vẫn thuần PlayRes, pretext chỉ dùng ở renderer.
 - **YouTube IFrame Player API** — cho rVFC + video metadata.
 - **Aegisub v3.4.2 spec** — cho phần Script Info (8 key) + V4+ Styles + Events.
 
@@ -772,7 +789,7 @@ Theo `pipeline.txt` đã chốt, **KHÔNG thay đổi trong spec này**:
 - **Firefox MV3 API khác biệt** (`browser.*` namespace, sidePanel, action API) — sẽ làm riêng ở spec sau.
 - **YouTube đổi DOM thường xuyên** — `PlayerAdapter.getVideoId` phải có fallback (URL → `ytInitialPlayerResponse` → DOM dataset). Cần monitor và update adapter khi YouTube release thay đổi.
 - **rVFC trên video YouTube** có thể không khả dụng trong một số trường hợp (vd tab throttled) — sẽ rơi về `requestAnimationFrame` (chưa implement ở spec này, OOS).
-- **`chrome.storage.local` quota** — `unlimitedStorage` đã có trong manifest, nhưng thực tế vẫn có giới hạn (browser-specific). Nếu user có nhiều cache, có thể đầy. Giải pháp: giới hạn số file cached (chưa chốt, sẽ xét ở config key).
+- **`chrome.storage.local` quota** — `unlimitedStorage` đã có trong manifest, nhưng thực tế vẫn có giới hạn (browser-specific). Nếu viewer có nhiều cache, có thể đầy. Giải pháp: giới hạn số file cached (chưa chốt, sẽ xét ở config key).
 
 ### 7.4 Khả năng tham chiếu
 
@@ -798,13 +815,14 @@ Sau khi spec này được implement, có thể chạy skill `/code-review` đ�
 
 ## 8. Workflow tiếp theo
 
-1. **Chốt 7 open questions** trong §7.1 (chủ repo cung cấp file `background.js` cũ ASS-CEE, verify YouTube DOM, chốt manifest permissions).
+0. **Tạo `options.html`** (kể cả placeholder) — `manifest.json` đang khai `options_page` trỏ tới file chưa tồn tại.
+1. **Chốt 6 open questions** trong §7.1 (chủ repo cung cấp file `background.js` cũ ASS-CEE, verify YouTube DOM, chốt manifest permissions).
 2. **Implement theo thứ tự**:
    - Bước 1: Tiếp tục classify 2.3/2.2/2.1 ở `tagProcess.js` + mở rộng tests.
    - Bước 2: Viết `background/background.js` (message bus + lifecycle + cooldown).
    - Bước 3: Viết `content/overlay.js` + `content/renderer.js` + `content/adapters/youtube.js`.
-   - Bước 4: Viết `background/options.html` + `background/options.js`.
-   - Bước 5: Viết `popup/popup.js`.
+   - Bước 4: Viết `options.html` + `options.js` (repo root — manifest đã trỏ sẵn `options_page`).
+   - Bước 5: Viết `popup.js` (repo root — `popup.html` đã trỏ sẵn `<script src="popup.js">`).
    - Bước 6: Mở rộng tests ở low + mid level.
 3. **Test trên máy thật**: load extension unpacked vào Chromium 131+, mở YouTube có sub fan-sub, kiểm tra render + popup + options page + re-fetch.
 4. **Review code** với `/code-review` (optional).
@@ -819,15 +837,20 @@ Sau khi spec này được implement, có thể chạy skill `/code-review` đ�
 |---|---|
 | §4.3 Chuẩn bổ sung | User story #15, #16, #17 |
 | §4.4 Search algorithm | User story #5 |
-| §4.5 Renderer | User story #6, #7, #8, #10, #11, #12 |
+| §4.5 Renderer | User story #6, #7, #8, #11, #12 |
 | §4.6 Parser/classify | Phần 2.3/2.2/2.1 của checklist 29aug26 mục #14-#16 |
 | §4.7 BG ↔ CS ↔ Options | User story #13 (manual refresh) |
 | §4.8 Re-fetch | User story #9 |
 | §4.9 Storage | User story #1, #2, #3, #13, #14 |
+| §4.14 Popup | User story #10 (3 stat + Title + log + 2 nút) |
+| §4.15 Options page | User story #9 (re-fetch + dialog 3 nút), #15 (quản lý source/cache/config) |
+| §4.17 Auto-hide | User story #11 |
 | §4.16 PlayerAdapter | Q15 (platform abstraction), Q22 (YouTube only) |
-| §6 OOS | Q25b, Q30, Q34, Q35, Q49, Q54, Q55, Q59, Q60 |
+| §6 OOS | Q20, Q22, Q25b, Q30, Q34, Q35, Q49, Q54, Q55, Q59, Q60 |
 
 ## Phụ lục B: Glossary
+
+> Glossary chính thức của repo là [`CONTEXT.md`](../../CONTEXT.md) (40 term, cập nhật 05sep26). Danh sách dưới đây là 11 term tối thiểu cần biết để đọc spec này; nếu 2 bên khác nhau, `CONTEXT.md` thắng.
 
 - **Aegisub**: phần mềm tạo và edit sub `.ass` phổ biến.
 - **ASS (Advanced SubStation Alpha)**: định dạng sub, kế thừa từ SubStation Alpha. File extension `.ass`.
@@ -838,5 +861,5 @@ Sau khi spec này được implement, có thể chạy skill `/code-review` đ�
 - **pretext**: thuật toán đo chữ + layout của chenglou (github.com/chenglou/pretext).
 - **Chuẩn bổ sung**: extension standard do maintainer PD-47.ass định nghĩa, optional cho sub provider, chỉ ở file name + Script Info.
 - **PlayerAdapter**: interface cho từng nền tảng (YouTube, Bilibili, …) để renderer lấy videoId + inject DOM.
-- **Sub provider**: người tạo và host file `.ass` (fansub author).
+- **Sub provider**: người tạo và host file `.ass` cho viewer dùng.
 - **Sub slot**: 1 entry trong cache `ASSCEE_subData_<videoId>`, ứng với 1 video ID.
