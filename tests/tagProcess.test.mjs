@@ -43,17 +43,17 @@ const MINI_ASS = [
 // 2.4 Layout Local — delta.text (layout tĩnh, CSS-cooked)
 // ======================================================================
 
-test('classify 2.4: \\fs \\fsc \\fsp \\fn \\b \\i → delta.text CSS-cooked, tags GIỮ NGUYÊN', () => {
-	const entry = classify({ base: mkBase([['\\fs30', '\\fscx150', '\\fscy80', '\\fsp2', '\\fnVerdana', '\\b1', '\\i1'], 'chữ']) }, DEFAULT_STYLE_REF);
+test('classify 2.4: \\fs \\fsc (scale cả X/Y) \\fsp \\fn \\b \\i → delta.text CSS-cooked, tags GIỮ NGUYÊN', () => {
+	const entry = classify({ base: mkBase([['\\fs30', '\\fsc150', '\\fsp2', '\\fnVerdana', '\\b1', '\\i1'], 'chữ']) }, DEFAULT_STYLE_REF);
 	assert.equal(entry.base.length, 1);
 	const item = entry.base[0];
 	assert.equal(item.text, 'chữ');
 	// tags không bị xóa khi classify (chốt 03sep26)
-	assert.deepEqual(item.tags, ['\\fs30', '\\fscx150', '\\fscy80', '\\fsp2', '\\fnVerdana', '\\b1', '\\i1']);
+	assert.deepEqual(item.tags, ['\\fs30', '\\fsc150', '\\fsp2', '\\fnVerdana', '\\b1', '\\i1']);
 	assert.deepEqual(item.delta, {
 		text: {
 			'font-size': '30px',
-			'transform': 'scaleX(1.5) scaleY(0.8)',
+			'transform': 'scaleX(1.5) scaleY(1.5)',
 			'letter-spacing': '2px',
 			'font-family': '"Verdana", sans-serif',
 			'font-weight': '700',
@@ -125,31 +125,31 @@ test('classify 2.4: marker \\N/\\h → delta.data { marker }, text rỗng, KHÔN
 // Nhóm ĐỘNG — \t (anim.t metadata, không bake; \pos/\move/\org trong \t bị BỎ QUA)
 // ======================================================================
 
-test('classify động: \\t(t1,t2,mods) → anim.t { t1, t2, easing, to } + collision.t = true', () => {
+test('classify động: \\t(t1,t2,mods) → anim.t { t1, t2, easing, target } + collision.t = true', () => {
 	const entry = classify({ base: mkBase([['\\t(0,500,\\fs30)'], 'x']) }, DEFAULT_STYLE_REF);
-	assert.deepEqual(entry.base[0].anim, { t: [{ t1: 0, t2: 500, easing: 1, to: { 'font-size': '30px' } }] });
+	assert.deepEqual(entry.base[0].anim, { t: [{ t1: 0, t2: 500, easing: 1, target: { 'font-size': '30px' } }] });
 	assert.equal(entry.collision.t, true); // signal \t ở collision (KHÔNG lặp payload)
 });
 
 test('classify động: \\t(accel,mods) 1 số → easing = accel, t2 = null (tới hết dòng)', () => {
 	const entry = classify({ base: mkBase([['\\t(2,\\fs30)'], 'x']) }, DEFAULT_STYLE_REF);
-	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: null, easing: 2, to: { 'font-size': '30px' } }]);
+	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: null, easing: 2, target: { 'font-size': '30px' } }]);
 });
 
 test('classify động: \\t(mods) không số → toàn dòng (t1 0, t2 null, easing 1)', () => {
 	const entry = classify({ base: mkBase([['\\t(\\fs30)'], 'x']) }, DEFAULT_STYLE_REF);
-	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: null, easing: 1, to: { 'font-size': '30px' } }]);
+	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: null, easing: 1, target: { 'font-size': '30px' } }]);
 });
 
-test('classify động: \\t(t1,t2,accel,mods) accel thập phân + scale target → to.transform', () => {
+test('classify động: \\t(t1,t2,accel,mods) accel thập phân + scale target → target.transform', () => {
 	const entry = classify({ base: mkBase([['\\t(0,1000,0.5,\\fscx120\\fscy90)'], 'x']) }, DEFAULT_STYLE_REF);
-	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: 1000, easing: 0.5, to: { transform: 'scaleX(1.2) scaleY(0.9)' } }]);
+	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: 1000, easing: 0.5, target: { transform: 'scaleX(1.2) scaleY(0.9)' } }]);
 });
 
-test('classify động: \\t chứa \\pos/\\move/\\org → BỎ QUA (không vào to; không còn target thì không tạo anim)', () => {
+test('classify động: \\t chứa \\pos/\\move/\\org → BỎ QUA (không vào target; không còn target thì không tạo anim)', () => {
 	// \pos nằm cạnh \fs30: chỉ \fs30 được animate
 	const entry = classify({ base: mkBase([['\\t(\\pos(10,20)\\fs30)'], 'x']) }, DEFAULT_STYLE_REF);
-	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: null, easing: 1, to: { 'font-size': '30px' } }]);
+	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: null, easing: 1, target: { 'font-size': '30px' } }]);
 	// \t chỉ chứa \move → bị loại hẳn (anim.t không tồn tại)
 	const entryMove = classify({ base: mkBase([['\\t(\\move(1,2,3,4))'], 'x']) }, DEFAULT_STYLE_REF);
 	assert.equal(entryMove.base[0].anim, undefined);
