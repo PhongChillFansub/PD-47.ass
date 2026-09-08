@@ -23,13 +23,13 @@
  */
 /** Định nghĩa/chú thích anim của 1 mục base (nhóm ĐỘNG — metadata nội suy, renderer resolve)
  * @typedef {object} parsedDataFormat.baseItemAnim
- * @property {Array<{t1: number, t2: (number|null), easing: number, to: Object}>} [t] Danh sách
- *   mỗi \t(...) trong item theo thứ tự: { t1, t2, easing, to }.
+ * @property {Array<{t1: number, t2: (number|null), easing: number, target: Object}>} [t] Danh sách
+ *   mỗi \t(...) trong item theo thứ tự: { t1, t2, easing, target }.
  *   - t1/t2: ms, tương đối đầu dòng (Aegisub: \t dùng ms). t2 = null khi file không ghi t2
  *     (transform chạy tới HẾT dòng — renderer lấy duration dòng từ events để resolve).
  *   - easing: số accel THÔ (default 1 = linear; >1 nhanh dần, <1 chậm dần) — renderer tự map
  *     sang hàm easing (linear/parabola/cubic...); giữ số thô để không mất độ chính xác.
- *   - to: tag target ĐÃ map CSS-cooked (giống delta.text). CHỈ chứa tag map được; \pos/\move/\org
+ *   - target: tag target ĐÃ map CSS-cooked (giống delta.text). CHỈ chứa tag map được; \pos/\move/\org
  *     trong \t bị BỎ QUA (chốt 03sep26), tag nhóm 2.3 (\c, \bord, \fr...) map khi viết 2.3.
  * @property {{type: ('kf'|'K'|'k'|'ko'), durationMs: number, startMs: number}} [k] Karaoke syl:
  *   durationMs = file (centisecond) × 10 → ms (chốt 03sep26); startMs = parser CỘNG DỒN các syl
@@ -87,7 +87,7 @@ function splitOverrideTagsTransform(text) {
 	return tags;
 }
 /** [arena.ai] Map 1 tag LAYOUT TĨNH (2.4) thành CSS-cooked, ghi vào context.
- * Chỉ xử lí: \fs \fscx \fscy \fsc (alias fscx) \fsp \fn \b \i.
+ * Chỉ xử lí: \fs \fscx \fscy \fsc (scale cả X và Y) \fsp \fn \b \i.
  * \b/\i (và \u/\s khi 2.3 làm) KHÔNG có số đằng sau → coi như KHÔNG có tag: return false, không toggle
  * (parser không giữ state dòng — chốt 03sep26 bản 2).
  * \r và marker \h/\N/\n KHÔNG qua hàm này (classifyLayoutLocal xử lí riêng — cần data + styleRef).
@@ -341,7 +341,7 @@ export function classifyLayoutLocal(base, styleRef) {
 /** [arena.ai] Nhóm 2.3 — Decoration Local Tags (màu, bord/shad, \fa, \fr...). SESSION SAU.
  * Để shape classify() chạy đúng thứ tự 2.4 → 2.3 → 2.2 → 2.1, hàm này được classify() gọi ở vị trí 2.
  * Khi implement: đọc tags còn nguyên trên từng mục base, MERGE delta vào item.delta ĐÃ CÓ từ 2.4
- * (không gán đè), và bổ sung tag target nhóm 2.3 vào anim.t[i].to của \t (tags raw vẫn còn để đối chiếu).
+ * (không gán đè), và bổ sung tag target nhóm 2.3 vào anim.t[i].target của \t (tags raw vẫn còn để đối chiếu).
  * QUY TẮC CHUNG (chốt 03sep26 bản 2): tag dạng bật/tắt kiểu \u/\s (và \b/\i nếu 2.3 đụng tới)
  * KHÔNG có số đằng sau → coi như KHÔNG có tag (bỏ qua, không toggle — parser không giữ state dòng).
  * @param {Array<parsedDataFormat.baseItem>} base Mảng mục base của dòng.

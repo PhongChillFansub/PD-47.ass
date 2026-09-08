@@ -169,12 +169,13 @@ parser.js — xử lí tag override (kế hoạch + ĐÃ LÀM 27-29aug26)
     - \h / \N / \n đứng NGOÀI tag → wrap thành {\h} / {\N} / {\n} riêng biệt, GIỮ NGUYÊN;
       renderer mới quyết định ngữ nghĩa (dấu cách / xuống dòng, theo WrapStyle / \q).
     - Tag {..}: bỏ comment thuần (không có '\'), strip phần trước '\' đầu, hợp nhất 2 tag liền nhau
-      (}{) — TRỪ khi tag sau chứa karaoke (\k/\K/\kf/\ko) và TRỪ marker {\h}/{\N}/{\n}.
+      (}{) — TRỪ marker {\h}/{\N}/{\n}. Karaoke không tạo ngoại lệ: một hoặc cả hai tag có
+      \k/\K/\kf/\ko vẫn hợp nhất bình thường.
     - \{ \} giữ nguyên văn, unescape ở renderer (tầng cuối, khi không cần phân biệt text/tag nữa).
     - baseFromTokens(tokens): tách tag trong token → mục base (ĐÃ LÀM, tests/parser.test.mjs)
         + Segment model: mỗi tag token kết hợp với text token tạo thành 1 segment:
             segment = { tags: [...tag đơn raw nguyên văn], text }
-            + Nhiều tag token LIỀN NHAU (tokenizer giữ riêng tag chứa karaoke) → gộp chung tags của 1 segment.
+            + Nhiều tag token LIỀN NHAU (kể cả token chứa karaoke) → gộp chung tags của 1 segment.
             + Text đứng trước mọi tag → segment { tags: [], text }.
             + Tag token cuối dòng (không còn text) → BỎ, không tạo segment (chốt 27aug26).
             + splitOverrideTags: tách theo '\' ở mức ngoặc ngoài cùng (đếm depth '()' nên \t(...)/\clip(...)
@@ -477,7 +478,7 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
        - clip = { rawList: [], effectiveType: null, effectiveRaw: null } (2.1 stub).
 
     4. Nhóm 2.4 (tĩnh) — map tag → delta (chốt):
-       \fs → text 'font-size' (px) | \fscx/\fscy/\fsc(alias fscx) → text 'transform' scaleX/scaleY
+       \fs → text 'font-size' (px) | \fscx/\fscy/\fsc (scale cả X và Y) → text 'transform' scaleX/scaleY
        (bỏ identity 100 — giống R3) | \fsp → text 'letter-spacing' (px) | \fn → text 'font-family'
        ("name", sans-serif; \fn rỗng → reset font style dòng) | \b → 'font-weight' 700/400 (regex khóa
        đuôi: \bord KHÔNG lọt) | \i → 'font-style' italic/normal | \r → data.baseStyleName (rỗng =
@@ -489,15 +490,15 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
        trong item.tags, nhóm sau cũng không áp khi thiếu số. \bord/\iclip... không lọt regex.
 
     5. Nhóm ĐỘNG — metadata nội suy (Cách 1, parser KHÔNG bake snapshot):
-       - \t(...) → base[i].anim.t = [{ t1, t2, easing, to }]:
+       - \t(...) → base[i].anim.t = [{ t1, t2, easing, target }]:
            + t1/t2 = ms tương đối đầu dòng (Aegisub: \t dùng ms, KHÔNG nhân 10 — khác \k).
              t2 = null khi file không ghi (transform tới HẾT dòng, renderer tự lấy line duration).
            + easing = số accel THÔ (mặc định 1 = linear) — renderer tự map sang easing function.
-           + to = tag target CSS-cooked. Gán theo SỐ token số đứng đầu (Aegisub/ASSv5 4 form):
+           + target = tag target CSS-cooked. Gán theo SỐ token số đứng đầu (Aegisub/ASSv5 4 form):
              0 số → toàn dòng; 1 số → accel; 2 số → t1,t2; 3+ → t1,t2,accel.
-           + ⚠️ \t KHÔNG animate \pos/\move/\org → BỎ QUA (không vào to; không còn target → không
+           + ⚠️ \t KHÔNG animate \pos/\move/\org → BỎ QUA (không vào target; không còn target → không
              tạo entry anim). \clip/\iclip trong \t cũng bỏ qua (2.1 đọc lại từ tags raw).
-           + to CHỈ map tag layout tĩnh; tag 2.3 (\c, \bord, \fr...) bổ sung khi viết 2.3
+           + target CHỈ map tag layout tĩnh; tag 2.3 (\c, \bord, \fr...) bổ sung khi viết 2.3
              (tags raw còn nguyên trên item để đối chiếu).
        - \k/\K/\kf/\ko → base[i].anim.k = { type, durationMs, startMs }:
            + durationMs = file × 10 (file ghi CENTISECOND — \k100 = 1s → 1000ms; chốt 03sep26).
@@ -515,7 +516,7 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
        - tests/parser.test.mjs: import classify; 2 expectation cập nhật theo classify (marker {\N} →
          delta.data.marker; \b1 → delta.text 'font-weight':'700'). Các test cũ còn lại giữ nguyên.
        - tests/tagProcess.test.mjs (MỚI): block test cho 2.4 — delta.text map CSS; \r baseStyleName
-         (style dòng / style tên); marker \h/\N/\n delta.data; \t → anim.t { t1,t2,easing,to } +
+         (style dòng / style tên); marker \h/\N/\n delta.data; \t → anim.t { t1,t2,easing,target } +
          collision.t; \t chứa \pos/\move/\org → BỎ QUA; \k/\K/\kf/\ko durationMs ×10 + startMs cộng
          dồn chính xác; shape lineCss { base, collision, clip }; tích hợp qua parser().
        - npm test (node --test): 90 pass / 0 fail (03sep26).
@@ -524,7 +525,7 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
     [x] 12. processLineText (rename) + classify entry { base, collision, clip } + styleForLine — ĐÃ LÀM 03sep26
     [x] 13. tagProcess.js: classifyLayoutLocal 2.4 + động \t/\k (metadata) + tests — ĐÃ LÀM 03sep26
     [ ] 14. Session sau — 2.3 classifyDecoration (màu/bord/shad/\fa/\fr): merge delta vào item.delta đã có,
-            bổ sung target 2.3 vào anim.t[].to của \t (đọc lại từ tags raw)
+            bổ sung target 2.3 vào anim.t[].target của \t (đọc lại từ tags raw)
     [ ] 15. Session sau — 2.2 classifyCollision làm đầy an/pos/move/org (first-wins; \an vẫn tính collision;
             pos/move/org → renderer tự disable)
     [ ] 16. Session sau — 2.1 classifyClip: rawList + effectiveType/effectiveRaw last-wins (kể cả \clip trong \t)
@@ -537,7 +538,7 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
 - Tests: parser.test.mjs cập nhật 2 expectation; tagProcess.test.mjs mới — npm test 90 pass
 - CÒN LẠI session sau:
     * 2.3 classifyDecoration: màu/bord/shad/\fa/\fr — merge delta vào item.delta đã có + bổ sung target
-      nhóm 2.3 vào anim.t[].to (đọc lại tags raw của \t)
+      nhóm 2.3 vào anim.t[].target (đọc lại tags raw của \t)
     * 2.2 classifyCollision làm đầy: an (1-9, vẫn tính collision) + pos/move/org (first-wins, renderer tự disable)
     * 2.1 classifyClip: rawList + effectiveType/effectiveRaw last-wins (kể cả \clip/\iclip nằm trong \t)
     * Lưu ý renderer: \kf/\K = quét màu (gradient, KHÔNG clip-path); \k/\ko = đổi màu tức thì;
@@ -581,8 +582,8 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
        Chỉ nhóm karaoke (\k, \kt) gây hỏng THỜI GIAN — dạng hỏng tệ nhất: sửa số cả dòng, im lặng.
 
     5. Đường sửa (KHI LÀM, chưa làm): nhánh \t trong classifyLayoutLocal (~dòng 282) — trước
-       continue, quét splitStyleModifiers(inner) lấy tag karaoke, đẩy vào CÙNG accumulator
-       karaokeRunMs + ghi đè animK. KHÔNG sửa trong parseTTransformTag (hàm đó chỉ lo transform).
+       continue, quét splitOverrideTagsTransform(inner) lấy tag karaoke, đẩy vào CÙNG accumulator
+       karaokeRunMs + ghi đè animK. KHÔNG sửa trong parseTransformTag (hàm đó chỉ lo transform).
        Nguyên tắc: \k trong \t phải đi QUA CÙNG MỘT ĐƯỜNG với \k ngoài \t.
 
     6. Đo đạc kèm theo (tham chiếu, KHÔNG phải lý do để sửa):

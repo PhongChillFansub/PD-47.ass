@@ -243,7 +243,7 @@ lineCss[i].base[j] = {
   tags: Array<string>,            // tag raw nguyên văn (giữ lại, không xóa khi consume)
   text: string,                   // text của mục base
   delta?: { text?: CSSObject, data?: object },  // delta tag 2.4
-  anim?: { t?: Array, k?: { type, durationMs, startMs } }
+  anim?: { t?: Array<{ t1, t2, easing, target: CSSObject }>, k?: { type, durationMs, startMs } }
 }
 
 lineCss[i].collision = { t?: boolean, an?, org?, pos?, move? }
@@ -451,17 +451,17 @@ Stat hiển thị (đúng `popup.html`, không thêm):
 - Skip dynamic + auto-detect đảm bảo máy yếu vẫn chạy được, dù sub có thể giật.
 - Test trên máy: target 60fps cho video 60fps với sub ~200 active line.
 
-### 4.6 Parser / classify — tiếp tục từ 03sep26
+### 4.6 Parser / classify — tiếp tục từ 08sep26
 
-Còn lại của checklist 29aug26 (cập nhật 02sep26 + 03sep26), cần làm trong spec này:
+Còn lại của checklist 29aug26 (cập nhật 02sep26 + 03sep26 + 08sep26), cần làm trong spec này:
 
-- [ ] #14. **2.3 `classifyDecoration`** (`tagProcess.js`): màu (`\1c`-`\4c`, `\alpha`), bord (`\bord`, `\xbord`, `\ybord`), shad (`\shad`, `\xshad`, `\yshad`), `\be`, `\blur`, `\fa`, `\fr`, `\fax`/`\fay`/`\frx`/`\fry`/`\frz`. Merge delta vào `item.delta` đã có (từ 2.4). Bổ sung target 2.3 vào `anim.t[].to` (đọc lại từ `tags` raw).
+- [ ] #14. **2.3 `classifyDecoration`** (`tagProcess.js`): màu (`\1c`-`\4c`, `\alpha`), bord (`\bord`, `\xbord`, `\ybord`), shad (`\shad`, `\xshad`, `\yshad`), `\be`, `\blur`, `\fa`, `\fr`, `\fax`/`\fay`/`\frx`/`\fry`/`\frz`. Merge delta vào `item.delta` đã có (từ 2.4). Bổ sung target 2.3 vào `anim.t[].target` (đọc lại từ `tags` raw).
 - [ ] #15. **2.2 `classifyCollision`** (`tagProcess.js`) làm đầy `an`, `pos`, `move`, `org` (first-wins; `\an` vẫn tính collision; `pos`/`move`/`org` → renderer tự disable collision). Cộng thêm signal hiện có `t` (đã có ở 03sep26).
 - [ ] #16. **2.1 `classifyClip`** (`tagProcess.js`): `rawList` + `effectiveType`/`effectiveRaw` last-wins (kể cả `\clip` trong `\t`). Renderer tự quyết clip-path vs inverse clip-path theo `effectiveType`.
 
 Phần đã làm (giữ nguyên, không thay đổi):
 - 2.4 `classifyLayoutLocal` (đã làm 03sep26).
-- Động `\t`/`\k` metadata (đã làm 03sep26).
+- Động `\t`/`\k` metadata (đã làm 03sep26; field CSS-cooked của `anim.t[]` là `target` từ 08sep26).
 - `tagProcess` strip mode (đã làm 02sep26 bản 2 — boolean `doStripTags`).
 - `lineCss` struct `{base, collision, clip}` (đã chốt 03sep26).
 - `styleCss` triết lý container/text/data (đã chốt 31aug26).

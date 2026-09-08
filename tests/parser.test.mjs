@@ -104,10 +104,10 @@ test('base: text trước mọi tag → mục base { tags: [] }; mỗi tag token
 	);
 });
 
-test('base: nhiều tag token liền nhau (karaoke) → gộp chung tags của 1 mục base', () => {
+test('base: 2 cụm tag liền nhau đều có karaoke → gộp chung tags của 1 mục base', () => {
 	assert.deepEqual(
-		baseOfLine('{\\b1}{\\k25}na'),
-		[{ tags: ['\\b1', '\\k25'], text: 'na' }]
+		baseOfLine('{\\b1\\k25}{\\i1\\K30}na'),
+		[{ tags: ['\\b1', '\\k25', '\\i1', '\\K30'], text: 'na' }]
 	);
 });
 

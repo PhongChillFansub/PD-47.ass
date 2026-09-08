@@ -79,7 +79,7 @@ Hoàn thiện extension v0.1.0 đạt **v1** theo nghĩa:
 
 ### 4.2 Data contracts
 - `parsedData` (đã chốt ở `parser.js`, typedef `parsedDataFormat`): `info, styles, events, globalCss, styleCss, lineCss[i]={base,collision,clip}`. BG gửi nguyên object này cho CS 1 lần, không gửi theo frame.
-- `lineCss[i].base[j]` = `{ tags, text, delta?, anim? }`; `delta.text` CSS-cooked; `delta.data` số liệu thuần; `anim.t` mảng `{t1,t2,easing,to}`; `anim.k` `{type,durationMs,startMs}`.
+- `lineCss[i].base[j]` = `{ tags, text, delta?, anim? }`; `delta.text` CSS-cooked; `delta.data` số liệu thuần; `anim.t` mảng `{t1,t2,easing,target}`; `anim.k` `{type,durationMs,startMs}`.
 - `collision` = `{t?, an?, org?, pos?, move?}` (an/org/pos/move session này); `clip` = `{rawList, effectiveType, effectiveRaw}` last-wins.
 - Message BG ↔ CS (chưa chốt schema cụ thể, dự kiến):
   - CS → BG: `{type:'sub/request', videoId}`, `{type:'renderer/reload'}`.
@@ -127,12 +127,12 @@ Hoàn thiện extension v0.1.0 đạt **v1** theo nghĩa:
   - **NPS**: số node phải render trong giây.
   - **DFPS**: số frame extension chủ động bỏ qua trong giây (tổng cộng dồn).
 
-### 4.6 Parser / classify — tiếp tục từ trạng thái 03sep26
-- Còn lại của checklist 29aug26 (cập nhật 02sep26 + 03sep26):
-  - [ ] #14. 2.3 `classifyDecoration`: màu, bord, shad, `\fa`, `\fr`; merge delta vào `item.delta`; bổ sung target 2.3 vào `anim.t[].to`.
+### 4.6 Parser / classify — tiếp tục từ trạng thái 08sep26
+- Còn lại của checklist 29aug26 (cập nhật 02sep26 + 03sep26 + 08sep26):
+  - [ ] #14. 2.3 `classifyDecoration`: màu, bord, shad, `\fa`, `\fr`; merge delta vào `item.delta`; bổ sung target 2.3 vào `anim.t[].target`.
   - [ ] #15. 2.2 `classifyCollision` làm đầy `an`, `pos`, `move`, `org` (first-wins; `\an` vẫn tính collision; pos/move/org → renderer tự disable).
   - [ ] #16. 2.1 `classifyClip`: `rawList` + `effectiveType`/`effectiveRaw` last-wins (kể cả `\clip` trong `\t`).
-- Phần 2.4 (đã làm) + động `\t`/`\k` (đã làm) + tagProcess strip mode (đã làm) → giữ nguyên.
+- Phần 2.4 (đã làm) + động `\t`/`\k` (đã làm) + tagProcess strip mode (đã làm) → giữ nguyên. Bản 08sep26: `\fsc` scale cả X/Y và entry `anim.t` dùng field `target`.
 
 ### 4.7 Background ↔ Content Script ↔ Options page
 - **CS chỉ làm renderer** (xem §4.5). CS **không bao giờ cần source data** (đúng Q54). *Đính chính 05sep26: phụ lục cuối file mô tả Q54 là "BG chỉ fetch on options page action"; mệnh đề này được chốt lại theo lý do **content-side vs background-side** — xem ADR 0001.*
