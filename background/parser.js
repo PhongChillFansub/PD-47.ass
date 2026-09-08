@@ -585,7 +585,7 @@ function tokenizeLineText(text) {
  * @property {parsedDataFormat.baseItemDelta} [delta] classify (tagProcess.js) sinh: mức text
  *   (layout tĩnh \fs\fsc\fsp\fn\b\i) / data (\r → baseStyleName; marker \h\N\n). text không tag thì KHÔNG có delta/anim.
  * @property {parsedDataFormat.baseItemAnim} [anim] classify sinh metadata nhóm ĐỘNG:
- *   t (mỗi \t → { t1, t2, easing, target }) + k ({ type, durationMs, startMs }) — renderer resolve.
+ *   t (mỗi \t → { t1, t2, easing, target }). Karaoke: delta.data.k { type, startTime, duration } — không anim.k.
  */
 /** Định nghĩa/chú thích delta theo mức node của mục base
  * ĐỊNH HƯỚNG cho classify (bước 4-7): parser xử lí đến base thì mỗi mục base mang

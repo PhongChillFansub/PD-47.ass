@@ -1,26 +1,14 @@
-// Tests cho tagProcess.js — classify() 03sep26 (nhóm 2.4 Layout Local + động \t/\k metadata).
-// Bản này: 2.4 làm thật (delta.text/data + anim.t/k); 2.3 no-op; 2.2 signal \t; 2.1 shape default.
-// Base input dựng TAY (mục { tags, text } đã tách tag đơn): tokenizeLineText/baseFromTokens là
-// PRIVATE theo chủ ý 03sep26 — pipeline token → base có test riêng qua parser() ở parser.test.mjs.
-// Chạy: npm test (node --test)
+// Tests cho tagProcess.js — classify() 09sep26 (2.4a apply-now + 2.4b \t).
+// 2.4 làm thật (delta.text/data + anim.t; karaoke = delta.data.k); 2.3 no-op; 2.2 signal \t; 2.1 stub.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parser } from '../background/parser.js';
 import { classify, classifyLayoutLocal } from '../background/tagProcess.js';
 
-// ======================================================================
-// Helper + fixture
-// ======================================================================
-
-/** Dựng base tay từ các cặp [tags, text] — đúng contract classify() nhận: mảng mục base,
- *  mỗi mục { tags: string[] (tag đơn), text }. Tag rác/double-escape đã được tokenizer
- *  xử lí phía parser (có test riêng ở parser.test.mjs) — tag cho vào đây là tag sạch. */
 const mkBase = (...pairs) => pairs.map(([tags, text]) => ({ tags, text }));
 
-/** Style chuẩn tối thiểu của dòng (classify chỉ đọc name/fontName ở bản 2.4). */
 const DEFAULT_STYLE_REF = { name: 'Default', fontName: 'Arial', fontSize: 20, alignment: 2 };
 
-/** File .ass mini (giống parser.test.mjs) cho test tích hợp qua parser(). */
 const MINI_ASS = [
 	'[Script Info]',
 	'Title: Test tagProcess',
@@ -39,16 +27,11 @@ const MINI_ASS = [
 	'Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\\pos(320,240)\\an5}Xin {\\c&HFF&}chào{\\N}các bạn',
 ].join('\n');
 
-// ======================================================================
-// 2.4 Layout Local — delta.text (layout tĩnh, CSS-cooked)
-// ======================================================================
-
-test('classify 2.4: \\fs \\fsc (scale cả X/Y) \\fsp \\fn \\b \\i → delta.text CSS-cooked, tags GIỮ NGUYÊN', () => {
+test('classify 2.4: \\fs \\fsc \\fsp \\fn \\b \\i → delta.text CSS-cooked, tags GIỮ NGUYÊN', () => {
 	const entry = classify({ base: mkBase([['\\fs30', '\\fsc150', '\\fsp2', '\\fnVerdana', '\\b1', '\\i1'], 'chữ']) }, DEFAULT_STYLE_REF);
 	assert.equal(entry.base.length, 1);
 	const item = entry.base[0];
 	assert.equal(item.text, 'chữ');
-	// tags không bị xóa khi classify (chốt 03sep26)
 	assert.deepEqual(item.tags, ['\\fs30', '\\fsc150', '\\fsp2', '\\fnVerdana', '\\b1', '\\i1']);
 	assert.deepEqual(item.delta, {
 		text: {
@@ -60,25 +43,22 @@ test('classify 2.4: \\fs \\fsc (scale cả X/Y) \\fsp \\fn \\b \\i → delta.tex
 			'font-style': 'italic',
 		},
 	});
-	assert.equal(item.anim, undefined); // không có \t/\k → không có anim
+	assert.equal(item.anim, undefined);
 });
 
-test('classify 2.4: \\b/\\i/\\u KHÔNG có số đằng sau → coi như KHÔNG có tag (không sinh delta/anim)', () => {
+test('classify 2.4: \\b/\\i/\\u KHÔNG có số đằng sau → coi như KHÔNG có tag', () => {
 	const entry = classify({ base: mkBase([['\\b'], 'x'], [['\\i'], 'y'], [['\\u'], 'z']) }, DEFAULT_STYLE_REF);
 	assert.equal(entry.base.length, 3);
-	// \b trần / \i trần: không toggle, không delta — để nguyên tags cho nhóm sau (nhóm sau cũng không áp khi thiếu số)
 	assert.deepEqual(entry.base[0], { tags: ['\\b'], text: 'x' });
 	assert.deepEqual(entry.base[1], { tags: ['\\i'], text: 'y' });
-	// \u thuộc nhóm 2.3 (chưa implement) — 2.4 không đụng tới, không delta
 	assert.deepEqual(entry.base[2], { tags: ['\\u'], text: 'z' });
 });
 
-test('classify 2.4: \\b0 \\i0 → tắt; \\fscx100 (identity) → KHÔNG sinh transform', () => {
+test('classify 2.4: \\b0 \\i0 → tắt; \\fscx100 identity → KHÔNG sinh transform', () => {
 	const entry = classify({ base: mkBase([['\\b0', '\\i0', '\\fscx100'], 'x']) }, DEFAULT_STYLE_REF);
 	assert.deepEqual(entry.base[0].delta, {
 		text: { 'font-weight': '400', 'font-style': 'normal' },
 	});
-	// \fscx100 là identity → không có key transform (giống R3 styleParsedToCss)
 	assert.equal(entry.base[0].delta.text.transform, undefined);
 });
 
@@ -87,23 +67,19 @@ test('classify 2.4: chỉ 1 trục scale → transform chỉ có scaleX hoặc s
 	assert.deepEqual(entry.base[0].delta.text, { transform: 'scaleY(0.8)' });
 });
 
-test('classify 2.4: nhiều tag scale trong CÙNG mục — tag SAU thắng, gộp 1 chuỗi transform', () => {
+test('classify 2.4: nhiều tag scale trong CÙNG mục — tag SAU thắng', () => {
 	const entry = classify({ base: mkBase([['\\fscx150', '\\fscy90', '\\fscx200'], 'x']) }, DEFAULT_STYLE_REF);
 	assert.deepEqual(entry.base[0].delta.text, { transform: 'scaleX(2) scaleY(0.9)' });
 });
 
-// ======================================================================
-// 2.4 — \r (delta.data.baseStyleName) + marker \h/\N/\n (delta.data.marker)
-// ======================================================================
-
-test('classify 2.4: \\r rỗng → baseStyleName = style DÒNG; \\rAlt → baseStyleName = "Alt"', () => {
+test('classify 2.4: \\r rỗng → baseStyleName = style DÒNG; \\rAlt → tên', () => {
 	const toDefault = classify({ base: mkBase([['\\r'], 'x']) }, DEFAULT_STYLE_REF);
 	assert.deepEqual(toDefault.base[0].delta, { data: { baseStyleName: 'Default' } });
 	const toAlt = classify({ base: mkBase([['\\rAltStyle'], 'x']) }, { name: 'Default', fontName: 'Arial' });
 	assert.deepEqual(toAlt.base[0].delta, { data: { baseStyleName: 'AltStyle' } });
 });
 
-test('classify 2.4: \\r + \\fs cùng mục → delta.data (reset) + delta.text cùng lúc', () => {
+test('classify 2.4: \\r + \\fs cùng mục → delta.data + delta.text', () => {
 	const entry = classify({ base: mkBase([['\\rAlt', '\\fs20'], 'x']) }, DEFAULT_STYLE_REF);
 	assert.deepEqual(entry.base[0].delta, {
 		data: { baseStyleName: 'Alt' },
@@ -111,117 +87,125 @@ test('classify 2.4: \\r + \\fs cùng mục → delta.data (reset) + delta.text c
 	});
 });
 
-test('classify 2.4: marker \\N/\\h → delta.data { marker }, text rỗng, KHÔNG delta.text', () => {
+test('classify 2.4: marker \\N/\\h → delta.data { marker }', () => {
 	const entry = classify({ base: mkBase([[], 'a'], [['\\N'], ''], [[], 'b']) }, DEFAULT_STYLE_REF);
 	assert.equal(entry.base.length, 3);
-	assert.deepEqual(entry.base[0], { tags: [], text: 'a' }); // không tag → không delta/anim
+	assert.deepEqual(entry.base[0], { tags: [], text: 'a' });
 	assert.deepEqual(entry.base[1], { tags: ['\\N'], text: '', delta: { data: { marker: '\\N' } } });
 	assert.deepEqual(entry.base[2], { tags: [], text: 'b' });
 	const entryH = classify({ base: mkBase([[], 'a'], [['\\h'], ''], [[], 'b']) }, DEFAULT_STYLE_REF);
 	assert.deepEqual(entryH.base[1].delta, { data: { marker: '\\h' } });
 });
 
-// ======================================================================
-// Nhóm ĐỘNG — \t (anim.t metadata, không bake; \pos/\move/\org trong \t bị BỎ QUA)
-// ======================================================================
-
-test('classify động: \\t(t1,t2,mods) → anim.t { t1, t2, easing, target } + collision.t = true', () => {
+test('classify 2.4b: \\t(t1,t2,mods) → anim.t + collision.t = true', () => {
 	const entry = classify({ base: mkBase([['\\t(0,500,\\fs30)'], 'x']) }, DEFAULT_STYLE_REF);
 	assert.deepEqual(entry.base[0].anim, { t: [{ t1: 0, t2: 500, easing: 1, target: { 'font-size': '30px' } }] });
-	assert.equal(entry.collision.t, true); // signal \t ở collision (KHÔNG lặp payload)
+	assert.equal(entry.collision.t, true);
 });
 
-test('classify động: \\t(accel,mods) 1 số → easing = accel, t2 = null (tới hết dòng)', () => {
+test('classify 2.4b: \\t(accel,mods) 1 số → easing = accel, t2 = null', () => {
 	const entry = classify({ base: mkBase([['\\t(2,\\fs30)'], 'x']) }, DEFAULT_STYLE_REF);
 	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: null, easing: 2, target: { 'font-size': '30px' } }]);
 });
 
-test('classify động: \\t(mods) không số → toàn dòng (t1 0, t2 null, easing 1)', () => {
+test('classify 2.4b: \\t(mods) không số → toàn dòng', () => {
 	const entry = classify({ base: mkBase([['\\t(\\fs30)'], 'x']) }, DEFAULT_STYLE_REF);
 	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: null, easing: 1, target: { 'font-size': '30px' } }]);
 });
 
-test('classify động: \\t(t1,t2,accel,mods) accel thập phân + scale target → target.transform', () => {
+test('classify 2.4b: \\t(t1,t2,accel,mods) + scale target', () => {
 	const entry = classify({ base: mkBase([['\\t(0,1000,0.5,\\fscx120\\fscy90)'], 'x']) }, DEFAULT_STYLE_REF);
 	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: 1000, easing: 0.5, target: { transform: 'scaleX(1.2) scaleY(0.9)' } }]);
 });
 
-test('classify động: \\t chứa \\pos/\\move/\\org → BỎ QUA (không vào target; không còn target thì không tạo anim)', () => {
-	// \pos nằm cạnh \fs30: chỉ \fs30 được animate
+test('classify 2.4b: \\t chứa \\pos/\\move/\\org → BỎ QUA khỏi target', () => {
 	const entry = classify({ base: mkBase([['\\t(\\pos(10,20)\\fs30)'], 'x']) }, DEFAULT_STYLE_REF);
 	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: null, easing: 1, target: { 'font-size': '30px' } }]);
-	// \t chỉ chứa \move → bị loại hẳn (anim.t không tồn tại)
 	const entryMove = classify({ base: mkBase([['\\t(\\move(1,2,3,4))'], 'x']) }, DEFAULT_STYLE_REF);
 	assert.equal(entryMove.base[0].anim, undefined);
-	// dù vậy \t vẫn là SIGNAL disable collision (prompt 03sep26: có \t trong dòng → t = true)
 	assert.equal(entryMove.collision.t, true);
 });
 
-test('classify động: \\t KHÔNG có trong dòng → collision.t = false', () => {
+test('classify 2.4b: không \\t → collision.t = false', () => {
 	const entry = classify({ base: mkBase([[], 'Xin chào']) }, DEFAULT_STYLE_REF);
 	assert.deepEqual(entry.collision, { t: false });
 });
 
-// ======================================================================
-// Nhóm ĐỘNG — karaoke \k/\K/\kf/\ko (anim.k: type, durationMs ×10, startMs cộng dồn)
-// ======================================================================
-
-test('classify động: \\k → anim.k { type, durationMs (cs ×10), startMs cộng dồn theo syl }', () => {
+test('classify 2.4a: \\k → delta.data.k { type, startTime, duration }', () => {
 	const entry = classify({ base: mkBase([['\\k25'], 'a'], [['\\K50'], 'b']) }, DEFAULT_STYLE_REF);
-	assert.deepEqual(entry.base[0].anim.k, { type: 'k', durationMs: 250, startMs: 0 });
-	assert.deepEqual(entry.base[1].anim.k, { type: 'K', durationMs: 500, startMs: 250 });
+	assert.deepEqual(entry.base[0].delta.data.k, { type: 'k', startTime: 0, duration: 250 });
+	assert.deepEqual(entry.base[1].delta.data.k, { type: 'K', startTime: 250, duration: 500 });
+	assert.equal(entry.base[0].anim, undefined);
 });
 
-test('classify động: \\kf/\\ko + mục không karaoke ở giữa KHÔNG cắt mạch cộng dồn', () => {
+test('classify 2.4a: \\kf/\\ko + mục giữa không cắt mạch cộng dồn', () => {
 	const entry = classify({ base: mkBase([[], 'x'], [['\\kf25'], 'a'], [['\\ko30'], 'b']) }, DEFAULT_STYLE_REF);
 	assert.equal(entry.base[0].anim, undefined);
-	assert.deepEqual(entry.base[1].anim.k, { type: 'kf', durationMs: 250, startMs: 0 });
-	assert.deepEqual(entry.base[2].anim.k, { type: 'ko', durationMs: 300, startMs: 250 });
+	assert.deepEqual(entry.base[1].delta.data.k, { type: 'kf', startTime: 0, duration: 250 });
+	assert.deepEqual(entry.base[2].delta.data.k, { type: 'ko', startTime: 250, duration: 300 });
 });
 
-test('classify động: cùng mục \\fs30 + \\k25 → delta.text (layout) + anim.k (karaoke)', () => {
+test('classify 2.4a: cùng mục \\fs30 + \\k25 → delta.text + data.k, không anim', () => {
 	const item = classify({ base: mkBase([['\\fs30', '\\k25'], 'na']) }, DEFAULT_STYLE_REF).base[0];
-	assert.deepEqual(item.delta, { text: { 'font-size': '30px' } });
-	assert.deepEqual(item.anim, { k: { type: 'k', durationMs: 250, startMs: 0 } });
+	assert.deepEqual(item.delta, {
+		text: { 'font-size': '30px' },
+		data: { k: { type: 'k', startTime: 0, duration: 250 } },
+	});
+	assert.equal(item.anim, undefined);
 });
 
-test('classify động: nhiều \\k trong CÙNG mục → anim.k = syl cuối; startMs vẫn cộng dồn cho mục SAU', () => {
+test('classify 2.4a: nhiều \\k cùng mục → data.k = syl cuối; cộng dồn mục sau', () => {
 	const entry = classify({ base: mkBase([['\\k25', '\\k30'], 'na'], [['\\k50'], 'x']) }, DEFAULT_STYLE_REF);
-	assert.deepEqual(entry.base[0].anim.k, { type: 'k', durationMs: 300, startMs: 250 });
-	assert.deepEqual(entry.base[1].anim.k, { type: 'k', durationMs: 500, startMs: 550 });
+	assert.deepEqual(entry.base[0].delta.data.k, { type: 'k', startTime: 250, duration: 300 });
+	assert.deepEqual(entry.base[1].delta.data.k, { type: 'k', startTime: 550, duration: 500 });
 });
 
-// ======================================================================
-// classify() — shape lineCss[i] = { base, collision, clip } + tích hợp qua parser()
-// ======================================================================
+test('classify 2.4a: \\q last-wins; \\kt bị bỏ', () => {
+	const entry = classify({ base: mkBase([['\\q1', '\\q2'], 'a'], [['\\kt50', '\\k10'], 'b']) }, DEFAULT_STYLE_REF);
+	assert.equal(entry.base[0].delta.data.q, 2);
+	assert.deepEqual(entry.base[1].delta.data.k, { type: 'k', startTime: 0, duration: 100 });
+});
 
-test('classify: lineCss[i] đủ { base, collision, clip }; 2.1 clip = shape default (stub)', () => {
+test('classify 2.4a trong \\t: \\k cộng dồn; \\fn vào delta.text không vào target', () => {
+	const entry = classify({
+		base: mkBase([['\\k20', '\\t(0,500,\\k99\\fnVerdana\\fs40)', '\\k30'], 'A'], [['\\k40'], 'B']),
+	}, DEFAULT_STYLE_REF);
+	assert.deepEqual(entry.base[0].delta.data.k, { type: 'k', startTime: 1190, duration: 300 });
+	assert.equal(entry.base[0].delta.text['font-family'], '"Verdana", sans-serif');
+	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: 500, easing: 1, target: { 'font-size': '40px' } }]);
+	assert.deepEqual(entry.base[1].delta.data.k, { type: 'k', startTime: 1490, duration: 400 });
+});
+
+test('classify 2.4b: \\an trong \\t không vào target', () => {
+	const entry = classify({ base: mkBase([['\\t(\\an5\\fs30)'], 'x']) }, DEFAULT_STYLE_REF);
+	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: null, easing: 1, target: { 'font-size': '30px' } }]);
+});
+
+test('classify: lineCss[i] đủ { base, collision, clip }', () => {
 	const entry = classify({ base: mkBase([['\\fs30'], 'x']) }, DEFAULT_STYLE_REF);
 	assert.deepEqual(Object.keys(entry).sort(), ['base', 'clip', 'collision']);
 	assert.deepEqual(entry.clip, { rawList: [], effectiveType: null, effectiveRaw: null });
 	assert.equal(entry.base[0].text, 'x');
 });
 
-test('classify: base rỗng / không phải array → không lỗi, collision/clip default', () => {
+test('classify: base rỗng / không phải array → không lỗi', () => {
 	assert.deepEqual(classify({ base: [] }, DEFAULT_STYLE_REF), { base: [], collision: { t: false }, clip: { rawList: [], effectiveType: null, effectiveRaw: null } });
 	assert.deepEqual(classify({}, DEFAULT_STYLE_REF), { base: [], collision: { t: false }, clip: { rawList: [], effectiveType: null, effectiveRaw: null } });
 });
 
-test('classifyLayoutLocal: hàm nhóm 2.4 export riêng — mutate base tại chỗ, giữ styleRef mặc định', () => {
+test('classifyLayoutLocal: mutate base tại chỗ', () => {
 	const base = mkBase([['\\fs30'], 'x']);
 	const out = classifyLayoutLocal(base, DEFAULT_STYLE_REF);
-	assert.equal(out, base); // mutate cùng mảng
+	assert.equal(out, base);
 	assert.deepEqual(base[0].delta.text, { 'font-size': '30px' });
 });
 
-test('classify qua parser(): lineCss[i] đã qua classify — marker \\N có delta.data, collision/clip có sẵn', () => {
+test('classify qua parser(): marker \\N có delta.data', () => {
 	const parsed = parser(false, MINI_ASS);
 	assert.equal(parsed.lineCss.length, 1);
 	assert.deepEqual(Object.keys(parsed.lineCss[0]).sort(), ['base', 'clip', 'collision']);
-	assert.deepEqual(parsed.lineCss[0].collision, { t: false }); // MINI_ASS không có \t
+	assert.deepEqual(parsed.lineCss[0].collision, { t: false });
 	assert.deepEqual(parsed.lineCss[0].clip, { rawList: [], effectiveType: null, effectiveRaw: null });
-	// 2.4 chạy trong parser: marker {\N} → delta.data.marker
 	assert.deepEqual(parsed.lineCss[0].base[2].delta.data, { marker: '\\N' });
-	// orgline không bị classify đụng tới (classify chỉ viết vào lineCss)
 	assert.equal(parsed.events[0].delta, undefined);
 });
