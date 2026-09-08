@@ -125,31 +125,31 @@ test('classify 2.4: marker \\N/\\h → delta.data { marker }, text rỗng, KHÔN
 // Nhóm ĐỘNG — \t (anim.t metadata, không bake; \pos/\move/\org trong \t bị BỎ QUA)
 // ======================================================================
 
-test('classify động: \\t(t1,t2,mods) → anim.t { t1, t2, easing, to } + collision.t = true', () => {
+test('classify động: \\t(t1,t2,mods) → anim.t { t1, t2, easing, target } + collision.t = true', () => {
 	const entry = classify({ base: mkBase([['\\t(0,500,\\fs30)'], 'x']) }, DEFAULT_STYLE_REF);
-	assert.deepEqual(entry.base[0].anim, { t: [{ t1: 0, t2: 500, easing: 1, to: { 'font-size': '30px' } }] });
+	assert.deepEqual(entry.base[0].anim, { t: [{ t1: 0, t2: 500, easing: 1, target: { 'font-size': '30px' } }] });
 	assert.equal(entry.collision.t, true); // signal \t ở collision (KHÔNG lặp payload)
 });
 
 test('classify động: \\t(accel,mods) 1 số → easing = accel, t2 = null (tới hết dòng)', () => {
 	const entry = classify({ base: mkBase([['\\t(2,\\fs30)'], 'x']) }, DEFAULT_STYLE_REF);
-	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: null, easing: 2, to: { 'font-size': '30px' } }]);
+	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: null, easing: 2, target: { 'font-size': '30px' } }]);
 });
 
 test('classify động: \\t(mods) không số → toàn dòng (t1 0, t2 null, easing 1)', () => {
 	const entry = classify({ base: mkBase([['\\t(\\fs30)'], 'x']) }, DEFAULT_STYLE_REF);
-	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: null, easing: 1, to: { 'font-size': '30px' } }]);
+	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: null, easing: 1, target: { 'font-size': '30px' } }]);
 });
 
-test('classify động: \\t(t1,t2,accel,mods) accel thập phân + scale target → to.transform', () => {
+test('classify động: \\t(t1,t2,accel,mods) accel thập phân + scale target → target.transform', () => {
 	const entry = classify({ base: mkBase([['\\t(0,1000,0.5,\\fscx120\\fscy90)'], 'x']) }, DEFAULT_STYLE_REF);
-	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: 1000, easing: 0.5, to: { transform: 'scaleX(1.2) scaleY(0.9)' } }]);
+	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: 1000, easing: 0.5, target: { transform: 'scaleX(1.2) scaleY(0.9)' } }]);
 });
 
-test('classify động: \\t chứa \\pos/\\move/\\org → BỎ QUA (không vào to; không còn target thì không tạo anim)', () => {
+test('classify động: \\t chứa \\pos/\\move/\\org → BỎ QUA không vào target; không còn target thì không tạo anim)', () => {
 	// \pos nằm cạnh \fs30: chỉ \fs30 được animate
 	const entry = classify({ base: mkBase([['\\t(\\pos(10,20)\\fs30)'], 'x']) }, DEFAULT_STYLE_REF);
-	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: null, easing: 1, to: { 'font-size': '30px' } }]);
+	assert.deepEqual(entry.base[0].anim.t, [{ t1: 0, t2: null, easing: 1, target: { 'font-size': '30px' } }]);
 	// \t chỉ chứa \move → bị loại hẳn (anim.t không tồn tại)
 	const entryMove = classify({ base: mkBase([['\\t(\\move(1,2,3,4))'], 'x']) }, DEFAULT_STYLE_REF);
 	assert.equal(entryMove.base[0].anim, undefined);
@@ -189,6 +189,55 @@ test('classify động: nhiều \\k trong CÙNG mục → anim.k = syl cuối; s
 	const entry = classify({ base: mkBase([['\\k25', '\\k30'], 'na'], [['\\k50'], 'x']) }, DEFAULT_STYLE_REF);
 	assert.deepEqual(entry.base[0].anim.k, { type: 'k', durationMs: 300, startMs: 250 });
 	assert.deepEqual(entry.base[1].anim.k, { type: 'k', durationMs: 500, startMs: 550 });
+});
+
+// ======================================================================
+// Note #17 (08sep26) — \k nằm TRONG \t(...) phải đẩy karaokeRunMs (theo libass)
+// ======================================================================
+
+test('note #17: \\\\k TRONG \\\\t(...) phải đẩy karaokeRunMs như \\\\k ngoài \\\\t (theo libass)', () => {
+	// {\k20\t(0,500,\k99)\k30}A{\k40}B
+	// \k20:          startMs=0,    durationMs=200,  karaokeRunMs=200
+	// \t(0,500,\k99): \k99 inside → startMs=200,  durationMs=990,  karaokeRunMs=1190
+	// \k30:          startMs=1190, durationMs=300,  karaokeRunMs=1490  ← A.anim.k
+	// \k40:          startMs=1490, durationMs=400,  karaokeRunMs=1890  ← B.anim.k
+	const entry = classify({
+		base: mkBase(
+			[['\\k20', '\\t(0,500,\\k99)', '\\k30'], 'A'],
+			[['\\k40'], 'B']
+		)
+	}, DEFAULT_STYLE_REF);
+	assert.deepEqual(entry.base[0].anim.k, { type: 'k', durationMs: 300, startMs: 1190 });
+	assert.deepEqual(entry.base[1].anim.k, { type: 'k', durationMs: 400, startMs: 1490 });
+});
+
+test('note #17: \\\\k trong \\\\t + \\\\t khác mục → karaokeRunMs xuyên suốt dòng', () => {
+	// {\k10}X{\t(0,300,\k50)\k20}Y
+	// \k10:           startMs=0,   durationMs=100, karaokeRunMs=100
+	// \t(0,300,\k50): \k50 inside → startMs=100, durationMs=500, karaokeRunMs=600
+	// \k20:           startMs=600, durationMs=200, karaokeRunMs=800  ← Y.anim.k
+	const entry = classify({
+		base: mkBase(
+			[['\\k10'], 'X'],
+			[['\\t(0,300,\\k50)', '\\k20'], 'Y']
+		)
+	}, DEFAULT_STYLE_REF);
+	assert.deepEqual(entry.base[0].anim.k, { type: 'k', durationMs: 100, startMs: 0 });
+	assert.deepEqual(entry.base[1].anim.k, { type: 'k', durationMs: 200, startMs: 600 });
+});
+
+test('note #17: \\\\t chỉ chứa \\\\fs (không có \\\\k) → KHÔNG đẩy karaokeRunMs', () => {
+	// {\k10}\t(\fs30){\k20}A
+	// \k10:        startMs=0,   durationMs=100, karaokeRunMs=100
+	// \t(\fs30):   không có \k → karaokeRunMs vẫn = 100
+	// \k20:        startMs=100, durationMs=200, karaokeRunMs=300  ← A.anim.k
+	const entry = classify({
+		base: mkBase(
+			[['\\k10'], ''],
+			[['\\t(\\fs30)', '\\k20'], 'A']
+		)
+	}, DEFAULT_STYLE_REF);
+	assert.deepEqual(entry.base[1].anim.k, { type: 'k', durationMs: 200, startMs: 100 });
 });
 
 // ======================================================================

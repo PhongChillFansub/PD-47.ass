@@ -23,13 +23,13 @@
  */
 /** Định nghĩa/chú thích anim của 1 mục base (nhóm ĐỘNG — metadata nội suy, renderer resolve)
  * @typedef {object} parsedDataFormat.baseItemAnim
- * @property {Array<{t1: number, t2: (number|null), easing: number, to: Object}>} [t] Danh sách
- *   mỗi \t(...) trong item theo thứ tự: { t1, t2, easing, to }.
+ * @property {Array<{t1: number, t2: (number|null), easing: number, target: Object}>} [t] Danh sách
+ *   mỗi \t(...) trong item theo thứ tự: { t1, t2, easing, target }.
  *   - t1/t2: ms, tương đối đầu dòng (Aegisub: \t dùng ms). t2 = null khi file không ghi t2
  *     (transform chạy tới HẾT dòng — renderer lấy duration dòng từ events để resolve).
  *   - easing: số accel THÔ (default 1 = linear; >1 nhanh dần, <1 chậm dần) — renderer tự map
  *     sang hàm easing (linear/parabola/cubic...); giữ số thô để không mất độ chính xác.
- *   - to: tag target ĐÃ map CSS-cooked (giống delta.text). CHỈ chứa tag map được; \pos/\move/\org
+ *   - target: tag target ĐÃ map CSS-cooked (giống delta.text). CHỈ chứa tag map được; \pos/\move/\org
  *     trong \t bị BỎ QUA (chốt 03sep26), tag nhóm 2.3 (\c, \bord, \fr...) map khi viết 2.3.
  * @property {{type: ('kf'|'K'|'k'|'ko'), durationMs: number, startMs: number}} [k] Karaoke syl:
  *   durationMs = file (centisecond) × 10 → ms (chốt 03sep26); startMs = parser CỘNG DỒN các syl
@@ -46,7 +46,6 @@
  *   Nhóm 2.1 — mức DÒNG, last-wins (bản này STUB default — session 2.1 làm đầy).
  */
 
-import * as utils from './utils.js';
 /** Regex nhận diện tag karaoke: \k / \K / \kf / \ko + duration (số, centisecond trong file).
  * Nhóm 1 = type ('k'|'K'|'kf'|'ko'), nhóm 2 = duration raw (cs). */
 const KARAOKE_RE = /^\\(k[fo]?|K)(\d+(?:\.\d+)?)/;
@@ -177,6 +176,20 @@ function finalizeTransform(css, scaleX, scaleY) {
 	if (scaleY !== undefined && scaleY !== 100) parts.push(`scaleY(${scaleY / 100})`);
 	if (parts.length) css['transform'] = parts.join(' ');
 }
+/** [arena.ai] Đọc 1 tag karaoke (\k/\K/\kf/\ko) → kết quả { k, runMs } hoặc null.
+ * Dùng chung cho karaoke NGOÀI \t (classifyLayoutLocal nhánh chính) và karaoke TRONG \t
+ * (note #17 — quét inner content). Nguyên tắc: cùng đường, cùng logic (theo libass).
+ * @param {string} tag Tag đơn raw (bắt đầu bằng '\\').
+ * @param {number} runMs startMs cộng dồn hiện tại (karaokeRunMs).
+ * @returns {{k: {type: string, durationMs: number, startMs: number}, runMs: number}|null}
+ *   null nếu tag không phải karaoke.
+ */
+function readKaraokeTag(tag, runMs) {
+	const km = KARAOKE_RE.exec(tag);
+	if (!km) return null;
+	const durationMs = Number(km[2]) * 10; // file ghi centisecond × 10 = ms
+	return { k: { type: km[1], durationMs, startMs: runMs }, runMs: runMs + durationMs };
+}
 /** [arena.ai] Parse 1 tag \t(...) thành entry anim { t1, t2, easing, target } (metadata — Cách 1,
  * KHÔNG xử lí tạo snapshot; để cho renderer resolve theo mediaTime).
  *
@@ -257,6 +270,7 @@ function parseTransformTag(tag, styleRef) {
  *   - delta.data — \r (baseStyleName: reset về style dòng khi \r rỗng, hoặc style tên trong \r);
  *                  marker \h/\N/\n (renderer quyết ngữ nghĩa xuống dòng/space theo WrapStyle/\q).
  *   - anim.t     — \t(...) → metadata nội suy (không bake); \pos/\move/\org trong \t bị BỎ QUA.
+ *                   { t1, t2, easing, target } (target = tag CSS-cooked).
  *   - anim.k     — \k/\K/\kf/\ko → { type, durationMs, startMs }; startMs CỘNG DỒN theo thứ tự
  *                  base trong cùng dòng (parser tính; ×10 vì file ghi đơn vị centisecond).
  * 					Chú ý: nếu nhiều \k cạnh nhau → xử lí như dạng offset. 
@@ -293,14 +307,26 @@ export function classifyLayoutLocal(base, styleRef) {
 			if (tag.startsWith('\\t')) {
 				const entry = parseTransformTag(tag, styleRef);
 				if (entry) animT.push(entry);
+				// Note #17 (08sep26): \k TRONG \t phải đếm như \k ngoài \t (theo libass).
+				// Chỉ quét modsText (sau '\' đầu trong inner) — skip argSection số.
+				// String slice thay regex: tag = '\t(...)' → inner = tag.slice(3, -1).
+				if (tag.length > 3 && tag[2] === '(' && tag.endsWith(')')) {
+					const inner = tag.slice(3, -1);
+					const firstSlash = inner.indexOf('\\');
+					if (firstSlash !== -1) {
+						for (const sub of splitOverrideTagsTransform(inner.slice(firstSlash))) {
+							const kr = readKaraokeTag(sub, karaokeRunMs);
+							if (kr) { animK = kr.k; karaokeRunMs = kr.runMs; }
+						}
+					}
+				}
 				continue;
 			}
 			// Nhóm ĐỘNG 2 — karaoke \k/\K/\kf/\ko: duration file centisecond × 10 = ms; startMs cộng dồn.
-			const km = KARAOKE_RE.exec(tag);
-			if (km) {
-				const durationMs = Number(km[2]) * 10;
-				animK = { type: km[1], durationMs, startMs: karaokeRunMs };
-				karaokeRunMs += durationMs; // syl SAU trong dòng lấy mốc mới
+			const kr = readKaraokeTag(tag, karaokeRunMs);
+			if (kr) {
+				animK = kr.k;
+				karaokeRunMs = kr.runMs;
 				continue;
 			}
 			// \r: reset style → delta.data.baseStyleName (nguồn baseStyleName của run).
@@ -341,7 +367,7 @@ export function classifyLayoutLocal(base, styleRef) {
 /** [arena.ai] Nhóm 2.3 — Decoration Local Tags (màu, bord/shad, \fa, \fr...). SESSION SAU.
  * Để shape classify() chạy đúng thứ tự 2.4 → 2.3 → 2.2 → 2.1, hàm này được classify() gọi ở vị trí 2.
  * Khi implement: đọc tags còn nguyên trên từng mục base, MERGE delta vào item.delta ĐÃ CÓ từ 2.4
- * (không gán đè), và bổ sung tag target nhóm 2.3 vào anim.t[i].to của \t (tags raw vẫn còn để đối chiếu).
+ * (không gán đè), và bổ sung tag target nhóm 2.3 vào anim.t[i].target của \t (tags raw vẫn còn để đối chiếu).
  * QUY TẮC CHUNG (chốt 03sep26 bản 2): tag dạng bật/tắt kiểu \u/\s (và \b/\i nếu 2.3 đụng tới)
  * KHÔNG có số đằng sau → coi như KHÔNG có tag (bỏ qua, không toggle — parser không giữ state dòng).
  * @param {Array<parsedDataFormat.baseItem>} base Mảng mục base của dòng.

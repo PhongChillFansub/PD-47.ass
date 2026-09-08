@@ -409,10 +409,6 @@ function styleParsedToCss (style, info = {}, styleIndex = -1) {
 
 	return { container, text, data };
 }
-/** [arena.ai] Tag có chứa tag karaoke (\k, \K, \kf, \ko) không? */
-function hasKaraokeTag(tag) {
-	return /\\[kK](?:[fo])?/.test(tag);
-}
 /** [arena.ai] Token là marker đứng riêng {\h} / {\N} / {\n} (renderer quyết định ngữ nghĩa) không? */
 function isStandaloneToken(tok) {
 	return tok === '{\\h}' || tok === '{\\N}' || tok === '{\\n}';
@@ -504,10 +500,10 @@ function tokenizeLineText(text) {
 	 * 4. Là tag có '\' → strip hết phần trước '\' ĐẦU TIÊN (bỏ '{' và phần comment dẫn đầu),
 	 *    rồi bọc lại trong { } thành cleaned (VD {abc\b1} → {\b1}).
 	 * 5. cleaned là marker đứng riêng {\h}/{\N}/{\n} → đẩy NGAY, không bao giờ merge.
-	 * 6. Ngược lại, nếu token trước trong result cũng là tag (không phải marker, không có
-	 *    karaoke) → HỢP NHẤT 2 tag: bỏ '}' của token trước và '{' của cleaned, ghép thành 1 tag
-	 *    liền (VD {\b1} + {\i1} → {\b1\i1}). Chỉ KHÔNG hợp nhất khi cleaned chứa tag karaoke
-	 *    (\k/\K/\kf/\ko) — karaoke phải đứng riêng để đo thời lượng từng syl.
+	 * 6. Ngược lại, nếu token trước trong result cũng là tag (không phải marker) →
+	 *    HỢP NHẤT 2 tag: bỏ '}' của token trước và '{' của cleaned, ghép thành 1 tag
+	 *    liền (VD {\b1} + {\i1} → {\b1\i1}). Kể cả khi cleaned chứa tag karaoke
+	 *    (\k/\K/\kf/\ko) — karaoke vẫn hợp nhất bình thường (khớp JSDoc ngoài).
 	 * 7. Còn lại → đẩy cleaned như 1 tag mới.
 	 *
 	 * Lưu ý: chỉ TAG mới được sửa/merge; TEXT luôn đẩy nguyên (như nhánh 2).
@@ -589,7 +585,7 @@ function tokenizeLineText(text) {
  * @property {parsedDataFormat.baseItemDelta} [delta] classify (tagProcess.js) sinh: mức text
  *   (layout tĩnh \fs\fsc\fsp\fn\b\i) / data (\r → baseStyleName; marker \h\N\n). text không tag thì KHÔNG có delta/anim.
  * @property {parsedDataFormat.baseItemAnim} [anim] classify sinh metadata nhóm ĐỘNG:
- *   t (mỗi \t → { t1, t2, easing, to }) + k ({ type, durationMs, startMs }) — renderer resolve.
+ *   t (mỗi \t → { t1, t2, easing, target }) + k ({ type, durationMs, startMs }) — renderer resolve.
  */
 /** Định nghĩa/chú thích delta theo mức node của mục base
  * ĐỊNH HƯỚNG cho classify (bước 4-7): parser xử lí đến base thì mỗi mục base mang
