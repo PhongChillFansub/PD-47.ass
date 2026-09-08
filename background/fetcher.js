@@ -1,4 +1,4 @@
-// v0.1.0 22aug26 
+// v0.1.0 08sep26 
 // beta mode (đã viết xong, sửa lỗi khi chạy)
 // Chức năng: xử lí ban đầu, giai đoạn từ danh sách link thư mục nguồn đến giai đoạn có file sub thô (rawText)
 // export: fetchSubtitleFileList (danh sách link thư mục nguồn → chỉ mục source.fileList),

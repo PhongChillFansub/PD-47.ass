@@ -1,4 +1,4 @@
-// v0.1.0 03sep26
+// v0.1.0 08sep26
 // beta mode (đã viết xong, sửa lỗi khi chạy)
 // Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
@@ -484,7 +484,8 @@ function styleForLine(orgline, parsedData) {
  *   - \h / \N / \n đứng NGOÀI tag → wrap thành {\h} / {\N} / {\n} riêng biệt, GIỮ NGUYÊN để
  *     renderer quyết định ngữ nghĩa (dấu cách / xuống dòng, theo WrapStyle / \q).
  *   - Tag {..}: bỏ tag rỗng/comment (không có '\'), strip phần trước '\' đầu tiên, hợp nhất 2 tag
- *     liền nhau (}{) — TRỪ khi tag sau chứa karaoke (\k/\K/\kf/\ko) và TRỪ marker {\h}/{\N}/{\n}.
+ *     liền nhau (}{) — TRỪ marker {\h}/{\N}/{\n}.
+ * 	 - Nếu 1 trong 2, hoặc cả 2 tag chứa karaoke (\k/\K/\kf/\ko) thì vẫn hợp nhất bình thường.
  *   - \{ \} giữ nguyên văn, unescape ở tầng cuối (renderer).
  */
 function tokenizeLineText(text) {
@@ -532,9 +533,9 @@ function tokenizeLineText(text) {
 			return;
 		}
 		const prev = result[result.length - 1];
-		// Nếu token trước là tag (không phải marker, không có karaoke) → merge 2 tag liền nhau
+		// Nếu token trước là tag (không phải marker) → merge 2 tag liền nhau
 		if (prev !== undefined && prev.startsWith('{') && prev.endsWith('}')
-			&& !isStandaloneToken(prev) && !hasKaraokeTag(cleaned)) {
+			&& !isStandaloneToken(prev)) {
 			result[result.length - 1] = prev.slice(0, -1) + cleaned.slice(1);
 		} else { // Nếu ko thì push cleaned như 1 tag mới
 			result.push(cleaned);
@@ -608,6 +609,7 @@ function tokenizeLineText(text) {
  * @returns {Array<string>} Các tag đơn, mỗi phần tử bắt đầu bằng '\', raw nguyên văn; content không chứa '\' → [].
  */
 function splitOverrideTags(content) {
+	const tags = [];
 	/**
 	 * Đẩy 1 tag đã cắt vào tags. BỎ tag rác: tag chỉ có mỗi '\' (length 1 — không có ký tự lệnh
 	 * theo sau). Xảy ra khi content chứa 2 dấu '\' LIỀN NHAU kiểu "\b1\\i1" (file lỗi / double-escape):
@@ -616,7 +618,6 @@ function splitOverrideTags(content) {
 	 * @param {string} tagChunk Đoạn tag từ '\' mở đầu (tối thiểu là '\').
 	 * @returns {void}
 	 */
-	const tags = [];
 	function pushTag(tagChunk) {
 		if (tagChunk.length > 1) tags.push(tagChunk);
 	}

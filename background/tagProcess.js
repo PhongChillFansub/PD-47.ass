@@ -1,4 +1,4 @@
-/** v0.1.0 03sep26
+/** v0.1.0 08sep26
  * alpha mode
  * Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] ĐẦY ĐỦ
  * { base, collision, clip } theo struct đích (mục 3 prompt 03sep26).
@@ -46,6 +46,7 @@
  *   Nhóm 2.1 — mức DÒNG, last-wins (bản này STUB default — session 2.1 làm đầy).
  */
 
+import * as utils from './utils.js';
 /** Regex nhận diện tag karaoke: \k / \K / \kf / \ko + duration (số, centisecond trong file).
  * Nhóm 1 = type ('k'|'K'|'kf'|'ko'), nhóm 2 = duration raw (cs). */
 const KARAOKE_RE = /^\\(k[fo]?|K)(\d+(?:\.\d+)?)/;
@@ -65,7 +66,7 @@ function isNumericToken(token) {
  * @param {string} text Chuỗi chứa tag, vd "\\fs30\\t(\\clip(0,0,1,1))\\c&HFF&".
  * @returns {string[]} Các tag đơn, mỗi phần tử bắt đầu bằng '\'.
  */
-function splitStyleModifiers(text) {
+function splitOverrideTagsTransform(text) {
 	const tags = [];
 	/** Bỏ tag rác chỉ có mỗi '\' (2 dấu '\' liền nhau) — đồng bộ splitOverrideTags ở parser.js. */
 	function pushTag(tagChunk) {
@@ -85,10 +86,7 @@ function splitStyleModifiers(text) {
 	if (start !== -1) pushTag(text.slice(start));
 	return tags;
 }
-
-
-
-/** [arena.ai] Map 1 tag LAYOUT TĨNH (2.4) thành CSS-cooked, ghi vào ctx.
+/** [arena.ai] Map 1 tag LAYOUT TĨNH (2.4) thành CSS-cooked, ghi vào context.
  * Chỉ xử lí: \fs \fscx \fscy \fsc (alias fscx) \fsp \fn \b \i.
  * \b/\i (và \u/\s khi 2.3 làm) KHÔNG có số đằng sau → coi như KHÔNG có tag: return false, không toggle
  * (parser không giữ state dòng — chốt 03sep26 bản 2).
@@ -96,7 +94,7 @@ function splitStyleModifiers(text) {
  * \t/\k là nhóm ĐỘNG → xử lí riêng, không qua hàm này.
  *
  * @param {string} tag Tag đơn raw, bắt đầu bằng '\' (vd "\\fs30", "\\fscx150").
- * @param {{css: Object, scaleX: (number|undefined), scaleY: (number|undefined), styleRef: (Object|null|undefined)}} ctx
+ * @param {{css: Object, scaleX: (number|undefined), scaleY: (number|undefined), styleRef: (Object|null|undefined)}} context
  *   Context dùng CHUNG cho cả item/entry (scaleX/scaleY phải tích lũy qua nhiều tag scale).
  *   - css: nơi ghi key CSS-cooked (font-size/letter-spacing/font-weight/font-style/font-family...).
  *   - scaleX/scaleY: số % gốc của tag scale — KHÔNG ghi css.transform tại đây, caller gộp 1 lần cuối
@@ -105,43 +103,46 @@ function splitStyleModifiers(text) {
  * @returns {boolean} true = tag thuộc layout tĩnh (đã xử lí — dù có sinh CSS hay không);
  *   false = tag KHÔNG thuộc nhóm này (vd \c, \bord, \an, \pos...) → để lại cho nhóm sau.
  */
-function applyLayoutStatic(tag, ctx) {
-	const { css } = ctx;
+function applyLayoutStatic(tag, context) {
+	const { css } = context;
 	// \fscy: scale Y (%).
 	if (tag.startsWith('\\fscy')) {
 		const v = Number.parseFloat(tag.slice(5));
-		if (!Number.isNaN(v)) ctx.scaleY = v;
+		if (!Number.isNaN(v)) context.scaleY = v;
 		return true;
 	}
 	// \fscx: scale X (%).
 	if (tag.startsWith('\\fscx')) {
 		const v = Number.parseFloat(tag.slice(5));
-		if (!Number.isNaN(v)) ctx.scaleX = v;
+		if (!Number.isNaN(v)) context.scaleX = v;
 		return true;
 	}
-	// \fsc = alias của \fscx (SSA cũ).
+	// \fsc = scale cả X và Y (VSFilterMod).
 	if (tag.startsWith('\\fsc')) {
 		const v = Number.parseFloat(tag.slice(4));
-		if (!Number.isNaN(v)) ctx.scaleX = v;
+		if (!Number.isNaN(v)) {
+			context.scaleX = v;
+			context.scaleY = v;
+		}
 		return true;
 	}
 	// \fsp: letter-spacing (px, PlayRes) — phải đứng trước \fs (prefix trùng '\fs').
 	if (tag.startsWith('\\fsp')) {
 		const v = Number.parseFloat(tag.slice(4));
-		if (!Number.isNaN(v)) css['letter-spacing'] = `${v}px`;
+		if (!Number.isNaN(v)) context.css['letter-spacing'] = `${v}px`;
 		return true;
 	}
 	// \fn: font-family (reset về font style dòng nếu \fn rỗng).
 	if (tag.startsWith('\\fn')) {
 		let name = tag.slice(3).trim();
-		if (name === '') name = ctx.styleRef?.fontName ?? '';
-		if (name !== '') css['font-family'] = `"${name}", sans-serif`;
+		if (name === '') name = context.styleRef?.fontName ?? '';
+		if (name !== '') context.css['font-family'] = `"${name}", sans-serif`;
 		return true;
 	}
 	// \fs: font-size (px, PlayRes) — để SAU \fscx/fscy/fsc/fsp vì prefix '\fs' trùng.
 	if (tag.startsWith('\\fs')) {
 		const v = Number.parseFloat(tag.slice(3));
-		if (!Number.isNaN(v)) css['font-size'] = `${v}px`;
+		if (!Number.isNaN(v)) context.css['font-size'] = `${v}px`;
 		return true;
 	}
 	// \b: font-weight 700/400 — YÊU CẦU SỐ đằng sau (\b1/\b0; \b-1 cũng là số → parse ≠ 0 → 700).
@@ -150,19 +151,18 @@ function applyLayoutStatic(tag, ctx) {
 	// \bord/\bbox... KHÔNG lọt (regex khóa đuôi chữ số).
 	if (/^\\b-?\d+(?:\.\d+)?$/.test(tag)) {
 		const on = Number.parseFloat(tag.slice(2)) !== 0;
-		css['font-weight'] = on ? '700' : '400';
+		context.css['font-weight'] = on ? '700' : '400';
 		return true;
 	}
 	// \i: font-style italic/normal — cùng quy tắc \b: YÊU CẦU SỐ; \i KHÔNG số → return false.
 	// (\iclip... không lọt — regex khóa đuôi chữ số.)
 	if (/^\\i-?\d+(?:\.\d+)?$/.test(tag)) {
 		const on = Number.parseFloat(tag.slice(2)) !== 0;
-		css['font-style'] = on ? 'italic' : 'normal';
+		context.css['font-style'] = on ? 'italic' : 'normal';
 		return true;
 	}
 	return false;
 }
-
 /** [arena.ai] Gộp scaleX/scaleY (số % đã gom từ nhiều tag scale trong CÙNG mục) thành chuỗi
  * 'transform' CSS-cooked. Chỉ emit key khi có ít nhất 1 scale ≠ 100 (identity không cần — giống R3).
  * Thứ tự chuỗi scaleX trước scaleY cho khớp styleParsedToCss (phần scale luôn đứng sau rotate).
@@ -177,9 +177,8 @@ function finalizeTransform(css, scaleX, scaleY) {
 	if (scaleY !== undefined && scaleY !== 100) parts.push(`scaleY(${scaleY / 100})`);
 	if (parts.length) css['transform'] = parts.join(' ');
 }
-
-/** [arena.ai] Parse 1 tag \t(...) thành entry anim { t1, t2, easing, to } (metadata — Cách 1,
- * KHÔNG bake snapshot; renderer resolve theo mediaTime).
+/** [arena.ai] Parse 1 tag \t(...) thành entry anim { t1, t2, easing, target } (metadata — Cách 1,
+ * KHÔNG xử lí tạo snapshot; để cho renderer resolve theo mediaTime).
  *
  * Cú pháp (Aegisub / ASSv5 wiki): \t([t1],[t2],[accel],mods) | \t([t1],[t2],mods) |
  * \t([accel],mods) | \t(mods). t1/t2 tính bằng ms, tương đối đầu dòng.
@@ -189,32 +188,39 @@ function finalizeTransform(css, scaleX, scaleY) {
  *   - 2 số  → t1, t2 (easing mặc định 1).
  *   - 3 số+ → t1, t2, accel.
  *
- * ⚠️ ĐIỂM ĐẶC BIỆT (chốt 03sep26): \t KHÔNG animate \pos/\move/\org — nếu bên trong \t(...) có
- * 3 tag này thì TỰ ĐỘNG BỎ QUA (không parse vào to). \t chỉ animate style (vd \fs, \c, \fsc, \fr,
+ * Chú ý: \t KHÔNG xử lí \pos, \move, \org, \[i]clip — nếu bên trong \t(...) có
+ * những tag này thì TỰ ĐỘNG BỎ QUA (không parse vào target). 
+ * 
+ * \t chỉ animate style (vd \fs, \c, \fsc, \fr,
  * \bord, \shad, \frz...). \pos/\move/\org là line-level (collision), không thể nằm trong \t.
- * \clip/\iclip trong \t cũng bỏ qua ở đây (ít gặp; nhóm 2.1 sau này đọc lại từ tags raw — tags
- * được GIỮ nên không mất dữ liệu).
+ * 
+ * \clip/\iclip sẽ được xử lí riêng (2.1).
  *
  * @param {string} tag Tag \t raw (vd "\\t(0,500,0.5,\\fs30\\fscx150)").
  * @param {Object|null|undefined} styleRef Style chuẩn của dòng (cho \fn rỗng bên trong \t).
- * @returns {{t1: number, t2: (number|null), easing: number, to: Object}|null} Entry anim;
- *   null khi \t không hợp lệ (thiếu ngoặc) hoặc KHÔNG có tag target nào map được (to rỗng).
+ * @returns {{t1: number, t2: (number|null), easing: number, target: Object}|null} Entry anim;
+ *   null khi \t không hợp lệ (thiếu ngoặc) hoặc KHÔNG có tag target nào map được (target rỗng).
  */
-function parseTTransformTag(tag, styleRef) {
+function parseTransformTag(tag, styleRef) {
 	const m = /^\\t(?:\((.*)\))?$/.exec(tag);
-	if (!m) return null; // \t không có (...): không hợp lệ → bỏ qua
-	const inner = m[1] ?? '';
-	// Tách phần tham số số (trước '\' đầu tiên) và phần style modifiers (từ '\' đầu tiên trở đi).
+	// \t chứa kí tự khác "(" sau đó, hoặc ko có ")" ở cuối *(không tính chỉ có "\t"): không hợp lệ → bỏ qua
+	if (!m) return null; 
+	// Lấy phần trong ngoặc (có thể rỗng — \t() → t1=0, t2=null, easing=1, target={})
+	const inner = m[1] ?? ''; 
+	// Tách phần tham số số (trước '\' đầu tiên) và phần override tags (từ '\' đầu tiên trở đi).
 	const firstSlash = inner.indexOf('\\');
+	// vd inner = "0,500,0.5,\\fs30\\fscx150" → argSection = "0,500,0.5", modsText = "\\fs30\\fscx150"
 	const argSection = firstSlash === -1 ? inner : inner.slice(0, firstSlash);
 	const modsText = firstSlash === -1 ? '' : inner.slice(firstSlash);
 	// Gom các token số dẫn đầu (bỏ token rỗng — file có thể ghi kiểu \t(,500,...)).
 	const nums = [];
+	// Kiểm tra và push các token số dẫn đầu (trước '\' đầu tiên) vào nums. Token không phải số → dừng.
 	for (const tok of argSection.split(',')) {
 		const t = tok.trim();
 		if (t === '') continue;
 		if (isNumericToken(t)) nums.push(Number(t));
-		else break; // token không phải số → hết phần tham số
+		// token không phải số → hết phần tham số (bỏ toàn bộ các phần sau. hiếm, vd: \t(0,abc,500,hello\fs30) → argSection = "0,abc,500,hello" chỉ lấy 0; bỏ "abc,500,hello")
+		else break;
 	}
 	let t1 = 0;
 	let t2 = null;
@@ -223,25 +229,28 @@ function parseTTransformTag(tag, styleRef) {
 		easing = nums[0]; // form \t(accel, mods)
 	} else if (nums.length === 2) {
 		t1 = nums[0];
-		t2 = nums[1];
+		t2 = nums[1]; // form \t(t1, t2, mods)
 	} else if (nums.length >= 3) {
 		t1 = nums[0];
 		t2 = nums[1];
-		easing = nums[2];
+		easing = nums[2]; // form \t(t1, t2, accel, mods)
 	}
-	// Map style modifiers → to (chỉ map được tag layout tĩnh; tag 2.3 bổ sung khi viết 2.3).
-	const ctx = { css: {}, scaleX: undefined, scaleY: undefined, styleRef };
-	for (const sub of splitStyleModifiers(modsText)) {
+	// Map override tags → target
+	const context = { css: {}, scaleX: undefined, scaleY: undefined, styleRef };
+	for (const sub of splitOverrideTagsTransform(modsText)) {
 		if (/^\\(pos|move|org)/.test(sub)) continue; // BỎ QUA \pos/\move/\org trong \t (điểm đặc biệt)
-		if (/^\\(iclip|clip)/.test(sub)) continue;   // \clip/\iclip trong \t → 2.1 đọc lại từ tags raw
-		applyLayoutStatic(sub, ctx);
+		if (/^\\(iclip|clip)/.test(sub)) continue;   // \clip/\iclip trong \t → 2.1 đọc lại từ raw sau
+		applyLayoutStatic(sub, context);
+		// Khi viết 2.3 về sau thì sẽ chèn vào dòng này?
 	}
-	finalizeTransform(ctx.css, ctx.scaleX, ctx.scaleY);
-	if (Object.keys(ctx.css).length === 0) return null; // không có target map được → không tạo entry
-	return { t1, t2, easing, to: ctx.css };
+	finalizeTransform(context.css, context.scaleX, context.scaleY);
+	if (Object.keys(context.css).length === 0) return null; // không có target map được → không tạo entry
+	return { t1, t2, easing, target: context.css };
 }
 
-/** [arena.ai] Nhóm 2.4 — Layout Local (LÀM NGAY, bản 03sep26). NHÓM TĨNH (+ động \t/\k metadata).
+
+
+/** [arena.ai] Nhóm 2.4 — Layout Local (có xử lí \t, \k)
  *
  * Với MỖI mục base, đọc tags (raw) theo THỨ TỰ trong mục và sinh:
  *   - delta.text — \fs \fscx \fscy \fsc \fsp \fn \b \i → CSS-cooked (khớp styleCss.text).
@@ -249,10 +258,12 @@ function parseTTransformTag(tag, styleRef) {
  *                  marker \h/\N/\n (renderer quyết ngữ nghĩa xuống dòng/space theo WrapStyle/\q).
  *   - anim.t     — \t(...) → metadata nội suy (không bake); \pos/\move/\org trong \t bị BỎ QUA.
  *   - anim.k     — \k/\K/\kf/\ko → { type, durationMs, startMs }; startMs CỘNG DỒN theo thứ tự
- *                  base trong CÙNG dòng (parser tính; ×10 vì file ghi centisecond — chốt 03sep26).
+ *                  base trong cùng dòng (parser tính; ×10 vì file ghi đơn vị centisecond).
+ * 					Chú ý: nếu nhiều \k cạnh nhau → xử lí như dạng offset. 
+ * 					(vd: {\k10\k20\k30}hello = {\k30\k30}hello = {\k30}{\k30}hello).
  *
  * Tag KHÔNG thuộc 2.4 (\c, \bord, \an, \pos...) để NGUYÊN trong item.tags — tags luôn được giữ
- * (chốt 03sep26) cho 2.3/2.2/2.1 chạy sau trong classify(). Hàm này là nhóm CHẠY ĐẦU nên gán
+ * lại cho 2.3/2.2/2.1 chạy sau trong classify(). Hàm này là nhóm CHẠY ĐẦU nên gán
  * thẳng item.delta/item.anim; nhóm 2.3 sau này phải MERGE (không gán đè) khi viết vào item.delta.
  *
  * @param {Array<parsedDataFormat.baseItem>} base Mảng mục base của dòng (mutate tại chỗ).
@@ -271,16 +282,16 @@ export function classifyLayoutLocal(base, styleRef) {
 		const css = {};
 		/** @type {Object} dữ liệu thuần mức data của item (\r → baseStyleName; marker \h/\N/\n) */
 		const data = {};
-		/** @type {Array<{t1,t2,easing,to}>} danh sách \t của item (theo thứ tự xuất hiện) */
+		/** @type {Array<{t1,t2,easing,target}>} danh sách \t của item (theo thứ tự xuất hiện) */
 		const animT = [];
-		/** @type {{type,durationMs,startMs}|undefined} karaoke của item (syl cuối thắng nếu nhiều \k cạnh nhau) */
+		/** @type {{type,durationMs,startMs}|undefined} karaoke của item (\k cuối thắng + offset các \k trước nếu nhiều \k cạnh nhau) */
 		let animK;
 		/** Context DÙNG CHUNG cả item — scaleX/scaleY tích lũy qua nhiều tag scale trong cùng mục */
-		const ctx = { css, scaleX: undefined, scaleY: undefined, styleRef };
+		const context = { css, scaleX: undefined, scaleY: undefined, styleRef };
 		for (const tag of tags) {
 			// Nhóm ĐỘNG 1 — \t(...): metadata nội suy (Cách 1), renderer resolve theo mediaTime.
 			if (tag.startsWith('\\t')) {
-				const entry = parseTTransformTag(tag, styleRef);
+				const entry = parseTransformTag(tag, styleRef);
 				if (entry) animT.push(entry);
 				continue;
 			}
@@ -306,10 +317,10 @@ export function classifyLayoutLocal(base, styleRef) {
 				continue;
 			}
 			// Layout tĩnh còn lại (fs/fscx/fscy/fsc/fsp/fn/b/i). false = tag nhóm khác → để nguyên cho 2.3/2.2/2.1.
-			applyLayoutStatic(tag, ctx);
+			applyLayoutStatic(tag, context);
 		}
 		// Gộp transform (scale) của item — chỉ khi có scale khác identity.
-		finalizeTransform(css, ctx.scaleX, ctx.scaleY);
+		finalizeTransform(css, context.scaleX, context.scaleY);
 		// Ghi delta (mức text/data) + anim (t/k) vào item — CHỈ khi có nội dung (giữ item tối giản).
 		if (Object.keys(css).length > 0 || Object.keys(data).length > 0) {
 			const delta = {};

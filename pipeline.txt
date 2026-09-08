@@ -1,4 +1,4 @@
-02sep26
+08sep26
 popup:
     popup.html
     popup.js
@@ -528,3 +528,70 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
     [ ] 15. Session sau — 2.2 classifyCollision làm đầy an/pos/move/org (first-wins; \an vẫn tính collision;
             pos/move/org → renderer tự disable)
     [ ] 16. Session sau — 2.1 classifyClip: rawList + effectiveType/effectiveRaw last-wins (kể cả \clip trong \t)
+
+
+03sep26 — classify 2.4 (Layout Local) + động \t/\k (ĐÃ LÀM — xem pipeline.txt mục 03sep26)
+- parser.js: tagProcess → processLineText (private, chỉ đổi tên); thêm styleForLine; push lineCss qua classify()
+- tagProcess.js (MỚI): classify + classifyLayoutLocal (2.4 LÀM THẬT) + classifyDecoration/classifyCollision/classifyClip (stub/signal)
+- lineCss[i] = { base, collision, clip } — tags giữ nguyên; base item thêm delta/anim khi có nội dung
+- Tests: parser.test.mjs cập nhật 2 expectation; tagProcess.test.mjs mới — npm test 90 pass
+- CÒN LẠI session sau:
+    * 2.3 classifyDecoration: màu/bord/shad/\fa/\fr — merge delta vào item.delta đã có + bổ sung target
+      nhóm 2.3 vào anim.t[].to (đọc lại tags raw của \t)
+    * 2.2 classifyCollision làm đầy: an (1-9, vẫn tính collision) + pos/move/org (first-wins, renderer tự disable)
+    * 2.1 classifyClip: rawList + effectiveType/effectiveRaw last-wins (kể cả \clip/\iclip nằm trong \t)
+    * Lưu ý renderer: \kf/\K = quét màu (gradient, KHÔNG clip-path); \k/\ko = đổi màu tức thì;
+      \t easing = accel thô; t2 = null = tới hết dòng; karaoke duration file centisecond × 10 = ms
+
+
+08sep26 — Soi lại tag trong \t(...) theo libass: \k TRONG \t phải tính như \k NGOÀI \t (LỖI LỆCH NHỊP)
+
+    1. Nguồn (primary, đọc trực tiếp): libass/libass · ass_parse.c · ass_parse_tags().
+       - Nhánh \t: gọi ĐỆ QUY chính ass_parse_tags(state, p, args[cnt].end, k, true)
+         (pwr = k = tiến độ anim). KHÔNG có whitelist "tag được phép trong \t".
+       - Nhánh \k/\K/\kf/\ko và \kt: KHÔNG có guard `nested` → xử lí y hệt khi đứng ngoài \t.
+       → Câu "only a limited set of the override tags are animateable with \t" (Aegisub manual)
+         nghĩa là CHỈ MỘT SỐ tag được NỘI SUY theo pwr; các tag còn lại (trong đó có \k) được
+         ÁP NGAY LẬP TỨC — chứ KHÔNG bị bỏ qua.
+
+    2. Trường hợp 2 tag \k trong CÙNG mục — code hiện tại ĐANG ĐÚNG (đối chiếu libass):
+       libass: mỗi \k làm effect_skip_timing += effect_timing (cũ), rồi effect_timing = mới.
+       {\k50\k30}AB → skip = 500, timing = 300. Mình: anim.k = syl CUỐI (durationMs 300,
+       startMs 500) + karaokeRunMs vẫn cộng ĐỦ 800 cho mục sau. KHỚP TỪNG ms.
+       ("skip" của libass = khoảng lặng trước khi syl sáng = đúng nghĩa startMs của mình.)
+
+    3. ⚠️ LỖI: \k nằm TRONG \t(...) hiện KHÔNG được đếm → LỆCH NHỊP CẢ DÒNG.
+       Nguyên nhân: ở mức mục, nguyên chuỗi \t(...) là MỘT tag → nhánh \t → continue, không
+       bao giờ tới KARAOKE_RE. libass thì đếm (mục 1).
+       Vd {\k20\t(0,500,\k99\fscx200)\k30}A{\k40}B:
+                            libass      hiện tại    lệch
+         A.startMs          1190        200         990  (= \k99 × 10)
+         A.durationMs       300         300         0
+         B.startMs          1490        500         990
+         B.durationMs       400         400         0
+       → Không chỉ mất 1 syl: MỌI syl SAU nó trong dòng đều lệch, vì karaokeRunMs không đẩy.
+
+    4. Cùng cơ chế ("libass áp ngay, mình bỏ qua") — cả một họ, không riêng \k:
+       + \k/\K/\kf/\ko trong \t → libass áp ngay (đẩy nhịp) | mình: bỏ im lặng   ⚠️ SAI SỐ
+       + \kt trong \t → libass: skip += timing, timing = 0, reset_effect | mình: KHÔNG NHẬN
+         (KARAOKE_RE = /^\\(k[fo]?|K)(\d+(?:\.\d+)?)/ không match \kt)            ⚠️ SAI SỐ
+       + \r/\an/\q/\fn trong \t → libass áp ngay | mình: bỏ im lặng (chưa chốt)
+       + \pos/\move/\org trong \t → libass áp ngay | mình: BỎ CÓ CHỦ Ý (đã chốt 03sep26)
+       + \clip/\iclip (rect) trong \t → libass NỘI SUY thật | mình: hoãn 2.1    ✓ ĐÚNG HƯỚNG
+       Chỉ nhóm karaoke (\k, \kt) gây hỏng THỜI GIAN — dạng hỏng tệ nhất: sửa số cả dòng, im lặng.
+
+    5. Đường sửa (KHI LÀM, chưa làm): nhánh \t trong classifyLayoutLocal (~dòng 282) — trước
+       continue, quét splitStyleModifiers(inner) lấy tag karaoke, đẩy vào CÙNG accumulator
+       karaokeRunMs + ghi đè animK. KHÔNG sửa trong parseTTransformTag (hàm đó chỉ lo transform).
+       Nguyên tắc: \k trong \t phải đi QUA CÙNG MỘT ĐƯỜNG với \k ngoài \t.
+
+    6. Đo đạc kèm theo (tham chiếu, KHÔNG phải lý do để sửa):
+       File 21.484 dòng / 117.567 tag \t (3,85MB) → parse ~700ms ở background (1 lần/lượt load).
+       Vòng lặp tag trong \t chiếm ~2% thời gian parse; gộp 2 regex skip thành 1 (có thêm \k)
+       nhanh hơn ~1,6% file thường / ~4-5% khi 100% \t chứa \k. KHÔNG đáng đổi độ rõ ràng code.
+       (Gộp thì được, nhưng đừng thêm regex skip RIÊNG cho \k — lợi ích nằm dưới nhiễu đo.)
+
+    Next steps checklist (bổ sung):
+    [ ] 17. Session sau — \k/\K/\kf/\ko/\kt nằm TRONG \t(...): đẩy karaokeRunMs + ghi đè animK
+            như \k ngoài \t (theo libass). Test: {\k20\t(0,500,\k99)\k30}A{\k40}B →
+            A.startMs = 1190, A.durationMs = 300, B.startMs = 1490, B.durationMs = 400.
