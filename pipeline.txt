@@ -572,19 +572,27 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
          B.durationMs       400         400         0
        → Không chỉ mất 1 syl: MỌI syl SAU nó trong dòng đều lệch, vì karaokeRunMs không đẩy.
 
-    4. Cùng cơ chế ("libass áp ngay, mình bỏ qua") — cả một họ, không riêng \k:
-       + \k/\K/\kf/\ko trong \t → libass áp ngay (đẩy nhịp) | mình: bỏ im lặng   ⚠️ SAI SỐ
-       + \kt trong \t → libass: skip += timing, timing = 0, reset_effect | mình: KHÔNG NHẬN
-         (KARAOKE_RE = /^\\(k[fo]?|K)(\d+(?:\.\d+)?)/ không match \kt)            ⚠️ SAI SỐ
-       + \r/\an/\q/\fn trong \t → libass áp ngay | mình: bỏ im lặng (chưa chốt)
+    4. Cùng cơ chế ("libass áp ngay, mình bỏ qua") — cả một họ, không riêng \k
+       (chốt 09sep26 với chủ repo — \kt WONTFIX vĩnh viễn, trong VÀ ngoài \t):
+       + \k/\K/\kf/\ko trong \t → libass áp ngay (đẩy nhịp) | mình: bỏ im lặng   ⚠️ SAI SỐ → #17
+       + \kt (trong/ngoài \t) → libass: skip += timing, timing = 0, reset_effect |
+         mình: KHÔNG NHẬN, KHÔNG BAO GIỜ hỗ trợ (KARAOKE_RE không match \kt)     ✓ WONTFIX
+       + \fn trong \t → apply ngay như \k* / như \fn ngoài \t (không vào anim.t.target)  → #18
+       + \q / \q2 trong \t → như \fn (apply ngay, không nội suy)                         → #18
+       + \r trong \t → như \fn (đổi baseStyleName ngay, không tween)                     → #18
+       + \an trong \t → như \pos: first-win line-level, KHÔNG animate, KHÔNG override
+         nếu ngoài \t đã có \an (cùng chốt 03sep26 với \pos/\move/\org)
        + \pos/\move/\org trong \t → libass áp ngay | mình: BỎ CÓ CHỦ Ý (đã chốt 03sep26)
        + \clip/\iclip (rect) trong \t → libass NỘI SUY thật | mình: hoãn 2.1    ✓ ĐÚNG HƯỚNG
-       Chỉ nhóm karaoke (\k, \kt) gây hỏng THỜI GIAN — dạng hỏng tệ nhất: sửa số cả dòng, im lặng.
+       Chỉ \k/\K/\kf/\ko trong \t gây hỏng THỜI GIAN — dạng hỏng tệ nhất: sửa số cả dòng, im lặng.
+       \t KHÔNG nội suy \r/\an/\q/\fn (không vào target); chúng hoặc apply-now hoặc first-win.
 
     5. Đường sửa (KHI LÀM, chưa làm): nhánh \t trong classifyLayoutLocal (~dòng 282) — trước
-       continue, quét splitOverrideTagsTransform(inner) lấy tag karaoke, đẩy vào CÙNG accumulator
-       karaokeRunMs + ghi đè animK. KHÔNG sửa trong parseTransformTag (hàm đó chỉ lo transform).
-       Nguyên tắc: \k trong \t phải đi QUA CÙNG MỘT ĐƯỜNG với \k ngoài \t.
+       continue, quét splitOverrideTagsTransform(inner):
+       - tag karaoke \k/\K/\kf/\ko → đẩy CÙNG accumulator karaokeRunMs + ghi đè animK.
+       - \fn/\q/\r → apply ngay như đứng ngoài \t (cùng path 2.4 tĩnh).
+       KHÔNG sửa trong parseTransformTag (hàm đó chỉ lo transform).
+       KHÔNG nhận \kt. Nguyên tắc: \k trong \t đi QUA CÙNG MỘT ĐƯỜNG với \k ngoài \t.
 
     6. Đo đạc kèm theo (tham chiếu, KHÔNG phải lý do để sửa):
        File 21.484 dòng / 117.567 tag \t (3,85MB) → parse ~700ms ở background (1 lần/lượt load).
@@ -593,6 +601,22 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
        (Gộp thì được, nhưng đừng thêm regex skip RIÊNG cho \k — lợi ích nằm dưới nhiễu đo.)
 
     Next steps checklist (bổ sung):
-    [ ] 17. Session sau — \k/\K/\kf/\ko/\kt nằm TRONG \t(...): đẩy karaokeRunMs + ghi đè animK
-            như \k ngoài \t (theo libass). Test: {\k20\t(0,500,\k99)\k30}A{\k40}B →
-            A.startMs = 1190, A.durationMs = 300, B.startMs = 1490, B.durationMs = 400.
+    [x] 17. \k/\K/\kf/\ko TRONG \t(...) — ĐÃ LÀM 09sep26 (2.4a applyNow inner trước 2.4b).
+            data.k { type, startTime, duration }. KHÔNG \kt. Test tagProcess: k20+t(k99)+k30 →
+            A startTime 1190 duration 300, B 1490/400.
+    [x] 18. \fn/\q/\r apply-now; \an skip target như \pos — ĐÃ LÀM 09sep26.
+
+09sep26 — 2.4a apply-now / 2.4b \t (KHÔNG đánh số 2.41)
+
+    Trong classifyLayoutLocal, một vòng theo thứ tự tag (không phải “hết ngoài rồi mới \t”):
+    - 2.4a applyNow: \k* / \fn / \r / \q — cùng path ngoài \t và inner \t.
+      Gặp \t: applyNow(inner) TRƯỚC, rồi parseTransformTag (2.4b).
+    - 2.4b parseTransformTag: CHỈ target tween. Skip pos/move/org/an/clip + apply-now (fn/r/q/k).
+      Không side-effect karaoke.
+
+    Karaoke KHÔNG còn anim.k. delta.data.k = { type, startTime, duration } (ms, file cs × 10).
+    \fn/\r/\q last-wins trong 1 item; \k* cộng dồn dòng, payload = syl cuối.
+    \q → data.q (số WrapStyle override, renderer).
+    \kt: wontfix.
+
+    Tests: tests/tagProcess.test.mjs — npm test 94 pass (09sep26).

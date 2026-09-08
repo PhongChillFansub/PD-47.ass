@@ -190,7 +190,7 @@ PD-47.ass/
    - OR groups (separated by `|`) to broaden results.
    - Diacritic-insensitive matching (tìm "Van" cũng khớp "Vân").
    - Levenshtein-based ranking with phrase-run bonus.
-6. As a viewer, I want sub to render in the YouTube player with full Aegisub fidelity — text style, border, shadow, opaque box, alignment, margin, scale, rotate, karaoke `\k`/`\kf`/`\K`/`\ko`, animated `\t`, motion `\move`, clip, vector — so that fan-sub looks identical to what Aegisub shows.
+6. As a viewer, I want sub to render in the YouTube player with Aegisub fidelity in phạm vi v1 — text style, border, shadow, opaque box, alignment, margin, scale, rotate, karaoke `\k`/`\kf`/`\K`/`\ko` (**không** `\kt`), animated `\t`, motion `\move`, clip, vector — so that fan-sub looks identical to what Aegisub shows trên các tag được hỗ trợ.
 7. As a viewer, I want sub to animate at the video's presented frame rate via `requestVideoFrameCallback`, so that karaoke and `\t` are smooth and pause freezes them.
 8. As a viewer, I want the renderer to **skip frames dynamically + auto-detect low-end machines** to keep playback smooth, so that weak laptops can still play fan-sub.
 9. As a viewer, I want to **manually re-fetch a sub** (per-video slot) from the options page; if the URL is dead, the extension must give me 3 choices: cancel (keep old), retry, or delete the cache. The dialog must auto-cancel after 15 seconds and let me customize the behavior (toast / timeout / post-timeout action) later.
@@ -243,7 +243,8 @@ lineCss[i].base[j] = {
   tags: Array<string>,            // tag raw nguyên văn (giữ lại, không xóa khi consume)
   text: string,                   // text của mục base
   delta?: { text?: CSSObject, data?: object },  // delta tag 2.4
-  anim?: { t?: Array<{ t1, t2, easing, target: CSSObject }>, k?: { type, durationMs, startMs } }
+  anim?: { t?: Array<{ t1, t2, easing, target: CSSObject }> }
+  // karaoke: delta.data.k = { type, startTime, duration } (ms). Không anim.k. Không \kt.
 }
 
 lineCss[i].collision = { t?: boolean, an?, org?, pos?, move? }
@@ -458,6 +459,10 @@ Còn lại của checklist 29aug26 (cập nhật 02sep26 + 03sep26 + 08sep26), c
 - [ ] #14. **2.3 `classifyDecoration`** (`tagProcess.js`): màu (`\1c`-`\4c`, `\alpha`), bord (`\bord`, `\xbord`, `\ybord`), shad (`\shad`, `\xshad`, `\yshad`), `\be`, `\blur`, `\fa`, `\fr`, `\fax`/`\fay`/`\frx`/`\fry`/`\frz`. Merge delta vào `item.delta` đã có (từ 2.4). Bổ sung target 2.3 vào `anim.t[].target` (đọc lại từ `tags` raw).
 - [ ] #15. **2.2 `classifyCollision`** (`tagProcess.js`) làm đầy `an`, `pos`, `move`, `org` (first-wins; `\an` vẫn tính collision; `pos`/`move`/`org` → renderer tự disable collision). Cộng thêm signal hiện có `t` (đã có ở 03sep26).
 - [ ] #16. **2.1 `classifyClip`** (`tagProcess.js`): `rawList` + `effectiveType`/`effectiveRaw` last-wins (kể cả `\clip` trong `\t`). Renderer tự quyết clip-path vs inverse clip-path theo `effectiveType`.
+- [x] #17. **`\k*` trong `\t`**: 2.4a `applyNow` inner trước 2.4b (09sep26). `delta.data.k = { type, startTime, duration }`. Không `anim.k`. Không `\kt`.
+- [x] #18. **2.4a apply-now** `\fn`/`\q`/`\r` last-wins; `\an` skip target như `\pos`.
+
+**Hợp đồng 2.4 (09sep26):** hai pass trong cùng 2.4, không nhóm 2.41. 2.4a apply-now (`\k*`/`\fn`/`\r`/`\q`) theo thứ tự tag — inner `\t` chạy apply-now trước `parseTransformTag`. 2.4b chỉ tween. Karaoke = `delta.data.k`. Chi tiết: `pipeline.txt` 09sep26.
 
 Phần đã làm (giữ nguyên, không thay đổi):
 - 2.4 `classifyLayoutLocal` (đã làm 03sep26).
@@ -759,6 +764,7 @@ Các OOS cho spec này (cố ý KHÔNG làm):
 19. **Multi-language UI** — chỉ Tiếng Việt.
 20. **E2E test với Playwright/Puppeteer** — chỉ low + mid level test (Q34).
 21. **Retry policy cho storage re-fetch khi fail** — chỉ manual qua dialog, không tự retry.
+22. **`\kt` (karaoke set timing)** — tool **không hỗ trợ**, trong lẫn ngoài `\t`. Không nhận, không đẩy `karaokeRunMs`. Wontfix v1 và về sau trừ khi mở lại quyết định này (09sep26; `pipeline.txt` 08sep26).
 
 ---
 
