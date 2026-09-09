@@ -156,6 +156,7 @@ parser.js — xử lí tag override (kế hoạch + ĐÃ LÀM 27-29aug26)
 
     Quyết định / ràng buộc:
     - Run model = hybrid: mỗi run/syl lưu style gốc của dòng (từ \r) + danh sách delta tag.
+      (ĐÃ THAY 02sep26: mỗi mục BASE giữ { tags, text } + delta/anim — xem mục 02sep26.)
     - parser là NAMED export (chốt 27aug26, cập nhật 31aug26 + 02sep26 bản 2): `export function parser(doStripTags = false, rawText)`
       — doStripTags (boolean, 02sep26 bản 2: truthy = strip tags, falsy = xử lí tất cả) dùng cho tagProcess();
       tests gọi parser(false, rawText) / parser(true, rawText);
@@ -270,6 +271,7 @@ renderer / kiến trúc (notes)
 Câu hỏi: có nên viết styleCss trước khi xử lí tag?
 → Trả lời: Có, nên viết/thiết kế styleCss trước (hoặc song song) vì:
   - Run model = hybrid: mỗi run lưu base style (từ \r hoặc style của dòng) + delta tag.
+    (ĐÃ THAY 02sep26: ghi trực tiếp vào base — xem mục 02sep26.)
     Không có styleCss thì không biết base để apply delta.
   - Tuy nhiên tag 2.4 (layout) cũng làm thay đổi kích thước, nên cần thiết kế cả 2 struct cùng lúc
     để tránh phải sửa lại lineCss nhiều lần → chọn both_design: thiết kế data structure trước, implement styleCss trước, rồi mới classify.
@@ -471,7 +473,7 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
        đầy đủ { base, collision, clip }. Gọi theo ĐÚNG THỨ TỰ 2.4 → 2.3 → 2.2 → 2.1:
            classifyLayoutLocal (2.4 — LÀM THẬT bản này) → classifyDecoration (2.3 — STUB session sau)
            → classifyCollision (2.2 — bản này CHỈ signal \t) → classifyClip (2.1 — STUB shape default).
-       Export theo nhóm (classifyLayoutLocal/classifyDecoration/classifyCollision/classifyClip) để test đơn vị.
+       CHỈ export classify (chốt 09sep26 bản sau — mọi hàm nhóm private; tests đi qua classify).
 
     3. lineCss[i] (struct đích — đã hỏi/chốt 03sep26 với chủ repo 4 điểm):
        { base, collision, clip }:
@@ -481,6 +483,8 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
          Object.assign; \fscx/fscy → 'transform' chứa scale của CHÍNH item, gộp transform với style
          gốc/rotate là việc renderer). data = số liệu thuần (\r → baseStyleName; marker \h\N\n).
          anim = { t?: Array, k?: { type, durationMs, startMs } }.
+         (CẬP NHẬT 09sep26: anim = MẢNG trực tiếp mỗi \t → { t1, t2, easing, target };
+          karaoke bỏ khỏi 2.4 — xem mục 09sep26 cuối file.)
        - collision = { t: boolean } (2.2 session sau thêm an/pos/move/org). t=true khi dòng có \t.
        - clip = { rawList: [], effectiveType: null, effectiveRaw: null } (2.1 stub).
 
@@ -495,8 +499,12 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
        BẢN 2 (chốt 03sep26): \b/\i (và \u/\s khi 2.3 làm) KHÔNG có số đằng sau → coi như KHÔNG
        có tag: bỏ qua, không sinh delta, không toggle (parser không giữ state dòng) — tag vẫn nằm
        trong item.tags, nhóm sau cũng không áp khi thiếu số. \bord/\iclip... không lọt regex.
+       (BẢN CUỐI 09sep26 — 2 điểm KHÁC: \fscx/\fscy identity 100 VẪN emit transform;
+        \r/\q ghi delta.text '--base-style-name'/'--wrap-style' chứ KHÔNG vào data — xem mục 09sep26.)
 
     5. Nhóm ĐỘNG — metadata nội suy (Cách 1, parser KHÔNG bake snapshot):
+       ⚠️ (BẢN CUỐI 09sep26): karaoke bỏ khỏi 2.4 (về 2.3) và anim = MẢNG trực tiếp
+       (không { t: [...] }, không anim.k) — các mô tả dưới đây đọc như lịch sử 03sep26.
        - \t(...) → base[i].anim.t = [{ t1, t2, easing, target }]:
            + t1/t2 = ms tương đối đầu dòng (Aegisub: \t dùng ms, KHÔNG nhân 10 — khác \k).
              t2 = null khi file không ghi (transform tới HẾT dòng, renderer tự lấy line duration).
@@ -600,6 +608,8 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
        - \fn/\q/\r → apply ngay như đứng ngoài \t (cùng path 2.4 tĩnh).
        KHÔNG sửa trong parseTransformTag (hàm đó chỉ lo transform).
        KHÔNG nhận \kt. Nguyên tắc: \k trong \t đi QUA CÙNG MỘT ĐƯỜNG với \k ngoài \t.
+       ⚠️ 09sep26 (bản sau, review lại): hướng sửa này KHÔNG được áp — apply-now bị loại;
+       \k/\fn/\r/\q trong \t hiện KHÔNG được xử lí (xem mục 09sep26 cuối file).
 
     6. Đo đạc kèm theo (tham chiếu, KHÔNG phải lý do để sửa):
        File 21.484 dòng / 117.567 tag \t (3,85MB) → parse ~700ms ở background (1 lần/lượt load).
@@ -608,22 +618,29 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
        (Gộp thì được, nhưng đừng thêm regex skip RIÊNG cho \k — lợi ích nằm dưới nhiễu đo.)
 
     Next steps checklist (bổ sung):
-    [x] 17. \k/\K/\kf/\ko TRONG \t(...) — ĐÃ LÀM 09sep26 (2.4a applyNow inner trước 2.4b).
-            data.k { type, startTime, duration }. KHÔNG \kt. Test tagProcess: k20+t(k99)+k30 →
-            A startTime 1190 duration 300, B 1490/400.
-    [x] 18. \fn/\q/\r apply-now; \an skip target như \pos — ĐÃ LÀM 09sep26.
+    [x] 17. \k/\K/\kf/\ko TRONG \t(...) — ĐÃ REVIEW LẠI 09sep26: KHÔNG theo hướng applyNow
+            (đã bỏ); karaoke chuyển 2.3, 2.4 KHÔNG đụng \k*. Xem mục 09sep26 cuối file.
+    [x] 18. \fn/\q/\r apply-now — ĐÃ REVIEW LẠI 09sep26: BỎ apply-now; tag 2.4.2 trong \t
+            chưa áp (chủ repo làm sau nếu cần). \an skip target như \pos GIỮ NGUYÊN.
 
-09sep26 — 2.4a apply-now / 2.4b \t (KHÔNG đánh số 2.41)
+09sep26 — 2.4: 2.4.1/2.4.2 tĩnh + \t metadata (bản CUỐI — sau review lại, BỎ apply-now)
 
-    Trong classifyLayoutLocal, một vòng theo thứ tự tag (không phải “hết ngoài rồi mới \t”):
-    - 2.4a applyNow: \k* / \fn / \r / \q — cùng path ngoài \t và inner \t.
-      Gặp \t: applyNow(inner) TRƯỚC, rồi parseTransformTag (2.4b).
-    - 2.4b parseTransformTag: CHỈ target tween. Skip pos/move/org/an/clip + apply-now (fn/r/q/k).
-      Không side-effect karaoke.
+    Trong classifyLayoutLocal, một vòng theo thứ tự tag:
+    - Tag 2.4.1 (transformable: \fs/\fsp/\fsc[x/y]) + 2.4.2 (non-transformable: \-/\b/\i/\fn/\r/\q)
+      áp TĨNH khi tag đứng NGOÀI \t (2.4.1 trước, 2.4.2 sau); marker \h/\N/\n → delta.data.marker.
+    - \t → parseTransformTag: CHỈ nội suy tag 2.4.1 trong modsText → base[i].anim (MẢNG TRỰC TIẾP
+      [{ t1, t2, easing, target }] — không bọc { t: [...] }). Skip pos/move/org/an/clip.
+      Tag 2.4.2 nằm TRONG \t hiện CHƯA áp (apply-now ĐÃ HỦY 09sep26 — chủ repo sẽ làm sau nếu cần).
+    - KHÔNG có 2 pass (không 2.4a/2.4b); đánh số 2.4.1/2.4.2.
 
-    Karaoke KHÔNG còn anim.k. delta.data.k = { type, startTime, duration } (ms, file cs × 10).
-    \fn/\r/\q last-wins trong 1 item; \k* cộng dồn dòng, payload = syl cuối.
-    \q → data.q (số WrapStyle override, renderer).
-    \kt: wontfix.
+    Karaoke KHÔNG còn anim.k và KHÔNG có delta.data.k: \k/\kf/\ko chuyển 2.3 (session sau —
+    comment cũ "đưa sang 2.3"); \K, \kt không xử lí (\kt wontfix). 2.4 KHÔNG đụng karaoke,
+    tags giữ raw (KARAOKE_RE giữ lại để dùng khi làm 2.3).
 
-    Tests: tests/tagProcess.test.mjs — npm test 94 pass (09sep26).
+    \fn/\r/\q last-wins trong 1 item; \q → delta.text '--wrap-style' (số WrapStyle override),
+    \r → delta.text '--base-style-name' (tên style; rỗng = style dòng) — KHÔNG vào delta.data.
+    \fscx/fscy identity 100 → VẪN emit transform scaleX(1)/scaleY(1) (không lọc — chốt).
+
+    Tests: tests/tagProcess.test.mjs (25 test — đồng bộ code sau khi bỏ karaoke/apply-now:
+    anim = mảng; \r/\q → delta.text; fscx100 vẫn transform; CHỈ export classify)
+    — npm test 94 pass (09sep26).

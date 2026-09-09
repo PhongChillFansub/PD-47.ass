@@ -2,7 +2,7 @@
 // beta mode (đã viết xong, sửa lỗi khi chạy)
 // Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
-import { classify } from './tagProcess.js'; // 03sep26: classify biến base → lineCss[i] đầy đủ { base, collision, clip }
+import { classify } from './tagProcess.js'; // 03sep26: classify biến base → lineCss[i] đầy đủ { base, collision, clip }; 09sep26: tagProcess CHỈ export classify
 /** Định nghĩa/chú thích object FALLBACK_DEFAULT_STYLE (parsedDataFormat.style) 
  * @typedef {object} parsedDataFormat.style Kiểu style nguyên bản 
  * 
@@ -41,7 +41,8 @@ import { classify } from './tagProcess.js'; // 03sep26: classify biến base →
  * @property {Array} lineCss mỗi phần tử { base, collision, clip } cùng chỉ số với events.
  *   (02sep26: đổi tên segments → base; classify ghi trực tiếp vào base + thêm collision, clip.
  *   03sep26: lineCss[i] = classify(processLineText(...)) — { base, collision, clip }; 2.4 layout +
- *   động \t/\k làm thật, 2.3/2.2/2.1 để session sau — xem background/tagProcess.js)
+ *   \t metadata làm thật; 09sep26: karaoke KHÔNG ở 2.4 (về 2.3), 2.3/2.2/2.1 để session sau
+ *   — xem background/tagProcess.js)
  */
 /** Định nghĩa/chú thích object parsedData.info sau xử lí 
  * @typedef {object} parsedDataFormat.info
@@ -577,9 +578,10 @@ function tokenizeLineText(text) {
  * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm tầng cuối).
  *   (classify KHÔNG xóa tags khi tiêu thụ: nhóm sau 2.3/2.2/2.1 + renderer/debug đọc lại được.)
  * @property {parsedDataFormat.baseItemDelta} [delta] classify (tagProcess.js) sinh: mức text
- *   (layout tĩnh \fs\fsc\fsp\fn\b\i) / data (\r → baseStyleName; marker \h\N\n). text không tag thì KHÔNG có delta/anim.
- * @property {parsedDataFormat.baseItemAnim} [anim] classify sinh metadata nhóm ĐỘNG:
- *   t (mỗi \t → { t1, t2, easing, target }). Karaoke: delta.data.k { type, startTime, duration } — không anim.k.
+ *   (layout tĩnh \fs\fsc\fsp + \fn\b\i + \r → '--base-style-name', \q → '--wrap-style') /
+ *   data (marker \h\N\n; karaoke CHƯA — về 2.3, tags giữ raw). text không tag thì KHÔNG có delta/anim.
+ * @property {parsedDataFormat.baseItemAnim} [anim] classify sinh metadata nội suy \t:
+ *   MẢNG trực tiếp, mỗi \t → { t1, t2, easing, target } (không bọc { t: [...] }). Karaoke không anim.k.
  */
 /** Định nghĩa/chú thích delta theo mức node của mục base
  * ĐỊNH HƯỚNG cho classify (bước 4-7): parser xử lí đến base thì mỗi mục base mang
@@ -587,7 +589,7 @@ function tokenizeLineText(text) {
  * Renderer chuyển mục base thành node container-text TÙY MỨC ĐỘ DELTA:
  * - delta có container → phải sinh CẶP node container+text MỚI (delta chạm vỏ dòng).
  * - delta chỉ có text  → chỉ sinh node text bên trong container hiện có (đổi ruột chữ).
- * - delta chỉ có data  → không sinh node, chỉ là số liệu cho đo chữ / collision / karaoke.
+ * - delta chỉ có data  → không sinh node, chỉ là số liệu cho đo chữ / collision.
  * @typedef {object} parsedDataFormat.baseItemDelta
  * @property {Object} [container] Tag chạm vỏ dòng (vd \bord/\4c khi borderStyle==3, \clip) → renderer tách container mới.
  * @property {Object} [text] Tag đổi ruột chữ (\fs, \c, \b, \fr...) → renderer chỉ thêm node text.

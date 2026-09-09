@@ -1,68 +1,78 @@
 /** v0.1.0 09sep26
  * alpha mode
  * Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] ĐẦY ĐỦ
- * { base, collision, clip } theo struct đích (mục 3 prompt 03sep26; karaoke → delta.data 09sep26).
+ * { base, collision, clip } theo struct đích (mục 3 prompt 03sep26).
  *
  * Thứ tự nhóm KHÔNG ĐƯỢC đổi (đã chốt):
- *   2.4 Layout Local (2.4a apply-now rồi 2.4b \\t — bản này) → 2.3 Decoration (session sau) →
+ *   2.4 Layout Local (2.4.1 transformable + 2.4.2 non-transformable TĨNH ngoài \t, rồi \t → metadata
+ *   anim — bản này) → 2.3 Decoration (session sau; karaoke \k/\kf/\ko nằm ở đây) →
  *   2.2 Collision (bản này chỉ signal t) → 2.1 Clip (bản này stub default).
+ *   KHÔNG có 2 pass 2.4a/2.4b — 09sep26 đã BỎ hướng apply-now (xem pipeline.txt mục 09sep26):
+ *   tag 2.4.2 nằm TRONG \t(...) hiện CHƯA được áp (chủ repo sẽ làm sau nếu cần).
  *
  * QUY ƯỚC CHUNG (KHÔNG bao giờ đổi):
  * - Parser giữ nguyên PlayRes px, KHÔNG đo chữ/scale/collision — việc đó của renderer.
- * - Parser KHÔNG bake snapshot: \\t chỉ lưu metadata nội suy (Cách 1);
+ * - Parser KHÔNG bake snapshot: \t chỉ lưu metadata nội suy (Cách 1);
  *   renderer resolve theo metadata.mediaTime mỗi tick rVFC.
  * - Tag chạm VỎ dòng → delta.container; đổi RUỘT chữ → delta.text; số liệu thuần → delta.data.
  * - delta.text dùng KEY CSS + value CSS-cooked (khớp styleCss.text của styleParsedToCss) để renderer
- *   áp bằng Object.assign; \\fscx/fscy ghi 'transform' chứa scale của CHÍNH item/entry đó
+ *   áp bằng Object.assign; \fscx/fscy ghi 'transform' chứa scale của CHÍNH item/entry đó
  *   (gộp transform với style gốc/rotate là việc renderer — đã hỏi/chốt 03sep26).
+ *   KHÔNG lọc identity 100: \fscx100/\fscy100 vẫn emit scaleX(1)/scaleY(1) (chốt 09sep26).
  * - Mỗi base item GIỮ NGUYÊN mảng tags raw (đã hỏi/chốt 03sep26): nhóm sau (2.3/2.2/2.1) và
  *   renderer/debug đọc lại được tag gốc — vì vậy các hàm nhóm KHÔNG xóa tag khi tiêu thụ.
  *
  * KHÔNG import gì từ './parser.js' (parser.js import classify từ file này → tránh vòng tròn).
  * Dữ liệu cần của style dòng (styleRef) do parser() truyền vào qua classify().
+ * File này CHỈ export classify — mọi hàm nhóm private (chốt 09sep26; tests đi qua classify).
  */
-/** Định nghĩa/chú thích anim của 1 mục base (chỉ \\t — karaoke không còn ở đây, 09sep26)
- * @typedef {object} parsedDataFormat.baseItemAnim
- * @property {Array<{t1: number, t2: (number|null), easing: number, target: Object}>} [t] Danh sách
- *   mỗi \\t(...) trong item theo thứ tự: { t1, t2, easing, target }.
- *   - t1/t2: ms, tương đối đầu dòng (Aegisub: \\t dùng ms). t2 = null khi file không ghi t2
- *     (transform chạy tới HẾT dòng — renderer lấy duration dòng từ events để resolve).
- *   - easing: số accel THÔ (default 1 = linear; >1 nhanh dần, <1 chậm dần) — renderer tự map
- *     sang hàm easing (linear/parabola/cubic...); giữ số thô để không mất độ chính xác.
- *   - target: tag nội suy CSS-cooked. KHÔNG chứa apply-now (\\fn/\\r/\\q/\\k*) hay
- *     \\pos/\\move/\\org/\\an (first-win 2.2). Tag 2.3 map khi viết 2.3. KHÔNG \\kt.
+/** Định nghĩa/chú thích anim của 1 mục base: metadata nội suy \t, lưu MẢNG TRỰC TIẾP
+ * (không bọc { t: [...] } — chốt 09sep26; renderer đọc item.anim[i].t1...).
+ * Karaoke KHÔNG còn nằm ở đây — 2.4 không xử lí karaoke (về 2.3, xem typedef lineCssEntry).
+ * @typedef {Array<{t1: number, t2: (number|null), easing: number, target: Object}>} parsedDataFormat.baseItemAnim
+ * Mỗi phần tử tương ứng 1 \t(...) trong item, theo thứ tự:
+ * - t1/t2: ms, tương đối đầu dòng (Aegisub: \t dùng ms). t2 = null khi file không ghi t2
+ *   (transform chạy tới HẾT dòng — renderer lấy duration dòng từ events để resolve).
+ * - easing: số accel THÔ (default 1 = linear; >1 nhanh dần, <1 chậm dần) — renderer tự map
+ *   sang hàm easing (linear/parabola/cubic...); giữ số thô để không mất độ chính xác.
+ * - target: tag nội suy CSS-cooked — CHỈ tag 2.4.1 (\fs/\fsp/\fsc[x/y]). KHÔNG chứa
+ *   \pos/\move/\org/\an (first-win 2.2) và KHÔNG có tag 2.4.2 (\b/\i/\fn/\r/\q/\- — trong \t
+ *   chưa được áp, apply-now đã bỏ 09sep26). Tag 2.3 map khi viết 2.3. KHÔNG \k*, KHÔNG \kt.
  */
 /** Định nghĩa/chú thích lineCss[i] sau classify (struct đích — mục 3 prompt 03sep26)
  * @typedef {object} parsedDataFormat.lineCssEntry
  * @property {Array<parsedDataFormat.baseItem>} base Mục base đã classify: mỗi mục giữ nguyên
  *   { tags, text } + thêm { delta?, anim? } (delta/anim chỉ xuất hiện khi có nội dung).
- *   delta.data.k = karaoke { type, startTime, duration } (ms); delta.data.q = WrapStyle override.
- * @property {{t: boolean}} collision Nhóm 2.2 — mức DÒNG (bản này CHỈ signal \\t, chốt 03sep26:
- *   an/pos/move/org để session 2.2 làm đầy). collision.t = true khi dòng có \\t → renderer tự
- *   disable collision (KHÔNG lưu payload \\t ở đây — payload chỉ ở base[i].anim.t).
+ *   delta.data chỉ chứa marker (\h/\N/\n) — số liệu thuần. \r/\q KHÔNG vào data: ghi vào
+ *   delta.text dưới dạng CSS var — '--base-style-name' (\r, rỗng = style dòng) / '--wrap-style'
+ *   (\q, last-wins). Karaoke \k* KHÔNG được 2.4 xử lí (tags giữ raw — về 2.3, session sau).
+ * @property {{t: boolean}} collision Nhóm 2.2 — mức DÒNG (bản này CHỈ signal \t, chốt 03sep26:
+ *   an/pos/move/org để session 2.2 làm đầy). collision.t = true khi dòng có \t → renderer tự
+ *   disable collision (KHÔNG lưu payload \t ở đây — payload chỉ ở base[i].anim).
  * @property {{rawList: string[], effectiveType: ('clip'|'iclip'|null), effectiveRaw: (string|null)}} clip
  *   Nhóm 2.1 — mức DÒNG, last-wins (bản này STUB default — session 2.1 làm đầy).
  */
 
 // import * as utils from './utils.js';
-/** Regex nhận diện tag karaoke: \\k / \\kf / \\ko + duration (số, centisecond trong file).
- * KHÔNG match \\kt và \K. Nhóm 1 = type, nhóm 2 = duration raw (cs). */
+/** Regex nhận diện tag karaoke: \k / \kf / \ko + duration (số, centisecond trong file).
+ * KHÔNG match \K (không xử lí) và \kt (wontfix v1+). Nhóm 1 = type, nhóm 2 = duration raw (cs).
+ * 2.4 hiện KHÔNG dùng regex này (karaoke về 2.3 — session sau; giữ lại để dùng khi làm 2.3). */
 const KARAOKE_RE = /^\\(k[fo]?)(\d+(?:\.\d+)?)/;
-/** Regex số thuần (cho phần tham số đứng đầu của \\t: t1/t2/accel) */
+/** Regex số thuần (cho phần tham số đứng đầu của \t: t1/t2/accel) */
 const NUMERIC_TOKEN_RE = /^[+-]?(\d+\.?\d*|\.\d+)$/;
-/** Tên style fallback khi styleRef thiếu (dùng cho \\r rỗng) — khớp FALLBACK_DEFAULT_STYLE.name */
+/** Tên style fallback khi styleRef thiếu (dùng cho \r rỗng) — khớp FALLBACK_DEFAULT_STYLE.name */
 const FALLBACK_STYLE_NAME = 'Default';
-/** [arena.ai] Token có phải số thuần (dùng làm tham số t1/t2/accel của \\t) không? */
+/** [arena.ai] Token có phải số thuần (dùng làm tham số t1/t2/accel của \t) không? */
 function isNumericToken(token) {
 	return NUMERIC_TOKEN_RE.test(token);
 }
-/** [arena.ai] Tách nội dung 1 chuỗi tag (không có ngoặc {}) thành các tag đơn theo '\\' ở mức
- * ngoặc NGOÀI CÙNG — theo dõi depth '()' nên \\clip(...)/\\t(...) không bị tách oan.
+/** [arena.ai] Tách nội dung 1 chuỗi tag (không có ngoặc {}) thành các tag đơn theo '\' ở mức
+ * ngoặc NGOÀI CÙNG — theo dõi depth '()' nên \clip(...)/\t(...) không bị tách oan.
  * Bản local (KHÔNG import splitOverrideTags từ parser.js để tránh vòng tròn import).
  *
- * note: hàm này giống hàm splitOverrideTags ở parser.js, nhưng nhân bản để dành cho tags trong \\t.
- * @param {string} text Chuỗi chứa tag, vd "\\fs30\\t(\\clip(0,0,1,1))\\c&HFF&".
- * @returns {string[]} Các tag đơn, mỗi phần tử bắt đầu bằng '\\'.
+ * note: hàm này giống hàm splitOverrideTags ở parser.js, nhưng nhân bản để dành cho tags trong \t.
+ * @param {string} text Chuỗi chứa tag, vd "\fs30\t(\clip(0,0,1,1))\c&HFF&".
+ * @returns {string[]} Các tag đơn, mỗi phần tử bắt đầu bằng '\'.
  */
 function splitOverrideTagsTransform(text) {
 	const tags = [];
@@ -84,14 +94,17 @@ function splitOverrideTagsTransform(text) {
 	if (start !== -1) pushTag(text.slice(start));
 	return tags;
 }
-/** [Manual edit] Hàm áp dụng tag nhóm 2.4.1 (Có thể transform trong tag \t; cục bộ; có thể làm ảnh hưởng layout):
- * 
+/** [Manual edit] Hàm áp dụng tag nhóm 2.4.1 — TRANSFORMABLE: được nội suy (tween) trong \t;
+ * cục bộ (mức mục base); có thể làm ảnh hưởng layout:
+ *
  * \fsc[x/y] (*:\fsc chỉ có trong VSFilterMod), \fsp, \fs.
  * @param {string} tag Tag đơn raw, bắt đầu bằng '\\'.
- * @param {{textCss: Object, scaleX: (number|undefined), scaleY: (number|undefined), styleRef: (Object|null|undefined)}} context 
- * Object ghi dữ liệu tạm thời. Chỉ khi có thay đổi thì mới ghi từ context sang lineCss[i].delta
+ * @param {{textCss: Object, scaleX: (number|undefined), scaleY: (number|undefined), styleRef: (Object|null|undefined)}} context
+ * Object ghi dữ liệu tạm thời (textCss / scaleX / scaleY). Caller (classifyLayoutLocal hoặc
+ * parseTransformTag) mới ghi context sang item.delta khi có thay đổi.
  * @returns {boolean} true = đã xử lí; false = không thuộc nhóm này.
  */
+
 function applyLayoutLocalTransformable(tag, context) {
 	if (tag.startsWith('\\fscy')) {
 		const v = Number.parseFloat(tag.slice(5));
@@ -123,18 +136,21 @@ function applyLayoutLocalTransformable(tag, context) {
 	}
 	return false;
 }
-/** [Manual edit] Hàm áp dụng tag nhóm 2.4.2 (Ko thể transform trong tag \t; cục bộ; có thể làm ảnh hưởng layout):
- * 
+/** [Manual edit] Hàm áp dụng tag nhóm 2.4.2 — NON-transformable: KHÔNG được nội suy (tween)
+ * trong \t (chỉ tag 2.4.1 vào target của parseTransformTag); cục bộ; có thể làm ảnh hưởng layout:
+ *
  * \- (inline-fx), \b, \i, \fn, \r, \q
- * 
- * comment: \k[f/o] đưa sang 2.3. Không xử lí \kt, \K.
- * 
- * Chú ý: những tag này vẫn xử lí như bình thường KỂ CẢ khi nằm trong \t(...).
+ *
+ * Karaoke: \k/\kf/\ko KHÔNG xử lí ở 2.4 — đưa sang 2.3 (session sau). Không xử lí \K, \kt.
+ *
+ * CHÚ Ý (09sep26): hàm này chỉ được gọi khi tag đứng NGOÀI \t. Tag 2.4.2 nằm TRONG \t(...)
+ * hiện CHƯA được áp (hướng apply-now đã HỦY; chủ repo sẽ làm sau nếu cần).
  * @param {string} tag Tag đơn raw, bắt đầu bằng '\\'.
- * @param {{textCss: Object, scaleX: (number|undefined), scaleY: (number|undefined), styleRef: (Object|null|undefined)}} context 
- * Object ghi dữ liệu tạm thời. Chỉ khi có thay đổi thì mới ghi từ context sang lineCss[i].delta
+ * @param {{textCss: Object, scaleX: (number|undefined), scaleY: (number|undefined), styleRef: (Object|null|undefined)}} context
+ * Object ghi dữ liệu tạm thời (textCss). Caller mới ghi context sang item.delta khi có thay đổi.
  * @returns {boolean} true = đã xử lí; false = không thuộc nhóm này.
  */
+
 function applyLayoutLocalNonTransformable(tag, context) {
 	if (/^\\-/.test(tag)) {
 		// Xử lý tag inline-fx: lưu dữ liệu text của inline-fx
@@ -174,17 +190,6 @@ function applyLayoutLocalNonTransformable(tag, context) {
 		if (!Number.isNaN(v)) context.textCss['--wrap-style'] = v;
 		return true;
 	}
-	// if (KARAOKE_RE.test(tag)) {
-	// 	// Xử lý tag karaoke: lưu dữ liệu text của karaoke và cập nhật --karaoke
-	// 	const km = KARAOKE_RE.exec(tag);
-	// 	if (km) {
-	// 		const endTime = context.data.k?.endTime ?? 0;
-	// 		// Chú ý: đây là endTime cũ, ko phải endTime của item hiện tại. Nếu item hiện tại có nhiều tag \k* thì cộng dồn duration.
-	// 		const duration = Number(km[2]) * 10;
-	// 		context.data.k = { type: km[1], duration, endTime: endTime + duration };
-	// 	}
-	// 	return true;
-	// }
 	return false;
 }
 /** [arena.ai] Tách \\t(...) → { t1, t2, easing, modsText } hoặc null nếu tag không hợp lệ.
@@ -225,21 +230,25 @@ function splitTransformParts(tag) {
 	}
 	return { t1, t2, easing, modsText };
 }
-/** [arena.ai] Gộp scaleX/scaleY thành chuỗi 'transform' dạng CSS để tối ưu riêng. */
+/** [arena.ai] Gộp scaleX/scaleY thành chuỗi 'transform' dạng CSS để tối ưu riêng.
+ * KHÔNG lọc identity 100: scaleX(1)/scaleY(1) vẫn emit (chốt 09sep26 — renderer áp trực tiếp,
+ * không tốn logic lọc ở parser). */
 function finalizeSmartScale(textCss, scaleX, scaleY) {
 	const parts = [];
 	if (scaleX !== undefined) parts.push(`scaleX(${scaleX / 100})`);
 	if (scaleY !== undefined) parts.push(`scaleY(${scaleY / 100})`);
 	if (parts.length) textCss['transform'] = parts.join(' ');
 }
-/** [Manual edit] Hàm áp dụng các tag trong tag \t. (2.4.1, 2.3) 
- * @param {string} tag Tag raw, bắt đầu bằng '\\t'.
+/** [Manual edit] Hàm áp dụng các tag bên trong tag \t — metadata nội suy (CHỈ tag 2.4.1).
+ * @param {string} tag Tag raw, bắt đầu bằng '\t' (vd "\t(0,500,\fs30)").
  * @param {Object} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
  * @returns {{t1: number, t2: (number|null), easing: number, target: Object}|null}
- *  - t1: ms, tương đối đầu dòng (Aegisub: \\t dùng ms).
- *  - t2: ms, tương đối đầu dòng (Aegisub: \\t dùng ms). 
- * null khi file không ghi t2 (transform chạy tới HẾT dòng — renderer lấy duration dòng từ events để resolve).
-*/
+ *  - null khi tag không phải \t hợp lệ, hoặc modsText không có tag 2.4.1 nào (không tạo entry anim).
+ *  - t1: ms, tương đối đầu dòng (Aegisub: \t dùng ms).
+ *  - t2: ms, tương đối đầu dòng; null khi file không ghi t2 (transform chạy tới HẾT dòng —
+ *    renderer lấy duration dòng từ events để resolve).
+ */
+
 function parseTransformTag(tag, styleRef) {
 	const parts = splitTransformParts(tag);
 	if (!parts) return null;
@@ -255,16 +264,17 @@ function parseTransformTag(tag, styleRef) {
 	if (Object.keys(context.textCss).length === 0) return null;
 	return { t1: parts.t1, t2: parts.t2, easing: parts.easing, target: context.textCss };
 }
-/** [Manual edit] Hàm xử lí các tag nhóm 2.4 - Layout Local.
- * chú ý: \k[f/o] đưa sang 2.3.
+/** [Manual edit] Hàm xử lí các tag nhóm 2.4 — Layout Local (2.4.1 + 2.4.2 tĩnh; \t → anim).
+ * chú ý: karaoke \k/\kf/\ko KHÔNG xử lí ở 2.4 — đưa sang 2.3 (session sau).
  * @param {Array<{tags: string[], text: string}>} base Mảng base item (đầu ra của processLineText).
  * @param {Object} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
- * @returns {Array<{tags: string[], text: string, delta?: Object, anim?: Object}>} base đã classify.
+ * @returns {Array<{tags: string[], text: string, delta?: Object, anim?: Array<Object>}>} base đã classify.
  */
+
 function classifyLayoutLocal(base, styleRef) {
 	if (!Array.isArray(base)) return base;
 	for (const item of base) {
-		// item là segments của line, mỗi item = { tags: string[], text: string } (đầu ra của processLineText).
+		// item là mục base của line, mỗi item = { tags: string[], text: string } (đầu ra của processLineText).
 		// trong item có thể có delta (container, text, data) và anim (\t).
 		const tags = item.tags;
 		// Tự động bỏ qua nếu line ko có tag nào (tránh tạo delta rỗng).
@@ -310,13 +320,13 @@ function classifyLayoutLocal(base, styleRef) {
 
 
 
-/** [arena.ai] Nhóm 2.3 — Decoration Local Tags. SESSION SAU. */
-export function classifyDecoration(base, styleRef) {
+/** [arena.ai] Nhóm 2.3 — Decoration Local Tags (gồm karaoke \k/\kf/\ko). SESSION SAU. */
+function classifyDecoration(base, styleRef) {
 	return base;
 }
 
 /** [arena.ai] Nhóm 2.2 — Collision. Bản này CHỈ signal \\t. */
-export function classifyCollision(base, styleRef) {
+function classifyCollision(base, styleRef) {
 	let hasTransform = false;
 	if (Array.isArray(base)) {
 		for (const item of base) {
@@ -331,7 +341,7 @@ export function classifyCollision(base, styleRef) {
 }
 
 /** [arena.ai] Nhóm 2.1 — Clip. STUB. */
-export function classifyClip(base, styleRef) {
+function classifyClip(base, styleRef) {
 	return { rawList: [], effectiveType: null, effectiveRaw: null };
 }
 
