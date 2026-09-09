@@ -1,4 +1,4 @@
-// v0.1.0 08sep26
+// v0.1.0 09sep26
 // beta mode (đã viết xong, sửa lỗi khi chạy)
 // Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
@@ -425,12 +425,6 @@ function styleForLine(orgline, parsedData) {
 	const found = parsedData.styles.find(style => style.name === orgline.style);
 	return found ?? FALLBACK_DEFAULT_STYLE;
 }
-// Thứ tự xử lí: tokenizeLineText (token + clean) → baseFromTokens (tách các tag đơn
-// trong tag token, ghép với text token kế tiếp thành 1 mục base). Trong baseFromTokens có splitOverrideTags().
-// Phân loại/phân cấp tag (nhóm 2.4 → 2.3 → 2.2 → 2.1): classify() ở background/tagProcess.js
-// (03sep26 — 2.4 layout + động \t/\k làm thật; 2.3/2.2/2.1 để session sau; xem file đó).
-// Các luật BASE MODEL (tag liền nhau gộp chung, marker flush riêng, tag cuối dòng bỏ...)
-// được ghi trực tiếp trong typedef baseItem + comment inline của từng hàm + test tương ứng.
 /** [arena.ai] Tokenize + làm sạch nội dung dòng (tiền xử lí tag override).
  *
  * Mục tiêu: biến line.text thô (một chuỗi đan xen text thường và tag {...}) thành một mảng
@@ -886,10 +880,3 @@ export function parser(doStripTags = false, rawText) {
 	utils.log(`${parserLogPrefix} Đã xử lí xong.`, parsedData);	
 	return parsedData;
 }
-
-
-
-
-
-
-

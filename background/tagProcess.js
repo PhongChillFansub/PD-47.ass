@@ -44,10 +44,10 @@
  *   Nhóm 2.1 — mức DÒNG, last-wins (bản này STUB default — session 2.1 làm đầy).
  */
 
-import * as utils from './utils.js';
-/** Regex nhận diện tag karaoke: \\k / \\K / \\kf / \\ko + duration (số, centisecond trong file).
- * KHÔNG match \\kt (wontfix 09sep26). Nhóm 1 = type, nhóm 2 = duration raw (cs). */
-const KARAOKE_RE = /^\\(k[fo]?|K)(\d+(?:\.\d+)?)/;
+// import * as utils from './utils.js';
+/** Regex nhận diện tag karaoke: \\k / \\kf / \\ko + duration (số, centisecond trong file).
+ * KHÔNG match \\kt và \K. Nhóm 1 = type, nhóm 2 = duration raw (cs). */
+const KARAOKE_RE = /^\\(k[fo]?)(\d+(?:\.\d+)?)/;
 /** Regex số thuần (cho phần tham số đứng đầu của \\t: t1/t2/accel) */
 const NUMERIC_TOKEN_RE = /^[+-]?(\d+\.?\d*|\.\d+)$/;
 /** Tên style fallback khi styleRef thiếu (dùng cho \\r rỗng) — khớp FALLBACK_DEFAULT_STYLE.name */
@@ -84,15 +84,15 @@ function splitOverrideTagsTransform(text) {
 	if (start !== -1) pushTag(text.slice(start));
 	return tags;
 }
-/** [arena.ai] Map 1 tag LAYOUT TĨNH TWEEN (2.4b / ngoài apply-now) thành CSS-cooked.
- * Chỉ xử lí: \\fs \\fscx \\fscy \\fsc \\fsp \\b \\i. \\fn là 2.4a (applyFontNow).
- * \\b/\\i KHÔNG có số → return false, không toggle (chốt 03sep26 bản 2).
- *
+/** [Manual edit] Hàm áp dụng tag nhóm 2.4.1 (Có thể transform trong tag \t; cục bộ; có thể làm ảnh hưởng layout):
+ * 
+ * \fsc[x/y] (*:\fsc chỉ có trong VSFilterMod), \fsp, \fs.
  * @param {string} tag Tag đơn raw, bắt đầu bằng '\\'.
- * @param {{css: Object, scaleX: (number|undefined), scaleY: (number|undefined), styleRef: (Object|null|undefined)}} context
- * @returns {boolean} true = đã xử lí; false = không thuộc nhóm tween.
+ * @param {{textCss: Object, scaleX: (number|undefined), scaleY: (number|undefined), styleRef: (Object|null|undefined)}} context 
+ * Object ghi dữ liệu tạm thời. Chỉ khi có thay đổi thì mới ghi từ context sang lineCss[i].delta
+ * @returns {boolean} true = đã xử lí; false = không thuộc nhóm này.
  */
-function applyLayoutStatic(tag, context) {
+function applyLayoutLocalTransformable(tag, context) {
 	if (tag.startsWith('\\fscy')) {
 		const v = Number.parseFloat(tag.slice(5));
 		if (!Number.isNaN(v)) context.scaleY = v;
@@ -113,44 +113,88 @@ function applyLayoutStatic(tag, context) {
 	}
 	if (tag.startsWith('\\fsp')) {
 		const v = Number.parseFloat(tag.slice(4));
-		if (!Number.isNaN(v)) context.css['letter-spacing'] = `${v}px`;
+		if (!Number.isNaN(v)) context.textCss['letter-spacing'] = `${v}px`;
 		return true;
 	}
 	if (tag.startsWith('\\fs')) {
 		const v = Number.parseFloat(tag.slice(3));
-		if (!Number.isNaN(v)) context.css['font-size'] = `${v}px`;
-		return true;
-	}
-	if (/^\\b-?\d+(?:\.\d+)?$/.test(tag)) {
-		const on = Number.parseFloat(tag.slice(2)) !== 0;
-		context.css['font-weight'] = on ? '700' : '400';
-		return true;
-	}
-	if (/^\\i-?\d+(?:\.\d+)?$/.test(tag)) {
-		const on = Number.parseFloat(tag.slice(2)) !== 0;
-		context.css['font-style'] = on ? 'italic' : 'normal';
+		if (!Number.isNaN(v)) context.textCss['font-size'] = `${v}px`;
 		return true;
 	}
 	return false;
 }
-/** [arena.ai] 2.4a — \\fn last-wins vào css (apply-now, không tween). */
-function applyFontNow(tag, context) {
-	if (!tag.startsWith('\\fn')) return false;
-	let name = tag.slice(3).trim();
-	if (name === '') name = context.styleRef?.fontName ?? '';
-	if (name !== '') context.css['font-family'] = `"${name}", sans-serif`;
-	return true;
+/** [Manual edit] Hàm áp dụng tag nhóm 2.4.2 (Ko thể transform trong tag \t; cục bộ; có thể làm ảnh hưởng layout):
+ * 
+ * \- (inline-fx), \b, \i, \fn, \r, \q
+ * 
+ * comment: \k[f/o] đưa sang 2.3. Không xử lí \kt, \K.
+ * 
+ * Chú ý: những tag này vẫn xử lí như bình thường KỂ CẢ khi nằm trong \t(...).
+ * @param {string} tag Tag đơn raw, bắt đầu bằng '\\'.
+ * @param {{textCss: Object, scaleX: (number|undefined), scaleY: (number|undefined), styleRef: (Object|null|undefined)}} context 
+ * Object ghi dữ liệu tạm thời. Chỉ khi có thay đổi thì mới ghi từ context sang lineCss[i].delta
+ * @returns {boolean} true = đã xử lí; false = không thuộc nhóm này.
+ */
+function applyLayoutLocalNonTransformable(tag, context) {
+	if (/^\\-/.test(tag)) {
+		// Xử lý tag inline-fx: lưu dữ liệu text của inline-fx
+		const inlineFx = tag.slice(2).trim();
+		if (inlineFx !== '') context.textCss['--inline-fx'] = inlineFx;
+		return true;
+	}
+	if (/^\\b-?\d+(?:\.\d+)?$/.test(tag)) {
+		// Xử lý tag bold: lưu dữ liệu text của bold và cập nhật font-weight
+		const on = Number.parseFloat(tag.slice(2)) !== 0;
+		context.textCss['font-weight'] = on ? '700' : '400';
+		return true;
+	}
+	if (/^\\i-?\d+(?:\.\d+)?$/.test(tag)) {
+		// Xử lý tag italic: lưu dữ liệu text của italic và cập nhật font-style
+		const on = Number.parseFloat(tag.slice(2)) !== 0;
+		context.textCss['font-style'] = on ? 'italic' : 'normal';
+		return true;
+	}
+	if (tag.startsWith('\\fn')) {
+		// Xử lý tag font name: lưu dữ liệu text của font name và cập nhật font-family
+		let name = tag.slice(3).trim();
+		if (name === '') name = context.styleRef?.fontName ?? '';
+		if (name !== '') context.textCss['font-family'] = `"${name}", sans-serif`;
+		return true;
+	}
+	if (tag.startsWith('\\r')) {
+		// Xử lý tag reset style: lưu dữ liệu text của reset style và cập nhật style name
+		const styleName = tag.slice(2);
+		const baseStyleName = styleName !== '' ? styleName : (context.styleRef?.name ?? FALLBACK_STYLE_NAME);
+		context.textCss['--base-style-name'] = baseStyleName;
+		return true;
+	}
+	if (/^\\q\d+$/.test(tag)) {
+		/// Xử lý tag wrap style: lưu dữ liệu text của wrap style và cập nhật --wrap-style
+		const v = Number.parseInt(tag.slice(2), 10);
+		if (!Number.isNaN(v)) context.textCss['--wrap-style'] = v;
+		return true;
+	}
+	// if (KARAOKE_RE.test(tag)) {
+	// 	// Xử lý tag karaoke: lưu dữ liệu text của karaoke và cập nhật --karaoke
+	// 	const km = KARAOKE_RE.exec(tag);
+	// 	if (km) {
+	// 		const endTime = context.data.k?.endTime ?? 0;
+	// 		// Chú ý: đây là endTime cũ, ko phải endTime của item hiện tại. Nếu item hiện tại có nhiều tag \k* thì cộng dồn duration.
+	// 		const duration = Number(km[2]) * 10;
+	// 		context.data.k = { type: km[1], duration, endTime: endTime + duration };
+	// 	}
+	// 	return true;
+	// }
+	return false;
 }
-/** [arena.ai] Gộp scaleX/scaleY thành chuỗi 'transform' CSS-cooked. */
-function finalizeTransform(css, scaleX, scaleY) {
-	const parts = [];
-	if (scaleX !== undefined && scaleX !== 100) parts.push(`scaleX(${scaleX / 100})`);
-	if (scaleY !== undefined && scaleY !== 100) parts.push(`scaleY(${scaleY / 100})`);
-	if (parts.length) css['transform'] = parts.join(' ');
-}
-/**
- * Tách \\t(...) → { t1, t2, easing, modsText } hoặc null nếu tag không hợp lệ.
- * parseTransformTag / 2.4a inner dùng chung để không parse ngoặc hai lần khác nhau.
+/** [arena.ai] Tách \\t(...) → { t1, t2, easing, modsText } hoặc null nếu tag không hợp lệ.
+ * 
+ * Chỉ lấy các tag thành modsText.
+ * @param {string} tag Tag raw, bắt đầu bằng '\\t'.
+ * @returns {{t1: number, t2: (number|null), easing: number, modsText: string}|null}
+ *  - t1: ms, tương đối đầu dòng (Aegisub: \\t dùng ms).
+ *  - t2: ms, tương đối đầu dòng (Aegisub: \\t dùng ms). 
+ * null khi file không ghi t2 (transform chạy tới HẾT dòng — renderer lấy duration dòng từ events để resolve).
  */
 function splitTransformParts(tag) {
 	const m = /^\\t(?:\((.*)\))?$/.exec(tag);
@@ -181,109 +225,90 @@ function splitTransformParts(tag) {
 	}
 	return { t1, t2, easing, modsText };
 }
-/** Tag trong \\t không vào anim.t.target: first-win line-level, clip, hoặc 2.4a apply-now. */
-function skipTransformTarget(sub) {
-	if (/^\\(pos|move|org)(?:$|[\\(])/.test(sub)) return true;
-	if (/^\\an\d/.test(sub) || sub === '\\an') return true;
-	if (/^\\(iclip|clip)/.test(sub)) return true;
-	if (sub.startsWith('\\fn')) return true;
-	if (sub.startsWith('\\r')) return true;
-	if (/^\\q/.test(sub)) return true;
-	if (KARAOKE_RE.test(sub)) return true;
-	return false;
+/** [arena.ai] Gộp scaleX/scaleY thành chuỗi 'transform' dạng CSS để tối ưu riêng. */
+function finalizeSmartScale(textCss, scaleX, scaleY) {
+	const parts = [];
+	if (scaleX !== undefined) parts.push(`scaleX(${scaleX / 100})`);
+	if (scaleY !== undefined) parts.push(`scaleY(${scaleY / 100})`);
+	if (parts.length) textCss['transform'] = parts.join(' ');
 }
-/** [arena.ai] 2.4b — Parse 1 tag \\t(...) thành { t1, t2, easing, target }. Không side-effect karaoke/fn/r/q. */
+/** [Manual edit] Hàm áp dụng các tag trong tag \t. (2.4.1, 2.3) 
+ * @param {string} tag Tag raw, bắt đầu bằng '\\t'.
+ * @param {Object} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
+ * @returns {{t1: number, t2: (number|null), easing: number, target: Object}|null}
+ *  - t1: ms, tương đối đầu dòng (Aegisub: \\t dùng ms).
+ *  - t2: ms, tương đối đầu dòng (Aegisub: \\t dùng ms). 
+ * null khi file không ghi t2 (transform chạy tới HẾT dòng — renderer lấy duration dòng từ events để resolve).
+*/
 function parseTransformTag(tag, styleRef) {
 	const parts = splitTransformParts(tag);
 	if (!parts) return null;
-	const context = { css: {}, scaleX: undefined, scaleY: undefined, styleRef };
+	/** Lưu dữ liệu tạm thời khi apply các tag trong \t. Chỉ khi có thay đổi thì mới ghi từ context sang lineCss[i].delta
+	 * @type {{textCss: Object, scaleX: (number|undefined), scaleY: (number|undefined), styleRef: (Object|null|undefined)}}
+	 */
+	const context = { textCss: {}, scaleX: undefined, scaleY: undefined, styleRef };
 	for (const sub of splitOverrideTagsTransform(parts.modsText)) {
-		if (skipTransformTarget(sub)) continue;
-		applyLayoutStatic(sub, context);
+		// Chỉ các hàm áp dụng tag có thể transform của các nhóm, thì mới đặt ở đây.
+		applyLayoutLocalTransformable(sub, context); // 2.4.1
 	}
-	finalizeTransform(context.css, context.scaleX, context.scaleY);
-	if (Object.keys(context.css).length === 0) return null;
-	return { t1: parts.t1, t2: parts.t2, easing: parts.easing, target: context.css };
+	finalizeSmartScale(context.textCss, context.scaleX, context.scaleY);
+	if (Object.keys(context.textCss).length === 0) return null;
+	return { t1: parts.t1, t2: parts.t2, easing: parts.easing, target: context.textCss };
 }
-
-/**
- * 2.4a apply-now trên 1 tag đơn (ngoài \\t hoặc inner \\t, cùng path).
- * \\fn/\\r/\\q last-wins trong item; \\k* cộng dồn karaokeRun trên CẢ DÒNG.
- * \\kt không match KARAOKE_RE → bỏ.
- * @returns {boolean} true nếu đã tiêu thụ tag apply-now.
+/** [Manual edit] Hàm xử lí các tag nhóm 2.4 - Layout Local.
+ * chú ý: \k[f/o] đưa sang 2.3.
+ * @param {Array<{tags: string[], text: string}>} base Mảng base item (đầu ra của processLineText).
+ * @param {Object} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
+ * @returns {Array<{tags: string[], text: string, delta?: Object, anim?: Object}>} base đã classify.
  */
-function applyNow(tag, acc) {
-	const km = KARAOKE_RE.exec(tag);
-	if (km) {
-		const duration = Number(km[2]) * 10;
-		acc.data.k = { type: km[1], startTime: acc.karaokeRunMs, duration };
-		acc.karaokeRunMs += duration;
-		return true;
-	}
-	if (tag.startsWith('\\r')) {
-		const styleName = tag.slice(2);
-		acc.data.baseStyleName = styleName !== '' ? styleName : (acc.styleRef?.name ?? FALLBACK_STYLE_NAME);
-		return true;
-	}
-	if (/^\\q/.test(tag)) {
-		const v = Number.parseInt(tag.slice(2), 10);
-		if (!Number.isNaN(v)) acc.data.q = v;
-		return true;
-	}
-	if (applyFontNow(tag, acc.context)) return true;
-	return false;
-}
-
-/** [arena.ai] Nhóm 2.4 — Layout Local: 2.4a apply-now (k/fn/r/q) theo thứ tự tag, gặp \\t thì
- * apply-now inner TRƯỚC rồi 2.4b parseTransformTag.
- *
- * delta.data.k = { type, startTime, duration } (ms, ×10 từ cs). Không anim.k.
- * \\k trong cùng item: cộng dồn; payload k = syl cuối.
- */
-export function classifyLayoutLocal(base, styleRef) {
+function classifyLayoutLocal(base, styleRef) {
 	if (!Array.isArray(base)) return base;
-	let karaokeRunMs = 0;
 	for (const item of base) {
+		// item là segments của line, mỗi item = { tags: string[], text: string } (đầu ra của processLineText).
+		// trong item có thể có delta (container, text, data) và anim (\t).
 		const tags = item.tags;
+		// Tự động bỏ qua nếu line ko có tag nào (tránh tạo delta rỗng).
 		if (!Array.isArray(tags) || tags.length === 0) continue;
-		const css = {};
-		const data = {};
-		const animT = [];
-		const context = { css, scaleX: undefined, scaleY: undefined, styleRef };
-		const acc = { data, context, styleRef, karaokeRunMs };
+		const textCss = {}; // Phần ghi vào item.delta.text.
+		const data = {}; // Phần ghi vào item.delta.data.
+		const animT = []; // Phần ghi vào item.anim.
+		const context = { textCss, scaleX: undefined, scaleY: undefined, styleRef };
 		for (const tag of tags) {
 			if (tag.startsWith('\\t')) {
-				const parts = splitTransformParts(tag);
-				if (parts) {
-					for (const sub of splitOverrideTagsTransform(parts.modsText)) {
-						applyNow(sub, acc);
-					}
-				}
 				const entry = parseTransformTag(tag, styleRef);
 				if (entry) animT.push(entry);
 				continue;
 			}
-			if (applyNow(tag, acc)) continue;
+			// Nếu là tag \t.
 			if (tag === '\\h' || tag === '\\N' || tag === '\\n') {
 				data.marker = tag;
 				continue;
 			}
-			applyLayoutStatic(tag, context);
+			// Nếu là tag marker \h, \N, \n.
+			applyLayoutLocalTransformable(tag, context); // 2.4.1
+			applyLayoutLocalNonTransformable(tag, context); // 2.4.2
 		}
-		karaokeRunMs = acc.karaokeRunMs;
-		finalizeTransform(css, context.scaleX, context.scaleY);
-		if (Object.keys(css).length > 0 || Object.keys(data).length > 0) {
-			const delta = {};
-			if (Object.keys(css).length > 0) delta.text = css;
+		finalizeSmartScale(context.textCss, context.scaleX, context.scaleY);
+		if (Object.keys(context.textCss).length > 0 || Object.keys(data).length > 0) {
+			const delta = {}; // Phần ghi vào item.delta.
+			if (Object.keys(context.textCss).length > 0) delta.text = context.textCss;
 			if (Object.keys(data).length > 0) delta.data = data;
 			item.delta = delta;
 		}
-		if (animT.length > 0) {
-			item.anim = { t: animT };
-		}
+		if (animT.length > 0) item.anim = animT;
 	}
 	return base;
 }
+
+
+
+
+
+
+
+
+
+
 
 /** [arena.ai] Nhóm 2.3 — Decoration Local Tags. SESSION SAU. */
 export function classifyDecoration(base, styleRef) {

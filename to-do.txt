@@ -1,8 +1,11 @@
-08sep26
+09sep26
 - popup.css: Thêm class cho log
 - fetcher.js: Thêm tùy chọn bật/tắt tính năng bắt buộc tìm kiếm theo tiếng Việt có dấu (fetcher.js/foldText)
 - fetcher.js: Thêm tùy chọn thay đổi maxAllowedDistance (mức độ liên quan của cú pháp tìm kiếm với tên tệp)
-- parser.js: Cần thêm nhiều test thực tế để chuẩn hóa styleParsedToCss
+- parser.js: Cần thêm nhiều test thực tế để chuẩn hóa styleParsedToCss và tagProcess
+- parser.js: Thêm tính năng xử lí tag thông minh, chống lặp những tag không có giá trị.
+    (vd: lặp nhiều lần "{\fs100}." thì chỉ tag \fs đầu tiên (hoặc không có tag nào, nếu style ban đầu là \fs100 sẵn) có hiệu lực)
+
 
 Những giả thiết tạm chấp nhận (sau này test):
 #a1: parser.js: validateAndNormalizeStyle(): Cho phép style.name rỗng (Aegisub vẫn coi là hợp lệ).
