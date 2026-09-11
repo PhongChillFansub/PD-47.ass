@@ -644,3 +644,18 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
     Tests: tests/tagProcess.test.mjs (25 test — đồng bộ code sau khi bỏ karaoke/apply-now:
     anim = mảng; \r/\q → delta.text; fscx100 vẫn transform; CHỈ export classify)
     — npm test 94 pass (09sep26).
+
+11sep26 — 2.4: tag 2.4.2 TRONG \t(...) áp apply-now (chủ repo, commit 1ee633d — THAY hướng 09sep26)
+
+    BẢN CUỐI 09sep26 bỏ apply-now ("chủ repo sẽ làm sau nếu cần") — commit 1ee633d LÀ CÁI "sau" đó:
+    parseTransformTag nhận tham số thứ 3 (context của segment NGOÀI \t); mỗi tag trong \t(...)
+    chạy applyLayoutLocalNonTransformable(sub, contextNgoài) — tag 2.4.2 (\-/\b/\i/\fn/\r/\q) áp
+    NGAY vào delta segment ngoài \t như tag ngoài \t thông thường. Tag 2.4.1 vẫn CHỈ nội suy vào
+    anim target (không double). \t chỉ chứa 2.4.2 → KHÔNG tạo entry anim nhưng delta vẫn áp.
+    Karaoke \k* vẫn KHÔNG xử lí ở 2.4 (về 2.3) — đường apply-now KHÔNG đụng \k*.
+    Các phần KHÁC của BẢN CUỐI 09sep26 GIỮ NGUYÊN: 1 vòng theo thứ tự tag, anim = mảng trực tiếp,
+    \fscx/fscy identity 100 vẫn emit transform.
+
+    Đồng bộ bởi agent (arena/01a08f8a, cùng ngày): test #89 tests/tagProcess.test.mjs cập nhật
+    theo hành vi mới (\fn TRONG \t → delta.text 'font-family'); header + typedef tagProcess.js sửa
+    chỗ còn ghi "apply-now đã bỏ".

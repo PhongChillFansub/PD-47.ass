@@ -164,16 +164,16 @@ test('classify 2.4: \\q last-wins → --wrap-style; \\kt + \\k → không delta'
 	assert.deepEqual(entry.base[1], { tags: ['\\kt50', '\\k10'], text: 'b' });
 });
 
-test('classify 2.4b: \\t chỉ nội suy tag 2.4.1 — \\k*/\\fn TRONG \\t không áp (apply-now đã BỎ)', () => {
+test('classify 2.4: \\t nội suy tag 2.4.1 — tag 2.4.2 TRONG \\t áp apply-now (11sep26); \\k* KHÔNG áp ở 2.4 (về 2.3)', () => {
 	const entry = classify({
 		base: mkBase([['\\k20', '\\t(0,500,\\k99\\fnVerdana\\fs40)', '\\k30'], 'A'], [['\\k40'], 'B']),
 	}, DEFAULT_STYLE_REF);
 	assert.deepEqual(entry.base[0], {
 		tags: ['\\k20', '\\t(0,500,\\k99\\fnVerdana\\fs40)', '\\k30'],
 		text: 'A',
+		delta: { text: { 'font-family': '"Verdana", sans-serif' } },
 		anim: [{ t1: 0, t2: 500, easing: 1, target: { 'font-size': '40px' } }],
 	});
-	assert.equal(entry.base[0].delta, undefined);
 	assert.deepEqual(entry.base[1], { tags: ['\\k40'], text: 'B' });
 });
 

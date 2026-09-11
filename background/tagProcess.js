@@ -7,8 +7,9 @@
  *   2.4 Layout Local (2.4.1 transformable + 2.4.2 non-transformable TĨNH ngoài \t, rồi \t → metadata
  *   anim — bản này) → 2.3 Decoration (session sau; karaoke \k/\kf/\ko nằm ở đây) →
  *   2.2 Collision (bản này chỉ signal t) → 2.1 Clip (bản này stub default).
- *   KHÔNG có 2 pass 2.4a/2.4b — 09sep26 đã BỎ hướng apply-now (xem pipeline.txt mục 09sep26):
- *   tag 2.4.2 nằm TRONG \t(...) hiện CHƯA được áp (chủ repo sẽ làm sau nếu cần).
+ *   KHÔNG có 2 pass 2.4a/2.4b — 11sep26 (chủ repo, commit 1ee633d): tag 2.4.2 nằm TRONG \t(...)
+ *   được apply-now vào context của segment NGOÀI \t, coi như tag ngoài \t thông thường
+ *   (09sep26 từng BỎ apply-now — hướng đó đã được thay thế bằng bản này).
  *
  * QUY ƯỚC CHUNG (KHÔNG bao giờ đổi):
  * - Parser giữ nguyên PlayRes px, KHÔNG đo chữ/scale/collision — việc đó của renderer.
@@ -36,8 +37,9 @@
  * - easing: số accel THÔ (default 1 = linear; >1 nhanh dần, <1 chậm dần) — renderer tự map
  *   sang hàm easing (linear/parabola/cubic...); giữ số thô để không mất độ chính xác.
  * - target: tag nội suy CSS-cooked — CHỈ tag 2.4.1 (\fs/\fsp/\fsc[x/y]). KHÔNG chứa
- *   \pos/\move/\org/\an (first-win 2.2) và KHÔNG có tag 2.4.2 (\b/\i/\fn/\r/\q/\- — trong \t
- *   chưa được áp, apply-now đã bỏ 09sep26). Tag 2.3 map khi viết 2.3. KHÔNG \k*, KHÔNG \kt.
+ *   \pos/\move/\org/\an (first-win 2.2) và KHÔNG có tag 2.4.2 (\b/\i/\fn/\r/\q/\- — KHÔNG nội suy
+ *   vào target; 11sep26: apply-now, áp ngay vào delta của segment ngoài \t như tag ngoài \t thông thường).
+ *   Tag 2.3 map khi viết 2.3. KHÔNG \k*, KHÔNG \kt.
  */
 /** Định nghĩa/chú thích lineCss[i] sau classify (struct đích — mục 3 prompt 03sep26)
  * @typedef {object} parsedDataFormat.lineCssEntry
