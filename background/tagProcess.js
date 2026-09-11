@@ -1,4 +1,4 @@
-/** v0.1.0 09sep26
+/** v0.1.0 11sep26
  * alpha mode
  * Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] ĐẦY ĐỦ
  * { base, collision, clip } theo struct đích (mục 3 prompt 03sep26).
@@ -104,7 +104,6 @@ function splitOverrideTagsTransform(text) {
  * parseTransformTag) mới ghi context sang item.delta khi có thay đổi.
  * @returns {boolean} true = đã xử lí; false = không thuộc nhóm này.
  */
-
 function applyLayoutLocalTransformable(tag, context) {
 	if (tag.startsWith('\\fscy')) {
 		const v = Number.parseFloat(tag.slice(5));
@@ -150,7 +149,6 @@ function applyLayoutLocalTransformable(tag, context) {
  * Object ghi dữ liệu tạm thời (textCss). Caller mới ghi context sang item.delta khi có thay đổi.
  * @returns {boolean} true = đã xử lí; false = không thuộc nhóm này.
  */
-
 function applyLayoutLocalNonTransformable(tag, context) {
 	if (/^\\-/.test(tag)) {
 		// Xử lý tag inline-fx: lưu dữ liệu text của inline-fx
@@ -242,14 +240,15 @@ function finalizeSmartScale(textCss, scaleX, scaleY) {
 /** [Manual edit] Hàm áp dụng các tag bên trong tag \t — metadata nội suy (CHỈ tag 2.4.1).
  * @param {string} tag Tag raw, bắt đầu bằng '\t' (vd "\t(0,500,\fs30)").
  * @param {Object} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
+ * @param {{textCss: Object, scaleX: (number|undefined), scaleY: (number|undefined), styleRef: (Object|null|undefined)}} nonTransformableContext
+ * Object ghi dữ liệu context của segment ngoài \t. (cho các tag 2.4.2, tag trong \t coi như tag ngoài \t thông thường)
  * @returns {{t1: number, t2: (number|null), easing: number, target: Object}|null}
  *  - null khi tag không phải \t hợp lệ, hoặc modsText không có tag 2.4.1 nào (không tạo entry anim).
  *  - t1: ms, tương đối đầu dòng (Aegisub: \t dùng ms).
  *  - t2: ms, tương đối đầu dòng; null khi file không ghi t2 (transform chạy tới HẾT dòng —
  *    renderer lấy duration dòng từ events để resolve).
  */
-
-function parseTransformTag(tag, styleRef) {
+function parseTransformTag(tag, styleRef, nonTransformableContext) {
 	const parts = splitTransformParts(tag);
 	if (!parts) return null;
 	/** Lưu dữ liệu tạm thời khi apply các tag trong \t. Chỉ khi có thay đổi thì mới ghi từ context sang lineCss[i].delta
@@ -259,6 +258,7 @@ function parseTransformTag(tag, styleRef) {
 	for (const sub of splitOverrideTagsTransform(parts.modsText)) {
 		// Chỉ các hàm áp dụng tag có thể transform của các nhóm, thì mới đặt ở đây.
 		applyLayoutLocalTransformable(sub, context); // 2.4.1
+		applyLayoutLocalNonTransformable(sub, nonTransformableContext); // 2.4.2
 	}
 	finalizeSmartScale(context.textCss, context.scaleX, context.scaleY);
 	if (Object.keys(context.textCss).length === 0) return null;
@@ -270,7 +270,6 @@ function parseTransformTag(tag, styleRef) {
  * @param {Object} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
  * @returns {Array<{tags: string[], text: string, delta?: Object, anim?: Array<Object>}>} base đã classify.
  */
-
 function classifyLayoutLocal(base, styleRef) {
 	if (!Array.isArray(base)) return base;
 	for (const item of base) {
@@ -285,7 +284,7 @@ function classifyLayoutLocal(base, styleRef) {
 		const context = { textCss, scaleX: undefined, scaleY: undefined, styleRef };
 		for (const tag of tags) {
 			if (tag.startsWith('\\t')) {
-				const entry = parseTransformTag(tag, styleRef);
+				const entry = parseTransformTag(tag, styleRef, context);
 				if (entry) animT.push(entry);
 				continue;
 			}

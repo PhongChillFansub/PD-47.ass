@@ -1,4 +1,4 @@
-09sep26
+11sep26
 - popup.css: Thêm class cho log
 - fetcher.js: Thêm tùy chọn bật/tắt tính năng bắt buộc tìm kiếm theo tiếng Việt có dấu (fetcher.js/foldText)
 - fetcher.js: Thêm tùy chọn thay đổi maxAllowedDistance (mức độ liên quan của cú pháp tìm kiếm với tên tệp)
