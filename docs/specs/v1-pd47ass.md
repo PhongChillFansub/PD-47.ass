@@ -456,7 +456,7 @@ Stat hiển thị (đúng `popup.html`, không thêm):
 
 Còn lại của checklist 29aug26 (cập nhật 02sep26 + 03sep26 + 08sep26), cần làm trong spec này:
 
-- [ ] #14. **2.3 `classifyDecoration`** (`tagProcess.js`): màu (`\1c`-`\4c`, `\alpha`), bord (`\bord`, `\xbord`, `\ybord`), shad (`\shad`, `\xshad`, `\yshad`), `\be`, `\blur`, `\fa`, `\fr`, `\fax`/`\fay`/`\frx`/`\fry`/`\frz`. Merge delta vào `item.delta` đã có (từ 2.4). Bổ sung target 2.3 vào `anim.t[].target` (đọc lại từ `tags` raw).
+- [x] #14. **2.3 `classifyDecoration`** *(ĐÃ LÀM 11sep26 — karaoke thuộc 2.3 theo BẢN CUỐI 09sep26; chi tiết `pipeline.txt` mục 11sep26)* (`tagProcess.js`): màu (`\1c`-`\4c`, `\alpha`), bord (`\bord`, `\xbord`, `\ybord`), shad (`\shad`, `\xshad`, `\yshad`), `\be`, `\blur`, `\fa`, `\fr`, `\fax`/`\fay`/`\frx`/`\fry`/`\frz`. Merge delta vào `item.delta` đã có (từ 2.4). Bổ sung target 2.3 vào `anim.t[].target` (đọc lại từ `tags` raw).
 - [ ] #15. **2.2 `classifyCollision`** (`tagProcess.js`) làm đầy `an`, `pos`, `move`, `org` (first-wins; `\an` vẫn tính collision; `pos`/`move`/`org` → renderer tự disable collision). Cộng thêm signal hiện có `t` (đã có ở 03sep26).
 - [ ] #16. **2.1 `classifyClip`** (`tagProcess.js`): `rawList` + `effectiveType`/`effectiveRaw` last-wins (kể cả `\clip` trong `\t`). Renderer tự quyết clip-path vs inverse clip-path theo `effectiveType`.
 - [x] #17. **`\k*` trong `\t`**: 2.4a `applyNow` inner trước 2.4b (09sep26). `delta.data.k = { type, startTime, duration }`. Không `anim.k`. Không `\kt`.

@@ -131,55 +131,209 @@ test('classify 2.4b: không \\t → collision.t = false', () => {
 	assert.deepEqual(entry.collision, { t: false });
 });
 
-test('classify 2.4: \\k/\\K KHÔNG tạo delta (về 2.3 — tags giữ raw)', () => {
+test('classify 2.3: \\k tạo data.k; \\K KHÔNG xử lí (không delta, không đẩy nhịp)', () => {
 	const entry = classify({ base: mkBase([['\\k25'], 'a'], [['\\K50'], 'b']) }, DEFAULT_STYLE_REF);
-	assert.deepEqual(entry.base[0], { tags: ['\\k25'], text: 'a' });
+	assert.deepEqual(entry.base[0], { tags: ['\\k25'], text: 'a', delta: { data: { k: { type: 'k', durationMs: 250, startMs: 0 } } } });
 	assert.deepEqual(entry.base[1], { tags: ['\\K50'], text: 'b' });
-	assert.equal(entry.base[0].delta, undefined);
 	assert.equal(entry.base[0].anim, undefined);
 });
 
-test('classify 2.4: \\kf/\\ko giữa các mục → không delta, không cộng dồn', () => {
+test('classify 2.3: \\kf/\\ko giữa các mục → data.k cộng dồn mức dòng', () => {
 	const entry = classify({ base: mkBase([[], 'x'], [['\\kf25'], 'a'], [['\\ko30'], 'b']) }, DEFAULT_STYLE_REF);
 	assert.deepEqual(entry.base[0], { tags: [], text: 'x' });
-	assert.deepEqual(entry.base[1], { tags: ['\\kf25'], text: 'a' });
-	assert.deepEqual(entry.base[2], { tags: ['\\ko30'], text: 'b' });
+	assert.deepEqual(entry.base[1], { tags: ['\\kf25'], text: 'a', delta: { data: { k: { type: 'kf', durationMs: 250, startMs: 0 } } } });
+	assert.deepEqual(entry.base[2], { tags: ['\\ko30'], text: 'b', delta: { data: { k: { type: 'ko', durationMs: 300, startMs: 250 } } } });
 });
 
-test('classify 2.4: cùng mục \\fs30 + \\k25 → chỉ delta.text, KHÔNG data.k', () => {
+test('classify 2.3: cùng mục \\fs30 + \\k25 → delta.text (2.4) + data.k (2.3) merge, KHÔNG anim', () => {
 	const item = classify({ base: mkBase([['\\fs30', '\\k25'], 'na']) }, DEFAULT_STYLE_REF).base[0];
-	assert.deepEqual(item.delta, { text: { 'font-size': '30px' } });
+	assert.deepEqual(item.delta, { text: { 'font-size': '30px' }, data: { k: { type: 'k', durationMs: 250, startMs: 0 } } });
 	assert.equal(item.anim, undefined);
 });
 
-test('classify 2.4: nhiều \\k cùng mục → không delta (không cộng dồn startTime)', () => {
+test('classify 2.3: nhiều \\k cùng mục → tag CUỐI thắng (syllable hiển thị), nhịp vẫn cộng dồn đủ', () => {
 	const entry = classify({ base: mkBase([['\\k25', '\\k30'], 'na'], [['\\k50'], 'x']) }, DEFAULT_STYLE_REF);
-	assert.deepEqual(entry.base[0], { tags: ['\\k25', '\\k30'], text: 'na' });
-	assert.deepEqual(entry.base[1], { tags: ['\\k50'], text: 'x' });
+	assert.deepEqual(entry.base[0], { tags: ['\\k25', '\\k30'], text: 'na', delta: { data: { k: { type: 'k', durationMs: 300, startMs: 250 } } } });
+	// \\k25 (syllable rỗng) vẫn đẩy nhịp → \\k50 của item sau bắt đầu ở 550.
+	assert.deepEqual(entry.base[1], { tags: ['\\k50'], text: 'x', delta: { data: { k: { type: 'k', durationMs: 500, startMs: 550 } } } });
 });
 
-test('classify 2.4: \\q last-wins → --wrap-style; \\kt + \\k → không delta', () => {
+test('classify 2.4: \\q last-wins → --wrap-style; \\kt KHÔNG xử lí (wontfix) nhưng \\k cùng mục vẫn ra data.k', () => {
 	const entry = classify({ base: mkBase([['\\q1', '\\q2'], 'a'], [['\\kt50', '\\k10'], 'b']) }, DEFAULT_STYLE_REF);
 	assert.deepEqual(entry.base[0].delta, { text: { '--wrap-style': 2 } });
-	assert.deepEqual(entry.base[1], { tags: ['\\kt50', '\\k10'], text: 'b' });
+	assert.deepEqual(entry.base[1], { tags: ['\\kt50', '\\k10'], text: 'b', delta: { data: { k: { type: 'k', durationMs: 100, startMs: 0 } } } });
 });
 
 test('classify 2.4: \\t nội suy tag 2.4.1 — tag 2.4.2 TRONG \\t áp apply-now (11sep26); \\k* KHÔNG áp ở 2.4 (về 2.3)', () => {
 	const entry = classify({
 		base: mkBase([['\\k20', '\\t(0,500,\\k99\\fnVerdana\\fs40)', '\\k30'], 'A'], [['\\k40'], 'B']),
 	}, DEFAULT_STYLE_REF);
+	// Karaoke: \\k99 TRONG \\t bỏ im lặng (SAI SỐ chấp nhận — #17); \\k20 rồi \\k30 → item A nhận tag cuối.
 	assert.deepEqual(entry.base[0], {
 		tags: ['\\k20', '\\t(0,500,\\k99\\fnVerdana\\fs40)', '\\k30'],
 		text: 'A',
-		delta: { text: { 'font-family': '"Verdana", sans-serif' } },
+		delta: { text: { 'font-family': '"Verdana", sans-serif' }, data: { k: { type: 'k', durationMs: 300, startMs: 200 } } },
 		anim: [{ t1: 0, t2: 500, easing: 1, target: { 'font-size': '40px' } }],
 	});
-	assert.deepEqual(entry.base[1], { tags: ['\\k40'], text: 'B' });
+	assert.deepEqual(entry.base[1], { tags: ['\\k40'], text: 'B', delta: { data: { k: { type: 'k', durationMs: 400, startMs: 500 } } } });
 });
 
 test('classify 2.4b: \\an trong \\t không vào target', () => {
 	const entry = classify({ base: mkBase([['\\t(\\an5\\fs30)'], 'x']) }, DEFAULT_STYLE_REF);
 	assert.deepEqual(entry.base[0].anim, [{ t1: 0, t2: null, easing: 1, target: { 'font-size': '30px' } }]);
+});
+
+// ==== Nhóm 2.3 — Decoration Local Tags (11sep26) ====
+// Style đầy đủ field decoration (màu/bord/shadow) cho các test 2.3.
+const DECOR_STYLE_REF = {
+	name: 'Decor', fontName: 'Arial', fontSize: 20, alignment: 2,
+	primaryColour: 'rgba(255, 255, 255, 1.00)',
+	secondaryColour: 'rgba(255, 0, 0, 1.00)',
+	outlineColour: 'rgba(0, 0, 0, 1.00)',
+	backColour: 'rgba(0, 0, 0, 0.50)',
+	borderStyle: 1, outline: 2, shadow: 2, angle: 0, scaleX: 100, scaleY: 100,
+};
+
+test('classify 2.3: \\1c/\\c → delta.text color + --primary-color (rgba nấu từ &HBBGGRR&)', () => {
+	const entry = classify({
+		base: mkBase([['\\1c&H00FF00&'], 'A'], [['\\c&HFF&'], 'B']),
+	}, DECOR_STYLE_REF);
+	assert.deepEqual(entry.base[0].delta, {
+		text: { 'color': 'rgba(0, 255, 0, 1.00)', '--primary-color': 'rgba(0, 255, 0, 1.00)' },
+	});
+	// \\c chỉ đổi RGB — alpha kế thừa primaryColour của style (1.00).
+	assert.deepEqual(entry.base[1].delta, {
+		text: { 'color': 'rgba(255, 0, 0, 1.00)', '--primary-color': 'rgba(255, 0, 0, 1.00)' },
+	});
+	assert.deepEqual(entry.base[0].tags, ['\\1c&H00FF00&']); // tags GIỮ NGUYÊN
+});
+
+test('classify 2.3: \\2c \\3c \\4c → --secondary-color / stroke-color + --outline-color / --back-color (+text-shadow khi style có shadow)', () => {
+	const entry = classify({
+		base: mkBase([['\\2c&H0000FF&'], 'A'], [['\\3c&H00FF00&'], 'B'], [['\\4c&HFF0000&'], 'C']),
+	}, DECOR_STYLE_REF);
+	assert.deepEqual(entry.base[0].delta.text, { '--secondary-color': 'rgba(255, 0, 0, 1.00)' });
+	assert.deepEqual(entry.base[1].delta.text, {
+		'-webkit-text-stroke-color': 'rgba(0, 255, 0, 1.00)',
+		'--outline-color': 'rgba(0, 255, 0, 1.00)',
+	});
+	// \\4c chỉ đổi RGB — alpha kế thừa backColour của style (0.50), đúng ngữ nghĩa Aegisub.
+	assert.deepEqual(entry.base[2].delta.text, {
+		'--back-color': 'rgba(0, 0, 255, 0.50)',
+		'text-shadow': '2px 2px rgba(0, 0, 255, 0.50)',
+	});
+});
+
+test('classify 2.3: \\alpha (mọi kênh) + \\1a..\\4a — rgb lấy từ style khi tag chỉ có alpha', () => {
+	const entry = classify({
+		base: mkBase([['\\alpha&H40&'], 'A'], [['\\1a&HFF&', '\\3c&H00FF00&'], 'B']),
+	}, DECOR_STYLE_REF);
+	assert.deepEqual(entry.base[0].delta.text, {
+		'color': 'rgba(255, 255, 255, 0.75)',
+		'--primary-color': 'rgba(255, 255, 255, 0.75)',
+		'--secondary-color': 'rgba(255, 0, 0, 0.75)',
+		'-webkit-text-stroke-color': 'rgba(0, 0, 0, 0.75)',
+		'--outline-color': 'rgba(0, 0, 0, 0.75)',
+		'--back-color': 'rgba(0, 0, 0, 0.75)',
+		'text-shadow': '2px 2px rgba(0, 0, 0, 0.75)',
+	});
+	assert.deepEqual(entry.base[1].delta.text, {
+		'color': 'rgba(255, 255, 255, 0.00)',
+		'--primary-color': 'rgba(255, 255, 255, 0.00)',
+		'-webkit-text-stroke-color': 'rgba(0, 255, 0, 1.00)',
+		'--outline-color': 'rgba(0, 255, 0, 1.00)',
+	});
+});
+
+test('classify 2.3: \\be/\\blur → filter blur; giá trị 0 → none; last-wins giữa \\be và \\blur', () => {
+	const entry = classify({
+		base: mkBase([['\\blur3'], 'A'], [['\\be2'], 'B'], [['\\blur0'], 'C'], [['\\be5', '\\blur1'], 'D']),
+	}, DECOR_STYLE_REF);
+	assert.deepEqual(entry.base[0].delta.text, { 'filter': 'blur(3px)' });
+	assert.deepEqual(entry.base[1].delta.text, { 'filter': 'blur(2px)' });
+	assert.deepEqual(entry.base[2].delta.text, { 'filter': 'none' });
+	assert.deepEqual(entry.base[3].delta.text, { 'filter': 'blur(1px)' });
+});
+
+test('classify 2.3: \\fr/\\frx/\\fry/\\frz → --angle-* (deg raw); \\fax/\\fay → --skew-* (deg nấu từ atan)', () => {
+	const entry = classify({
+		base: mkBase([['\\fr45'], 'A'], [['\\frx10', '\\fry-20', '\\frz30'], 'B'], [['\\fax1'], 'C']),
+	}, DECOR_STYLE_REF);
+	assert.deepEqual(entry.base[0].delta.text, { '--angle-z': '45deg' });
+	assert.deepEqual(entry.base[1].delta.text, { '--angle-x': '10deg', '--angle-y': '-20deg', '--angle-z': '30deg' });
+	// atan(1) = 45 độ — skew nấu sẵn deg để renderer chỉ việc ráp transform.
+	assert.deepEqual(entry.base[2].delta.text, { '--skew-x': '45deg' });
+});
+
+test('classify 2.3: \\bord → stroke ×2 + --outline-width; \\xbord/\\ybord → xấp xỉ max(x,y); \\bord0 hợp lệ', () => {
+	const entry = classify({
+		base: mkBase([['\\bord4'], 'A'], [['\\xbord1', '\\ybord5'], 'B'], [['\\bord0'], 'C']),
+	}, DECOR_STYLE_REF);
+	assert.deepEqual(entry.base[0].delta.text, { '-webkit-text-stroke-width': '8px', '--outline-width': '4px' });
+	assert.deepEqual(entry.base[1].delta.text, { '-webkit-text-stroke-width': '10px', '--outline-width': '5px' });
+	assert.deepEqual(entry.base[2].delta.text, { '-webkit-text-stroke-width': '0px', '--outline-width': '0px' });
+});
+
+test('classify 2.3: \\shad → text-shadow + --shadow-depth; \\shad0 → none; \\xshad/\\yshad offset chính xác; màu từ \\4c cùng item', () => {
+	const entry = classify({
+		base: mkBase([['\\shad3'], 'A'], [['\\shad0'], 'B'], [['\\xshad4', '\\yshad1'], 'C'], [['\\4c&HFF&', '\\shad2'], 'D']),
+	}, DECOR_STYLE_REF);
+	assert.deepEqual(entry.base[0].delta.text, { 'text-shadow': '3px 3px rgba(0, 0, 0, 0.50)', '--shadow-depth': '3px' });
+	assert.deepEqual(entry.base[1].delta.text, { 'text-shadow': 'none', '--shadow-depth': '0px' });
+	assert.deepEqual(entry.base[2].delta.text, { 'text-shadow': '4px 1px rgba(0, 0, 0, 0.50)', '--shadow-depth': '4px' });
+	// \\4c&HFF& kế thừa alpha backColour style (0.50) — text-shadow dùng màu back hiệu dụng.
+	assert.deepEqual(entry.base[3].delta.text, {
+		'--back-color': 'rgba(255, 0, 0, 0.50)',
+		'text-shadow': '2px 2px rgba(255, 0, 0, 0.50)',
+		'--shadow-depth': '2px',
+	});
+});
+
+test('classify 2.3: \\fs (2.4) + \\1c (2.3) cùng item → merge vào CÙNG delta.text, không ghi đè', () => {
+	const item = classify({ base: mkBase([['\\fs30', '\\1c&H00FF00&'], 'x']) }, DECOR_STYLE_REF).base[0];
+	assert.deepEqual(item.delta.text, {
+		'font-size': '30px',
+		'color': 'rgba(0, 255, 0, 1.00)',
+		'--primary-color': 'rgba(0, 255, 0, 1.00)',
+	});
+});
+
+const BOX_STYLE_REF = Object.freeze({ ...DECOR_STYLE_REF, borderStyle: 3 });
+
+test('classify 2.3 box (borderStyle 3): \\3c → container background-color; \\bord → container padding; \\shad → container box-shadow', () => {
+	const entry = classify({
+		base: mkBase([['\\3c&H00FF00&'], 'A'], [['\\bord5'], 'B'], [['\\shad3'], 'C'], [['\\shad0'], 'D']),
+	}, BOX_STYLE_REF);
+	assert.deepEqual(entry.base[0].delta, { container: { 'background-color': 'rgba(0, 255, 0, 1.00)' } });
+	assert.deepEqual(entry.base[1].delta, { container: { padding: '5px' }, text: { '--outline-width': '5px' } });
+	assert.deepEqual(entry.base[2].delta, { container: { 'box-shadow': '3px 3px rgba(0, 0, 0, 0.50)' }, text: { '--shadow-depth': '3px' } });
+	assert.deepEqual(entry.base[3].delta, { container: { 'box-shadow': 'none' }, text: { '--shadow-depth': '0px' } });
+});
+
+test('classify 2.3: tag 2.3 TRONG \\t → anim.t[].target; \\k* trong \\t bỏ im lặng (SAI SỐ #17); item không delta ngoài', () => {
+	const entry = classify({
+		base: mkBase([['\\t(0,500,\\1c&H0000FF&\\bord4\\fr30\\k10)'], 'x']),
+	}, DECOR_STYLE_REF);
+	assert.deepEqual(entry.base[0].anim, [{
+		t1: 0, t2: 500, easing: 1,
+		target: {
+			'color': 'rgba(255, 0, 0, 1.00)',
+			'--primary-color': 'rgba(255, 0, 0, 1.00)',
+			'-webkit-text-stroke-width': '8px',
+			'--outline-width': '4px',
+			'--angle-z': '30deg',
+		},
+	}]);
+	assert.equal(entry.base[0].delta, undefined);
+});
+
+test('classify 2.3: \\clip KHÔNG bị 2.3 tiêu thụ (việc của 2.1); tag 2.2/2.4 đi qua không tạo delta thừa', () => {
+	const entry = classify({
+		base: mkBase([['\\clip(0,0,100,100)', '\\fs30'], 'x'], [['\\an5'], 'y']),
+	}, DECOR_STYLE_REF);
+	assert.deepEqual(entry.base[0].delta, { text: { 'font-size': '30px' } });
+	assert.deepEqual(entry.base[0].tags, ['\\clip(0,0,100,100)', '\\fs30']); // tags GIỮ NGUYÊN cho 2.1
+	assert.equal(entry.base[1].delta, undefined);
 });
 
 test('classify: lineCss[i] đủ { base, collision, clip }', () => {

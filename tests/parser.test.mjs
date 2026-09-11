@@ -187,7 +187,8 @@ test('parser: base (mục base tag-text) ghi vào lineCss (cùng chỉ số vớ
 		parsed.lineCss[0].base,
 		[
 			{ tags: ['\\pos(320,240)', '\\an5'], text: 'Xin ' },
-			{ tags: ['\\c&HFF&'], text: 'chào' },
+			// \c&HFF& → delta.text màu (classify 2.3, 11sep26); alpha kế thừa PrimaryColour style (1.00).
+			{ tags: ['\\c&HFF&'], text: 'chào', delta: { text: { 'color': 'rgba(255, 0, 0, 1.00)', '--primary-color': 'rgba(255, 0, 0, 1.00)' } } },
 			{ tags: ['\\N'], text: '', delta: { data: { marker: '\\N' } } }, // marker → mục base riêng (classify 2.4: delta.data.marker)
 			{ tags: [], text: 'các bạn' },
 		]
@@ -524,4 +525,18 @@ test('02sep26 R2: box (borderStyle=3) reset đủ bộ — stroke-color transpar
 	assert.equal(text['paint-order'], 'normal');
 	assert.equal(text['text-shadow'], 'none');
 	// nhánh thường (test khác đã cover): paint-order vẫn 'stroke fill markers'
+});
+
+test('classify 2.3 integration: parser() → delta.text màu/bord/shad + karaoke data.k từ file raw', () => {
+	const parsed = parser(false, assWithText('{\\1c&H00FF00&\\bord3}Xanh {\\shad0\\k20}ka{\\k30}ra'));
+	const css = parsed.lineCss[0];
+	assert.deepEqual(css.base[0].delta.text, {
+		'color': 'rgba(0, 255, 0, 1.00)',
+		'--primary-color': 'rgba(0, 255, 0, 1.00)',
+		'-webkit-text-stroke-width': '6px',
+		'--outline-width': '3px',
+	});
+	assert.deepEqual(css.base[1].delta.text, { 'text-shadow': 'none', '--shadow-depth': '0px' });
+	assert.deepEqual(css.base[1].delta.data.k, { type: 'k', durationMs: 200, startMs: 0 });
+	assert.deepEqual(css.base[2].delta.data.k, { type: 'k', durationMs: 300, startMs: 200 });
 });
