@@ -343,7 +343,7 @@ Next steps checklist (29aug26, cập nhật 31aug26):
     [x] 2. Dọn pipeline line 192+ — gộp 27aug26 notes lên trên, xóa đoạn trùng — ĐÃ LÀM 29aug26
     [x] 3. Viết styleParsedToCss chi tiết: container/text/data tách bạch, map ASS → CSS, transform-origin từ \an, box vs outline — ĐÃ LÀM 29aug26 (bước 3)
     [x] 4. Viết classify: 2.4 layout local → tách run, xử lý \r, \h, \N, \n, \fs, \fsc, \fsp, \fn, \b, \i — ĐÃ LÀM 03sep26 (classifyLayoutLocal + động \t/\k metadata; xem mục 03sep26)
-    [ ] 5. Viết 2.3 decoration: màu, bord, shad, fa, fr — stub classifyDecoration ĐÃ DỰNG (no-op) trong tagProcess.js, session sau làm thật
+    [x] 5. Viết 2.3 decoration: màu, bord, shad, fa, fr — ĐÃ LÀM 11sep26 (classifyDecoration thật; thêm alpha/be/blur + karaoke — xem mục 11sep26 cuối file)
     [~] 6. Viết 2.2 collision: an, org, pos, move, t (defer) — 03sep26: mới có signal collision.t (tagProcess.js); an/org/pos/move session sau
     [~] 7. Viết 2.1 clip: clip/iclip last-wins — 03sep26: mới có shape default stub; session sau làm thật
     [x] 8. Cập nhật tests/parser.test.mjs cho styleCss + runs — ĐÃ LÀM 03sep26 (parser.test.mjs cập nhật expectation + tests/tagProcess.test.mjs mới; npm test 90 pass)
@@ -539,8 +539,8 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
     Next steps checklist (bổ sung vào checklist 29aug26 + 02sep26):
     [x] 12. processLineText (rename) + classify entry { base, collision, clip } + styleForLine — ĐÃ LÀM 03sep26
     [x] 13. tagProcess.js: classifyLayoutLocal 2.4 + động \t/\k (metadata) + tests — ĐÃ LÀM 03sep26
-    [ ] 14. Session sau — 2.3 classifyDecoration (màu/bord/shad/\fa/\fr): merge delta vào item.delta đã có,
-            bổ sung target 2.3 vào anim.t[].target của \t (đọc lại từ tags raw)
+    [x] 14. 2.3 classifyDecoration (màu/alpha/bord/shad/be/blur/fa/fr + karaoke) — ĐÃ LÀM 11sep26:
+            merge delta vào item.delta đã có + target 2.3 vào anim.t[].target (xem mục 11sep26 cuối file)
     [ ] 15. Session sau — 2.2 classifyCollision làm đầy an/pos/move/org (first-wins; \an vẫn tính collision;
             pos/move/org → renderer tự disable)
     [ ] 16. Session sau — 2.1 classifyClip: rawList + effectiveType/effectiveRaw last-wins (kể cả \clip trong \t)
@@ -644,3 +644,56 @@ Chú ý (ĐÃ LÀM 31aug26 — cả 2, xem mục styleCss + "Cập nhật 31aug2
     Tests: tests/tagProcess.test.mjs (25 test — đồng bộ code sau khi bỏ karaoke/apply-now:
     anim = mảng; \r/\q → delta.text; fscx100 vẫn transform; CHỈ export classify)
     — npm test 94 pass (09sep26).
+
+11sep26 — 2.4: tag 2.4.2 TRONG \t(...) áp apply-now (chủ repo, commit 1ee633d — THAY hướng 09sep26)
+
+    BẢN CUỐI 09sep26 bỏ apply-now ("chủ repo sẽ làm sau nếu cần") — commit 1ee633d LÀ CÁI "sau" đó:
+    parseTransformTag nhận tham số thứ 3 (context của segment NGOÀI \t); mỗi tag trong \t(...)
+    chạy applyLayoutLocalNonTransformable(sub, contextNgoài) — tag 2.4.2 (\-/\b/\i/\fn/\r/\q) áp
+    NGAY vào delta segment ngoài \t như tag ngoài \t thông thường. Tag 2.4.1 vẫn CHỈ nội suy vào
+    anim target (không double). \t chỉ chứa 2.4.2 → KHÔNG tạo entry anim nhưng delta vẫn áp.
+    Karaoke \k* vẫn KHÔNG xử lí ở 2.4 (về 2.3) — đường apply-now KHÔNG đụng \k*.
+    Các phần KHÁC của BẢN CUỐI 09sep26 GIỮ NGUYÊN: 1 vòng theo thứ tự tag, anim = mảng trực tiếp,
+    \fscx/fscy identity 100 vẫn emit transform.
+
+    Đồng bộ bởi agent (arena/01a08f8a, cùng ngày): test #89 tests/tagProcess.test.mjs cập nhật
+    theo hành vi mới (\fn TRONG \t → delta.text 'font-family'); header + typedef tagProcess.js sửa
+    chỗ còn ghi "apply-now đã bỏ".
+
+11sep26 — 2.3 classifyDecoration ĐÃ LÀM THẬT (agent arena/01a08f8a, theo ticket #14 spec §4.6 + 4 quyết định chủ repo)
+
+    Nhóm 2.3 — cục bộ mức item, last-wins trong item, KHÔNG đổi kích thước khung chữ; merge vào
+    item.delta đã có từ 2.4 (delta.text/delta.container/delta.data từng mức — không ghi đè).
+
+    Quyết định đã chốt với chủ repo (11sep26, trước khi viết):
+    1. Karaoke = delta.data.k per item { type: 'k'|'kf'|'ko', durationMs (cs×10), startMs (cộng dồn
+       mức DÒNG) }; tag \k* CUỐI trong item thắng (syllable hiển thị) nhưng nhịp vẫn cộng dồn đủ
+       các \k* rỗng trước nó. \K + \kt: KHÔNG xử lí, KHÔNG đẩy nhịp (wontfix). \k* TRONG \t:
+       bỏ im lặng (SAI SỐ chấp nhận — #17).
+    2. \xbord/\ybord → XẤP XỈ stroke-width = 2×max(x,y) (CSS stroke không tách được chiều);
+       \xshad/\yshad → text-shadow offset x/y CHÍNH XÁC.
+    3. \fr*/\fa* → CSS variables raw/cooked ('--angle-x/y/z' deg raw — renderer đổi dấu khi gộp;
+       '--skew-x/y' = atan(f) nấu sẵn deg). Gộp transform là việc renderer (chốt 03sep26 giữ nguyên).
+    4. Seam test: classify() trong tagProcess.test.mjs + 1 integration qua parser() (parser.test.mjs).
+
+    Mapping delta.text (khóa khớp styleCss.text — renderer Object.assign):
+    - \1c/\c → 'color' + '--primary-color'; \2c → '--secondary-color'; \3c → '-webkit-text-stroke-color'
+      + '--outline-color'; \4c → '--back-color' (+ 'text-shadow' khi shadow hiệu dụng ≠ 0).
+    - Tag màu KHÔNG kèm byte alpha (≤6 hex) → alpha kế thừa \Na > \alpha > alpha màu style
+      (đúng ngữ nghĩa Aegisub: màu và alpha trực giao). 8 hex → byte AA thắng.
+    - \bord → '-webkit-text-stroke-width' = eff×2 (ADR 0007) + '--outline-width'; \shad → 'text-shadow'
+      + '--shadow-depth' (= max(|x|,|y|)); \shad0 → 'text-shadow: none'.
+    - \be/\blur CÙNG họ (last-wins chéo) → 'filter: blur(Npx)'; 0 → 'none'.
+    - borderStyle 3 (box): \3c → container 'background-color'; \bord → container 'padding';
+      \shad → container 'box-shadow' (không stroke/text-shadow).
+
+    \t: tag 2.3 trong \t(...) → anim.t[].target qua applyDecorationToTarget (nấu độc lập theo styleRef,
+    CHỈ khóa mức text) — parseTransformTag nay chạy 3 đường: 2.4.1 tween target / 2.4.2 apply-now /
+    2.3 target.
+
+    Ghi chú implementation: parseTagColor/parseTagAlpha lọc KÍ TỰ HEX (không replace '&H'/'&') —
+    tag cắt ra còn dạng 'HBBGGRR&', replace pattern cũ để sót 'H' (bug latent, phát hiện khi test
+    \alpha&H40&). Nhân bản helper màu local (KHÔNG import parser.js — vòng tròn).
+
+    Tests: tagProcess.test.mjs 36 test + parser.test.mjs thêm 1 integration — npm test 106 pass (11sep26).
+    CÒN LẠI: #15 (2.2 an/pos/move/org), #16 (2.1 clip).
