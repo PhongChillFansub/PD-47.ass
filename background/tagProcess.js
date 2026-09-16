@@ -1,4 +1,4 @@
-/** v0.1.0 11sep26
+/** v0.1.0 16sep26
  * alpha mode
  * Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] ĐẦY ĐỦ
  * { base, collision, clip } theo struct đích (mục 3 prompt 03sep26).
@@ -56,7 +56,7 @@
  *   Nhóm 2.1 — mức DÒNG, last-wins (bản này STUB default — session 2.1 làm đầy).
  */
 
-// import * as utils from './utils.js';
+import * as utils from './utils.js';
 /** Regex nhận diện tag karaoke: \k / \kf / \ko + duration (số, centisecond trong file).
  * KHÔNG match \K (không xử lí) và \kt (wontfix v1+). Nhóm 1 = type, nhóm 2 = duration raw (cs).
  * Dùng trong classifyDecoration (2.3 — ĐÃ LÀM 11sep26); 2.4 KHÔNG đụng karaoke. */
@@ -231,15 +231,16 @@ function splitTransformParts(tag) {
 	}
 	return { t1, t2, easing, modsText };
 }
-/** [arena.ai] Gộp scaleX/scaleY thành chuỗi 'transform' dạng CSS để tối ưu riêng.
- * KHÔNG lọc identity 100: scaleX(1)/scaleY(1) vẫn emit (chốt 09sep26 — renderer áp trực tiếp,
- * không tốn logic lọc ở parser). */
-function finalizeSmartScale(textCss, scaleX, scaleY) {
-	const parts = [];
-	if (scaleX !== undefined) parts.push(`scaleX(${scaleX / 100})`);
-	if (scaleY !== undefined) parts.push(`scaleY(${scaleY / 100})`);
-	if (parts.length) textCss['transform'] = parts.join(' ');
-}
+// Cấu trúc mới: loại bỏ hàm này, và viết 1 hàm mới (có thể sau 2.1) để gộp style thành CSS-cooked.
+// /** [arena.ai] Gộp scaleX/scaleY thành chuỗi 'transform' dạng CSS để tối ưu riêng.
+//  * KHÔNG lọc identity 100: scaleX(1)/scaleY(1) vẫn emit (chốt 09sep26 — renderer áp trực tiếp,
+//  * không tốn logic lọc ở parser). */
+// function finalizeSmartScale(textCss, scaleX, scaleY) {
+// 	const parts = [];
+// 	if (scaleX !== undefined) parts.push(`scaleX(${scaleX / 100})`);
+// 	if (scaleY !== undefined) parts.push(`scaleY(${scaleY / 100})`);
+// 	if (parts.length) textCss['transform'] = parts.join(' ');
+// }
 /** [Manual edit] Hàm áp dụng các tag bên trong tag \t — metadata nội suy (CHỈ tag 2.4.1).
  * @param {string} tag Tag raw, bắt đầu bằng '\t' (vd "\t(0,500,\fs30)").
  * @param {Object} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
@@ -264,7 +265,7 @@ function parseTransformTag(tag, styleRef, nonTransformableContext) {
 		applyLayoutLocalNonTransformable(sub, nonTransformableContext); // 2.4.2 (apply-now 11sep26)
 		applyDecorationToTarget(sub, context); // 2.3 → target (11sep26; karaoke bỏ im lặng — #17)
 	}
-	finalizeSmartScale(context.textCss, context.scaleX, context.scaleY);
+	// finalizeSmartScale(context.textCss, context.scaleX, context.scaleY);
 	if (Object.keys(context.textCss).length === 0) return null;
 	return { t1: parts.t1, t2: parts.t2, easing: parts.easing, target: context.textCss };
 }
@@ -301,7 +302,7 @@ function classifyLayoutLocal(base, styleRef) {
 			applyLayoutLocalTransformable(tag, context); // 2.4.1
 			applyLayoutLocalNonTransformable(tag, context); // 2.4.2
 		}
-		finalizeSmartScale(context.textCss, context.scaleX, context.scaleY);
+		// finalizeSmartScale(context.textCss, context.scaleX, context.scaleY);
 		if (Object.keys(context.textCss).length > 0 || Object.keys(data).length > 0) {
 			const delta = {}; // Phần ghi vào item.delta.
 			if (Object.keys(context.textCss).length > 0) delta.text = context.textCss;
@@ -312,6 +313,8 @@ function classifyLayoutLocal(base, styleRef) {
 	}
 	return base;
 }
+/** Field màu của styleRef theo kênh ASS (1=primary, 2=secondary, 3=outline, 4=back). */
+const STYLE_COLOR_FIELD = Object.freeze({ 1: 'primaryColour', 2: 'secondaryColour', 3: 'outlineColour', 4: 'backColour' });
 
 
 
@@ -320,47 +323,45 @@ function classifyLayoutLocal(base, styleRef) {
 
 
 
+// to-do: sửa đoạn này
 
-
-
-/** [arena.ai] Parse màu inline của tag 2.3 (&HBBGGRR& hoặc &HAABBGGRR&) → { r, g, b, alpha }
- * (alpha: 0..1 tính ngược Aegisub; NULL khi hex ≤ 6 chữ số = tag không kèm byte alpha → alpha
- * kế thừa trạng thái đang theo dõi / alpha của style lúc emit). Null khi không có hex.
- * Khớp convertAegisubColorToCss của parser.js về thứ tự byte AABBGGRR.
- * Nhân bản local vì tagProcess.js KHÔNG import parser.js (tránh vòng tròn — precedent splitOverrideTagsTransform). */
-function parseTagColor(raw) {
-	// Chỉ GIỮ ký tự hex — tag tới đây có thể còn dạng 'HBBGGRR&' (đã cắt '&'); lọc sạch là chắc ăn nhất.
-	const hex0 = String(raw).replace(/[^0-9a-f]/gi, '');
-	if (hex0 === '') return null;
-	const hasAlphaByte = hex0.length > 6; // >6 chữ số = có byte AA (AABBGGRR)
-	const hex = hex0.padStart(8, '0');
-	const alpha = hasAlphaByte ? (255 - Number.parseInt(hex.slice(0, 2), 16)) / 255 : null;
-	const b = Number.parseInt(hex.slice(2, 4), 16);
-	const g = Number.parseInt(hex.slice(4, 6), 16);
-	const r = Number.parseInt(hex.slice(6, 8), 16);
-	if ([alpha, b, g, r].some(v => v !== null && Number.isNaN(v))) return null;
-	return { r, g, b, alpha };
-}
-/** [arena.ai] Parse alpha của tag 2.3 (&HAA&) → 0..1 (Aegisub tính ngược), null khi vô giá trị. */
-function parseTagAlpha(raw) {
-	const hex = String(raw).replace(/[^0-9a-f]/gi, '');
-	if (hex === '') return null;
-	const aa = Number.parseInt(hex.padStart(2, '0').slice(0, 2), 16);
-	if (Number.isNaN(aa)) return null;
-	return (255 - aa) / 255;
-}
-/** [arena.ai] Nấu { r, g, b, a } → chuỗi rgba() đúng format convertAegisubColorToCss (space sau dấu phẩy, a 2 số lẻ). */
-function cookRgba({ r, g, b, a }) {
-	return `rgba(${r}, ${g}, ${b}, ${a.toFixed(2)})`;
-}
+// /** [arena.ai] Parse màu inline của tag 2.3 (&HBBGGRR& hoặc &HAABBGGRR&) → { r, g, b, alpha }
+//  * (alpha: 0..1 tính ngược Aegisub; NULL khi hex ≤ 6 chữ số = tag không kèm byte alpha → alpha
+//  * kế thừa trạng thái đang theo dõi / alpha của style lúc emit). Null khi không có hex.
+//  * Khớp convertAegisubColorToCss của parser.js về thứ tự byte AABBGGRR.
+//  * Nhân bản local vì tagProcess.js KHÔNG import parser.js (tránh vòng tròn — precedent splitOverrideTagsTransform). */
+// function parseTagColor(raw) {
+// 	// Chỉ GIỮ ký tự hex — tag tới đây có thể còn dạng 'HBBGGRR&' (đã cắt '&'); lọc sạch là chắc ăn nhất.
+// 	const hex0 = String(raw).replace(/[^0-9a-f]/gi, '');
+// 	if (hex0 === '') return null;
+// 	const hasAlphaByte = hex0.length > 6; // >6 chữ số = có byte AA (AABBGGRR)
+// 	const hex = hex0.padStart(8, '0');
+// 	const alpha = hasAlphaByte ? (255 - Number.parseInt(hex.slice(0, 2), 16)) / 255 : null;
+// 	const b = Number.parseInt(hex.slice(2, 4), 16);
+// 	const g = Number.parseInt(hex.slice(4, 6), 16);
+// 	const r = Number.parseInt(hex.slice(6, 8), 16);
+// 	if ([alpha, b, g, r].some(v => v !== null && Number.isNaN(v))) return null;
+// 	return { r, g, b, alpha };
+// }
+// /** [arena.ai] Parse alpha của tag 2.3 (&HAA&) → 0..1 (Aegisub tính ngược), null khi vô giá trị. */
+// function parseTagAlpha(raw) {
+// 	const hex = String(raw).replace(/[^0-9a-f]/gi, '');
+// 	if (hex === '') return null;
+// 	const aa = Number.parseInt(hex.padStart(2, '0').slice(0, 2), 16);
+// 	if (Number.isNaN(aa)) return null;
+// 	return (255 - aa) / 255;
+// }
+// /** [arena.ai] Nấu { r, g, b, a } → chuỗi rgba() đúng format convertAegisubColorToCss (space sau dấu phẩy, a 2 số lẻ). */
+// function cookRgba({ r, g, b, a }) {
+// 	return `rgba(${r}, ${g}, ${b}, ${a.toFixed(2)})`;
+// }
 /** [arena.ai] Parse ngược chuỗi rgba() đã nấu (màu style của styleRef) → { r, g, b, a }, null khi không khớp. */
 function parseCssRgba(css) {
 	const m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/.exec(String(css ?? ''));
 	if (!m) return null;
 	return { r: Number(m[1]), g: Number(m[2]), b: Number(m[3]), a: m[4] != null ? Number(m[4]) : 1 };
 }
-/** Field màu của styleRef theo kênh ASS (1=primary, 2=secondary, 3=outline, 4=back). */
-const STYLE_COLOR_FIELD = Object.freeze({ 1: 'primaryColour', 2: 'secondaryColour', 3: 'outlineColour', 4: 'backColour' });
+
 /** [arena.ai] Nấu hệ số skew ASS (\\fax/\\fay: x' = x + f·y) → góc deg cho CSS skewX/Y: θ = atan(f). */
 function skewFactorToDeg(f) {
 	return Number((Math.atan(f) * 180 / Math.PI).toFixed(4));

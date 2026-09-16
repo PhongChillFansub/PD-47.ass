@@ -1,4 +1,4 @@
-// v0.1.0 09sep26
+// v0.1.0 16sep26
 // beta mode (đã viết xong, sửa lỗi khi chạy)
 // Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
@@ -127,24 +127,6 @@ const convertTimeStringToMs = t => {
     const [h = 0, m = 0, s = 0, cs = 0] = Array(4 - p.length).fill(0).concat(p);
     return h * 36e5 + m * 6e4 + s * 1e3 + String(cs).padEnd(2, '0').slice(0, 2) * 10 || 0;
 };
-/** Chuyển chuỗi màu Aegisub sang định dạng rgba() dùng cho CSS.
- * Hỗ trợ cả định dạng style màu &HAABBGGRR và inline màu &HBBGGRR&.
- *
- * @param {string} ascStr Chuỗi màu đầu vào từ file ASS.
- * @returns {string} Giá trị màu theo dạng rgba(r, g, b, a).
- */
-function convertAegisubColorToCss(ascStr) {
-  let hex = ascStr.replace(/&H|&/g, ''); // Loại bỏ ký tự định dạng &H và & của string màu (định dạng mới AABBGGRR/BBGGRR)
-  if (!hex) return 'rgba(0,0,0,0)'; // Nếu string màu trống (&H&), coi như màu đen
-  hex = hex.padStart(8, '0'); // Chuyển về chuẩn AABBGGRR
-  // Trong định dạng màu Aegisub: Alpha theo cơ chế tính ngược (00: Opaque, FF: Transparent)
-  // Còn lại đều là tính xuôi. Và tất cả đều là hệ 16
-  const a = ((255 - parseInt(hex.substring(0, 2), 16)) / 255).toFixed(2);
-  const b = parseInt(hex.substring(2, 4), 16);
-  const g = parseInt(hex.substring(4, 6), 16);
-  const r = parseInt(hex.substring(6, 8), 16);
-  return `rgba(${r}, ${g}, ${b}, ${a})`;
-}
 /** Parse và clamp một giá trị số từ file ASS về phạm vi hợp lệ.
  * @param {boolean} isInteger true nếu cần parse kiểu integer, false nếu cần parse kiểu float.
  * @param {string|number} v Giá trị đầu vào.
@@ -786,7 +768,7 @@ export function parser(doStripTags = false, rawText) {
 					// Đặt biến tạm thời styleValue lấy bằng styleValues[styleIndex] (hoặc trống nếu i vượt quá. Có thể vượt quá à?) 
                     if (styleField.toLowerCase().includes('colour')) {
 						// Nhận diện các styleValue có định dạng màu (tìm theo styleField tương ứng của nó.)
-                        styleValue = convertAegisubColorToCss(styleValue);
+                        styleValue = utils.hexToRgba(styleValue);
 						// Đổi định dạng màu.
                     }
                     style[toCamelCase(styleField,styleField.includes("Font") ? [0, 4] : [0])] = styleValue;

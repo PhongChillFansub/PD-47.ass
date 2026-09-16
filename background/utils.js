@@ -1,4 +1,4 @@
-// v0.1.0 20aug26
+// v0.1.0 16sep26
 "use strict";
 const extensionName = "PD-47.ass";
 const HTML_ENTITIES = {
@@ -77,4 +77,61 @@ export function decodeURISegment(segment) {
  */
 export function encodeURISegment(segment) {
   return encodeURIComponent(decodeURISegment(segment));
+}
+
+/** Chuyển chuỗi màu và alpha Aegisub sang định dạng rgba() dùng cho CSS.
+ * Hỗ trợ các định dạng màu &HAABBGGRR, &HBBGGRR&, #RRGGBB[AA] và alpha &HAA&.
+ * 
+ * Chú ý: nếu đầu vào là alpha, xử lí như màu đỏ (r: alpha, g: 0, b: 0, a: 0). Do đó phải lấy dữ liệu của r thay vì a)
+ * 
+ * Các trường hợp rác trả về [null, null, null, null]
+ * @param {string} raw Chuỗi màu đầu vào.
+ * @returns {Object<{r: number, g: number, b: number, a: number}>} Object đầu ra {r, g, b, a}. Nếu đầu vào ko chứa dữ liệu, đầu ra là null (vd: #RRGGBB -> [r, g, b, null])
+ */
+export function parseAegisubHex(raw) {
+	if (typeof raw !== 'string') return {r: null, g: null, b: null, a: null};
+	const s = String(raw).trim();
+	/** Xử lí trong trường hợp html */
+	const html = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.exec(s);
+	if (html) {
+		const h = html[1];
+		return {
+			r: Number.parseInt(h.slice(0, 2), 16),
+			g: Number.parseInt(h.slice(2, 4), 16),
+			b: Number.parseInt(h.slice(4, 6), 16),
+			a: h.length === 8 ? Number.parseInt(h.slice(6, 8), 16) / 255 : 0,
+		};
+	}
+	const hex = s.replace(/[^0-9a-f]/gi, '');
+	if (hex === '') return {r: null, g: null, b: null, a: null};
+	// Đưa về dạng AABBGGRR. (2 chữ số -> RR (alpha đọc như AA); 6 c.số -> BBGGRR, 8 -> AABBGGRR)
+	const hex8 = hex.padStart(8, '0');
+	const a = (255 - Number.parseInt(hex8.slice(0, 2), 16)) / 255;
+	const b = Number.parseInt(hex8.slice(2, 4), 16);
+	const g = Number.parseInt(hex8.slice(4, 6), 16);
+	const r = Number.parseInt(hex8.slice(6, 8), 16);
+	if ([r,g,b,a].some(v => v !== null && Number.isNaN(v))) return {r: null, g: null, b: null, a: null};
+	return {r, g, b, a};
+}
+/**
+ * Chuyển đổi màu hex Aegisub sang định dạng rgba() cho CSS
+ * @param {string|Object<{r: number, g: number, b: number, a: number}>} raw 
+ * @returns {string|null} Chuỗi rgba(r, g, b, a) hoặc null nếu đầu vào không hợp lệ
+ */
+export function hexToRgba(raw) {
+	if (raw == null || (typeof raw !== 'string' && typeof raw !== 'object')) return null;
+	const {r, g, b, a} = (typeof raw === 'string') ? parseAegisubHex(raw) : raw;
+	if (r == null || g == null || b == null || a == null) return null;
+	return `rgba(${r}, ${g}, ${b}, ${a.toFixed(2)})`;
+}
+/**
+ * Chuyển đổi alpha hex Aegisub sang giá trị alpha cho CSS
+ * @param {string|Object<{r: number, g: number, b: number, a: number}>} raw Ở đây chỉ nhận r.
+ * @returns {number|null} Giá trị alpha (r, thô) hoặc null nếu đầu vào không hợp lệ
+ */
+export function hexToAlpha(raw) {
+	if (raw == null || (typeof raw !== 'string' && typeof raw !== 'object')) return null;
+	const {r, g, b, a} = (typeof raw === 'string') ? parseAegisubHex(raw) : raw;
+	if (r == null) return null;
+	return r;
 }
