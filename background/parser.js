@@ -243,9 +243,8 @@ function cachedGlobalCss(info) {
  *
  * VỎ NGOÀI của một dòng sub, parent của các segmentSub. Chỉ chứa prop mà TOÀN LINE chịu ảnh hưởng:
  * - tag mức dòng: 2.2 (\an, \pos, \move, \org) và 2.1 (\clip, \iclip);
- * - dữ liệu KHÔNG phải tag ở mức dòng: alignment + marginL/R/V của style, WrapStyle của info (globalCss),
- *   borderStyle 3 (border box: nền / padding / bóng của box bao CẢ DÒNG).
- * KHÔNG chứa typography (font / màu chữ / viền chữ) — những thứ đó thuộc segmentSubCss.
+ * - dữ liệu KHÔNG phải tag ở mức dòng: alignment + marginL/R/V của style, WrapStyle của info (globalCss).
+ * KHÔNG chứa typography (font / màu chữ / viền chữ / border box) — những thứ đó thuộc segmentSubCss.
  *
  * Mọi px giữ theo PlayRes; renderer mới scale (videoSize / PlayRes) và xử lí collision.
  * styleParsedToCss chỉ dựng phần suy TỪ STYLE + INFO; các key do tag sinh ra (đánh dấu [tùy chọn])
@@ -266,12 +265,6 @@ function cachedGlobalCss(info) {
  * @property {string} transform-origin gốc quay/neo của dòng — LUÔN emit. Mặc định suy từ \an của style
  *   (map TRANSFORM_ORIGIN_MAP), ghi đè bởi \org (2.2 — nên key này thuộc mức DÒNG, không phải segment).
  *   \fr* (2.3) ở mức segment quay quanh chính gốc này.
- * @property {string} [background-color] [tùy chọn] chỉ khi borderStyle 3 (opaque box): style.outlineColour
- *   là MÀU NỀN của box; \3c (2.3) ghi đè vào đây thay vì vào màu viền chữ. borderStyle 1 → 'transparent'.
- * @property {string} [padding] [tùy chọn] chỉ khi borderStyle 3: padding box CHÍNH LÀ \bord (style.outline),
- *   KHÔNG phải margin (margin là định vị dòng); \bord (2.3) ghi đè.
- * @property {string} [box-shadow] [tùy chọn] chỉ khi borderStyle 3: style.shadow + style.backColour;
- *   \shad (2.3) ghi đè. borderStyle 1 dùng text-shadow ở segmentSub, KHÔNG dùng key này.
  * @property {string} [clip-path] [tùy chọn] chỉ có khi dòng bị \clip / \iclip (2.1); \iclip là phần bù
  *   (dựng bằng fill-rule evenodd hoặc path bao ngoài — chốt khi làm 2.1, ticket #16).
  */
@@ -287,11 +280,14 @@ function cachedGlobalCss(info) {
  * styleParsedToCss dựng bộ GỐC của style; mỗi tag cục bộ chỉ tạo một segment mới ghi đè vài key.
  * Kèm bộ CSS variables giữ SỐ LIỆU THÔ để tag override và renderer đọc lại mà không phải parse ngược CSS.
  *
- * Lưu ý 2 key KHÔNG nằm ở đây dù trông như chuyện của chữ:
- * - transform-origin → lineSubCss (gốc quay đến từ \org, tag 2.2 mức dòng);
- * - border box của borderStyle 3 (background-color / padding / box-shadow) → lineSubCss; khi
- *   borderStyle 3, \3c / \bord / \shad (2.3) ghi thẳng vào lineSub, còn ở đây bị reset
- *   (stroke 0px + transparent, paint-order normal, text-shadow none) để node chữ không dính viền cũ.
+ * Key DUY NHẤT trông như chuyện của chữ nhưng KHÔNG nằm ở đây: transform-origin → lineSubCss
+ * (gốc quay đến từ \org, tag 2.2 mức dòng).
+ *
+ * BORDER BOX (borderStyle 3) nằm Ở ĐÂY, không phải ở lineSub — vì libass dựng box bằng cách thay
+ * outline của TỪNG GLYPH bằng hộp bao rồi hợp lại, nên box thừa hưởng màu/độ dày/cỡ chữ của khúc
+ * chữ tại chỗ đó: \3c, \bord, \fs giữa dòng đều đổi box từ chỗ đó trở đi (một box phẳng mức dòng
+ * sẽ sai cả 3 ca). Box "một khối cho cả event" là BorderStyle=4 — extension riêng của libass,
+ * VSFilter render thành BorderStyle=1, KHÔNG phải thứ đang làm ở đây.
  *
  * @property {string} font-family '"<fontName>", sans-serif' — từ style.fontName; \fn (2.4.2) ghi đè
  *   (\fn rỗng = về font của styleRef).
@@ -320,6 +316,29 @@ function cachedGlobalCss(info) {
  *   \shad (2.3, x = y), \xshad/\yshad (2.3, tách chiều CHÍNH XÁC), màu theo \4c/\4a. 'none' khi borderStyle 3.
  * @property {string} [filter] [tùy chọn] 'blur(Npx)' — chỉ khi có \be / \blur (2.3, cùng họ, last-wins chéo);
  *   style gốc không sinh key này.
+ * @property {string} [background-color] [tùy chọn] chỉ khi borderStyle 3 (opaque box): style.outlineColour
+ *   là MÀU NỀN của box (không phải màu viền chữ); \3c/\3a (2.3) ghi đè. borderStyle 1 → không emit.
+ * @property {string} [padding] [tùy chọn] chỉ khi borderStyle 3: độ nở của box = \bord (style.outline),
+ *   KHÔNG phải margin (margin là định vị dòng, thuộc lineSub); \bord (2.3) ghi đè.
+ *   NGUYÊN LÍ BÙ MARGIN ÂM (chốt 26sep26) — libass nở hộp bao của từng glyph thêm \bord rồi HỢP
+ *   (union) các hộp: box to ra nhưng VỊ TRÍ CHỮ KHÔNG ĐỔI. CSS thì ngược: padding của một inline box
+ *   CHIẾM CHỖ trong luồng, nên mỗi mối nối giữa 2 segment chữ sẽ bị nới thêm 2×\bord. Cách bù:
+ *     padding: <bord>px; margin-left: -<bord>px; margin-right: -<bord>px;
+ *   → luồng chữ trở lại đúng advance width gốc (padding cộng vào, margin âm trừ đi), trong khi nền
+ *   vẫn được VẼ đủ phần nở ra; vùng nở của 2 segment kề nhau đè lên nhau đúng bằng \bord nên dải box
+ *   liền mạch, không hở khe — đúng hiệu ứng union của libass.
+ *   Chiều DỌC không cần bù: padding dọc của inline box không làm cao line box (chiều cao dòng do
+ *   line-height quyết định), nền vẫn tràn ra ngoài — chỉ cần lineSub đừng cắt (overflow visible).
+ *   SAI SỐ ĐÃ BIẾT: nếu màu box trong suốt một phần (alpha < 1) thì dải chồng rộng \bord ở mỗi mối
+ *   nối sẽ ĐẬM GẤP ĐÔI (libass hợp hình rồi mới tô, nên không bị). Giảm thiểu: renderer GỘP các
+ *   segment liền kề có cùng màu nền + cùng \bord vào MỘT node nền — khi đó chỉ còn mối nối ở chỗ
+ *   thật sự đổi \3c/\bord, là chỗ màu vốn đã khác nên khó lộ.
+ * @property {string} [margin-left] [tùy chọn] chỉ khi borderStyle 3: '-<bord>px' — phần bù cho padding
+ *   (xem NGUYÊN LÍ BÙ MARGIN ÂM ở trên). KHÔNG liên quan marginL/R/V của style (cái đó là định vị dòng).
+ * @property {string} [margin-right] [tùy chọn] chỉ khi borderStyle 3: '-<bord>px' — phần bù cho padding.
+ * @property {string} [box-shadow] [tùy chọn] chỉ khi borderStyle 3: style.shadow + style.backColour
+ *   ('<x>px <y>px <backColour>'); \shad/\xshad/\yshad + \4c/\4a (2.3) ghi đè.
+ *   borderStyle 1 dùng text-shadow (bóng bám chữ), KHÔNG dùng key này.
  * @property {string} --primary-color số liệu thô màu chính (\1c/\c, và màu chữ CHƯA hát của karaoke).
  * @property {string} --secondary-color số liệu thô màu phụ (\2c) — màu chữ ĐÃ hát của karaoke.
  * @property {string} --outline-color số liệu thô màu viền (\3c).
