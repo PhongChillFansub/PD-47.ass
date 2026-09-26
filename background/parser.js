@@ -240,15 +240,104 @@ function cachedGlobalCss(info) {
 }
 /** Định nghĩa/chú thích lineSubCss
  * @typedef {object} parsedDataFormat.lineSubCss các thuộc tính CSS cho toàn line (tương đương tag 2.2, 2.1)
- * 
+ *
+ * VỎ NGOÀI của một dòng sub, parent của các segmentSub. Chỉ chứa prop mà TOÀN LINE chịu ảnh hưởng:
+ * - tag mức dòng: 2.2 (\an, \pos, \move, \org) và 2.1 (\clip, \iclip);
+ * - dữ liệu KHÔNG phải tag ở mức dòng: alignment + marginL/R/V của style, WrapStyle của info (globalCss).
+ * KHÔNG chứa typography (font / màu / viền / box) — những thứ đó thuộc segmentSubCss.
+ *
+ * Mọi px giữ theo PlayRes; renderer mới scale (videoSize / PlayRes) và xử lí collision.
+ * styleParsedToCss chỉ dựng phần suy TỪ STYLE + INFO; các key do tag sinh ra (đánh dấu [tùy chọn])
+ * do tagProcess/classify ghi đè lên cùng bộ key này, renderer Object.assign là ra kết quả cuối.
+ *
+ * @property {string} display 'inline-block' — khung dòng ôm sát chữ, không chiếm cả hàng ngang.
+ * @property {string} position 'absolute' — chỗ dựa để renderer set left/top/right/bottom theo
+ *   alignment + marginL/R/V, ghi đè bởi \an / \pos / \move (2.2). Parser KHÔNG ghi sẵn tọa độ
+ *   (tọa độ là việc của renderer: cần videoSize thật + collision).
+ * @property {string} text-align 'left' | 'center' | 'right' — suy từ alignment (hAlign); \an (2.2) ghi đè.
+ * @property {string} white-space 'pre' (WrapStyle 2) | 'pre-wrap' — globalCss, theo info.WrapStyle.
+ * @property {string} word-break 'keep-all' — globalCss (hằng, không tag nào đụng).
+ * @property {string} overflow-wrap 'break-word' — globalCss (hằng, không tag nào đụng).
+ * @property {string} text-wrap 'balance' (WrapStyle 3) | 'wrap' (1) | 'pretty' (0, 2) — globalCss theo
+ *   info.WrapStyle. Lưu ý: \q là tag 2.4.2 (mức segment) nên KHÔNG ghi đè key này; nó đi qua
+ *   '--wrap-style' của segmentSub, renderer tự quy đổi.
+ * @property {string} max-width '100%' — globalCss, chặn dòng tràn ra ngoài khung video.
+ * @property {string} [transform-origin] [tùy chọn] gốc quay/neo Ở MỨC DÒNG khi có \org (2.2).
+ *   Không có \org thì không emit — gốc quay mặc định nằm ở segmentSub (theo \an).
+ * @property {string} [clip-path] [tùy chọn] chỉ có khi dòng bị \clip / \iclip (2.1); \iclip là phần bù
+ *   (dựng bằng fill-rule evenodd hoặc path bao ngoài — chốt khi làm 2.1, ticket #16).
  */
-/** Định nghĩa/chú thích lineSubCss
+/** Định nghĩa/chú thích segmentSubCss
  * @typedef {object} parsedDataFormat.segmentSubCss các thuộc tính CSS cho segment (tương đương tag 2.4, 2.3)
- * 
+ *
+ * RUỘT CHỮ của một segment — một khúc chữ bên trong lineSub, là đơn vị nhỏ nhất mà tag CỤC BỘ
+ * tác động: 2.4 (layout cục bộ: \fs, \fsp, \fsc*, \b, \i, \fn, \r, \q, \-) và 2.3 (trang trí:
+ * màu/alpha, \bord, \shad, \be, \blur, \fa*, \fr*, karaoke).
+ * (Từ "segment" ở đây là đơn vị CSS của renderer, KHÔNG liên quan tới tên cũ "segment → base"
+ * của tokenizer — hai khái niệm khác nhau, đừng gộp.)
+ *
+ * styleParsedToCss dựng bộ GỐC của style; mỗi tag cục bộ chỉ tạo một segment mới ghi đè vài key.
+ * Kèm bộ CSS variables giữ SỐ LIỆU THÔ để tag override và renderer đọc lại mà không phải parse ngược CSS.
+ *
+ * @property {string} font-family '"<fontName>", sans-serif' — từ style.fontName; \fn (2.4.2) ghi đè
+ *   (\fn rỗng = về font của styleRef).
+ * @property {string} font-size px theo PlayRes — style.fontSize; \fs (2.4.1, nội suy được trong \t).
+ * @property {string} line-height px — style.fontSize (19sep26: chuyển XUỐNG mức segment, trước ở container;
+ *   đổi theo \fs cùng lúc với font-size).
+ * @property {string} color màu chữ chính — style.primaryColour; \1c/\c (2.3), alpha từ \1a/\alpha (2.3).
+ * @property {string} font-weight '700' | '400' — style.bold; \b (2.4.2).
+ * @property {string} font-style 'italic' | 'normal' — style.italic; \i (2.4.2).
+ * @property {string} text-decoration 'underline' | 'line-through' | cả hai | 'none' — style.underline/strikeOut;
+ *   \u, \s (2.3).
+ * @property {string} letter-spacing px — style.spacing; \fsp (2.4.1, nội suy được).
+ * @property {string} [transform] CHỈ emit khi khác identity (R3): chuỗi rotate(-angle) ĐỨNG TRƯỚC
+ *   scaleX/scaleY (R1 — CSS áp phải→trái, khớp VSFilter; \frz dương của ASS quay ngược chiều kim
+ *   đồng hồ nên phải đổi dấu). Nguồn: style.angle/scaleX/scaleY; \frx/\fry/\frz + \fax/\fay (2.3)
+ *   và \fscx/\fscy/\fsc (2.4.1). Gộp chuỗi transform cuối cùng là việc của RENDERER (chốt 03sep26),
+ *   tag chỉ đẩy số liệu qua --angle-x/y/z và --skew-x/y.
+ * @property {string} transform-origin gốc quay theo \an của style (luôn emit, vô hại); \org (2.2) ở mức
+ *   dòng và \fr* (2.3) ở mức segment đọc lại qua đây.
+ * @property {string} paint-order 'stroke fill markers' (borderStyle 1) | 'normal' (borderStyle 3) —
+ *   để stroke không che fill khi dùng -webkit-text-stroke (Chromium 123+ mới áp cho HTML text).
+ * @property {string} -webkit-text-stroke-width px — borderStyle 1: style.outline × 2 (ADR 0007 — stroke
+ *   vẽ cân giữa đường bao glyph, nhân đôi + paint-order để phần ngoài đúng \bord px như Aegisub);
+ *   borderStyle 3: '0px'. Tag: \bord (2.3); \xbord/\ybord → XẤP XỈ 2×max(x,y) (CSS không tách chiều).
+ * @property {string} -webkit-text-stroke-color màu viền — style.outlineColour; \3c/\3a (2.3);
+ *   'transparent' khi borderStyle 3.
+ * @property {string} text-shadow '<x>px <y>px <backColour>' | 'none' — style.shadow + style.backColour;
+ *   \shad (2.3, x = y), \xshad/\yshad (2.3, tách chiều CHÍNH XÁC), màu theo \4c/\4a. 'none' khi borderStyle 3.
+ * @property {string} [filter] [tùy chọn] 'blur(Npx)' — chỉ khi có \be / \blur (2.3, cùng họ, last-wins chéo);
+ *   style gốc không sinh key này.
+ * @property {string} [background-color] [tùy chọn] chỉ khi borderStyle 3 (opaque box): style.outlineColour
+ *   là MÀU NỀN box; \3c (2.3) ghi đè.
+ * @property {string} [padding] [tùy chọn] chỉ khi borderStyle 3: padding box CHÍNH LÀ \bord (style.outline),
+ *   KHÔNG phải margin (margin là định vị dòng, thuộc lineSub); \bord (2.3) ghi đè.
+ * @property {string} [box-shadow] [tùy chọn] chỉ khi borderStyle 3: style.shadow + style.backColour;
+ *   \shad (2.3) ghi đè.
+ * @property {string} --primary-color số liệu thô màu chính (\1c/\c, và màu chữ CHƯA hát của karaoke).
+ * @property {string} --secondary-color số liệu thô màu phụ (\2c) — màu chữ ĐÃ hát của karaoke.
+ * @property {string} --outline-color số liệu thô màu viền (\3c).
+ * @property {string} --back-color số liệu thô màu bóng/nền box (\4c).
+ * @property {string} --outline-width px GỐC của \bord (CHƯA ×2 — số thô cho renderer/tag override).
+ * @property {string} --shadow-depth px độ sâu bóng = max(|x|, |y|) của \shad / \xshad / \yshad.
+ * @property {string} --font-size px GỐC của \fs (số thô để đo chữ / quy đổi tương đối).
+ * @property {string} [--angle-x] [tùy chọn] deg RAW của \frx (2.3) — renderer đổi dấu khi gộp transform.
+ * @property {string} [--angle-y] [tùy chọn] deg RAW của \fry (2.3).
+ * @property {string} [--angle-z] [tùy chọn] deg RAW của \frz / \fr (2.3).
+ * @property {string} [--skew-x] [tùy chọn] deg đã NẤU SẴN = atan(f) của \fax (2.3).
+ * @property {string} [--skew-y] [tùy chọn] deg đã NẤU SẴN = atan(f) của \fay (2.3).
+ * @property {string} [--inline-fx] [tùy chọn] tên hiệu ứng inline của \- (2.4.2) — parser không diễn giải.
+ * @property {string} [--base-style-name] [tùy chọn] tên style để reset của \r (2.4.2); rỗng = style của dòng.
+ * @property {number} [--wrap-style] [tùy chọn] số WrapStyle override của \q (2.4.2) — renderer tự quy đổi
+ *   sang white-space/text-wrap của lineSub.
  */
-/** Định nghĩa/chú thích lineSubCss
+/** Định nghĩa/chú thích dataCss
  * @typedef {object} parsedDataFormat.dataCss các biến dữ liệu chung
- * 
+ *
+ * CHƯA CHỐT (19sep26) — cố ý để trống. Đây là chỗ chứa SỐ LIỆU (không sinh node, không phải CSS)
+ * cho renderer dùng: dữ liệu mức LINE lẫn mức SEGMENT đều nằm chung ở đây.
+ * Chốt tới đâu thì bổ sung @property tới đó; đừng suy diễn từ `data` của hàm styleParsedToCss cũ
+ * ({ ...style, isBox, hAlign, transformOrigin, styleIndex }) — bộ đó thuộc cấu trúc cũ container/text/data.
  */
 /** [Manual edit] Hàm chuyển đỏi style đã chuẩn hóa thành object CSS (lineSub, segmentSub, data)
  * Cấu trúc: lineSub là parent cho các segmentSub; data lưu dữ liệu (cả line và segment để renderer xử lí)
