@@ -1,4 +1,4 @@
-// v0.1.0 16sep26
+// v0.1.0 19sep26
 "use strict";
 const extensionName = "PD-47.ass";
 const HTML_ENTITIES = {
@@ -113,6 +113,7 @@ export function parseAegisubHex(raw) {
 	if ([r,g,b,a].some(v => v !== null && Number.isNaN(v))) return {r: null, g: null, b: null, a: null};
 	return {r, g, b, a};
 }
+
 /**
  * Chuyển đổi màu hex Aegisub sang định dạng rgba() cho CSS
  * @param {string|Object<{r: number, g: number, b: number, a: number}>} raw 
@@ -124,6 +125,7 @@ export function hexToRgba(raw) {
 	if (r == null || g == null || b == null || a == null) return null;
 	return `rgba(${r}, ${g}, ${b}, ${a.toFixed(2)})`;
 }
+
 /**
  * Chuyển đổi alpha hex Aegisub sang giá trị alpha cho CSS
  * @param {string|Object<{r: number, g: number, b: number, a: number}>} raw Ở đây chỉ nhận r.

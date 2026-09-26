@@ -1,4 +1,4 @@
-// v0.1.0 16sep26
+// v0.1.0 19sep26
 // beta mode (đã viết xong, sửa lỗi khi chạy)
 // Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
@@ -188,7 +188,7 @@ function validateAndNormalizeStyle(style) {
  */
 function processLineText(doStripTags, text) {
 	const tokens = tokenizeLineText(text ?? '');
-	if (!doStripTags) return { base: baseFromTokens(tokens) }; // falsy → xử lí tất cả
+	if (!doStripTags) return baseFromTokens(tokens); // falsy → xử lí tất cả
 	// truthy → strip: nối text token + marker nguyên văn, bỏ mọi tag token.
 	let stripped = '';
 	for (const tok of tokens) {
@@ -196,7 +196,7 @@ function processLineText(doStripTags, text) {
 		if (tok.startsWith('{') && tok.endsWith('}')) continue; // tag token → xóa
 		stripped += tok; // text token (kể cả '{' không đóng, \{ \})
 	}
-	return { base: stripped === '' ? [] : [{ tags: [], text: stripped }] };
+	return [{ tags: [], text: stripped }];
 }
 /** [arena.ai] globalCss làm CHUẨN, suy từ info (đã chuẩn hóa).
  * Bộ props dùng chung cho MỌI dòng của file sub. Parser nhúng thẳng bộ này vào container
@@ -238,8 +238,30 @@ function cachedGlobalCss(info) {
 	}
 	return cached;
 }
-/** [arena.ai] Chuyển đổi style đã chuẩn hóa thành object CSS.
- * 29aug26 — bước 3: phân tích kĩ container / text / data
+/** Định nghĩa/chú thích lineSubCss
+ * @typedef {object} parsedDataFormat.lineSubCss các thuộc tính CSS cho toàn line (tương đương tag 2.2, 2.1)
+ * 
+ */
+/** Định nghĩa/chú thích lineSubCss
+ * @typedef {object} parsedDataFormat.segmentSubCss các thuộc tính CSS cho segment (tương đương tag 2.4, 2.3)
+ * 
+ */
+/** Định nghĩa/chú thích lineSubCss
+ * @typedef {object} parsedDataFormat.dataCss các biến dữ liệu chung
+ * 
+ */
+/** [Manual edit] Hàm chuyển đỏi style đã chuẩn hóa thành object CSS (lineSub, segmentSub, data)
+ * Cấu trúc: lineSub là parent cho các segmentSub; data lưu dữ liệu (cả line và segment để renderer xử lí)
+ * 
+ * - Ghi chú: parser chỉ dựa trên PlayRes, renderer chỉ xử lí scale và collision, 
+ * tất cả dữ liệu khác phải xử lí trước trong parser/tagProcess.
+ * 
+ * 
+ */
+
+
+
+/** [arena.ai] to-do: sửa hàm này. Chuyển đổi style đã chuẩn hóa thành object CSS.
  * 31aug26 — Chú ý 2 pipeline: container chứa sẵn globalCss (chuẩn); delta theo mức node
  *           {container, text, data} cho classify (bước 4-7) — xem typedef
  *           parsedDataFormat.baseItemDelta bên dưới baseFromTokens.
@@ -313,7 +335,7 @@ function styleParsedToCss (style, info = {}, styleIndex = -1) {
 		'display': 'inline-block',
 		'position': 'absolute', // renderer sẽ set left/top/right/bottom theo an + margin + pos/move
 		'text-align': hAlign,
-		'line-height': `${style.fontSize}px`,
+		'line-height': `${style.fontSize}px`, // to-do: line-height theo text/segment, ko phải container/line
 		...globalCss, // globalCssFromInfo(info): chuẩn wrap/khung dòng, renderer không cần merge riêng
 		...(isBox ? {
 			// borderStyle 3: opaque box — theo spec Aegisub, outlineColour là màu nền box,
@@ -852,7 +874,7 @@ export function parser(doStripTags = false, rawText) {
 				parsedData._lastRawDialogue = orgline; // Lưu tham chiếu dòng dialogue mới nhất
 				parsedData.events.push(orgline);
 				// base (mục base tag-text) của dòng ghi vào lineCss (cùng chỉ số với events), KHÔNG thay đổi orgline.
-				// 03sep26: qua classify() → lineCss[i] = { base, collision, clip } — cần styleRef của dòng
+				// qua classify() → lineCss[i] = { base, collision, clip } — cần styleRef của dòng
 				// (style đã chuẩn hóa, lookup theo orgline.style) để \r biết reset về style nào.
 				parsedData.lineCss.push(
 					classify(processLineText(doStripTags, orgline.text), styleForLine(orgline, parsedData))

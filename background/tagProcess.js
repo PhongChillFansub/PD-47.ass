@@ -1,4 +1,4 @@
-/** v0.1.0 16sep26
+/** v0.1.0 20sep26
  * alpha mode
  * Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] ĐẦY ĐỦ
  * { base, collision, clip } theo struct đích (mục 3 prompt 03sep26).
@@ -28,6 +28,7 @@
  * Dữ liệu cần của style dòng (styleRef) do parser() truyền vào qua classify().
  * File này CHỈ export classify — mọi hàm nhóm private (chốt 09sep26; tests đi qua classify).
  */
+
 /** Định nghĩa/chú thích anim của 1 mục base: metadata nội suy \t, lưu MẢNG TRỰC TIẾP
  * (không bọc { t: [...] } — chốt 09sep26; renderer đọc item.anim[i].t1...).
  * Karaoke KHÔNG còn nằm ở đây — 2.4 không xử lí karaoke (về 2.3, xem typedef lineCssEntry).
@@ -36,11 +37,8 @@
  * - t1/t2: ms, tương đối đầu dòng (Aegisub: \t dùng ms). t2 = null khi file không ghi t2
  *   (transform chạy tới HẾT dòng — renderer lấy duration dòng từ events để resolve).
  * - easing: số accel THÔ (default 1 = linear; >1 nhanh dần, <1 chậm dần) — renderer tự map
- *   sang hàm easing (linear/parabola/cubic...); giữ số thô để không mất độ chính xác.
- * - target: tag nội suy CSS-cooked — tag 2.4.1 (\fs/\fsp/\fsc[x/y]) + tag 2.3 (màu/bord/shad/
- *   be/blur/fa/fr — ĐÃ map 11sep26). KHÔNG chứa \pos/\move/\org/\an (first-win 2.2) và KHÔNG có
- *   tag 2.4.2 (\b/\i/\fn/\r/\q/\- — KHÔNG nội suy vào target; 11sep26: apply-now, áp ngay vào delta
- *   của segment ngoài \t như tag ngoài \t thông thường). KHÔNG \k* (bỏ im lặng — SAI SỐ #17), KHÔNG \kt.
+ *   sang hàm easing (linear/parabola/cubic...); parser/tagProcess giữ số thô để không mất độ chính xác.
+ * - target: tag 2.4.1 và 2.3 (trừ \k*), KHÔNG chứa tag 2.4.2, 2.2, 2.1.
  */
 /** Định nghĩa/chú thích lineCss[i] sau classify (struct đích — mục 3 prompt 03sep26)
  * @typedef {object} parsedDataFormat.lineCssEntry
@@ -231,16 +229,6 @@ function splitTransformParts(tag) {
 	}
 	return { t1, t2, easing, modsText };
 }
-// Cấu trúc mới: loại bỏ hàm này, và viết 1 hàm mới (có thể sau 2.1) để gộp style thành CSS-cooked.
-// /** [arena.ai] Gộp scaleX/scaleY thành chuỗi 'transform' dạng CSS để tối ưu riêng.
-//  * KHÔNG lọc identity 100: scaleX(1)/scaleY(1) vẫn emit (chốt 09sep26 — renderer áp trực tiếp,
-//  * không tốn logic lọc ở parser). */
-// function finalizeSmartScale(textCss, scaleX, scaleY) {
-// 	const parts = [];
-// 	if (scaleX !== undefined) parts.push(`scaleX(${scaleX / 100})`);
-// 	if (scaleY !== undefined) parts.push(`scaleY(${scaleY / 100})`);
-// 	if (parts.length) textCss['transform'] = parts.join(' ');
-// }
 /** [Manual edit] Hàm áp dụng các tag bên trong tag \t — metadata nội suy (CHỈ tag 2.4.1).
  * @param {string} tag Tag raw, bắt đầu bằng '\t' (vd "\t(0,500,\fs30)").
  * @param {Object} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
@@ -269,13 +257,42 @@ function parseTransformTag(tag, styleRef, nonTransformableContext) {
 	if (Object.keys(context.textCss).length === 0) return null;
 	return { t1: parts.t1, t2: parts.t2, easing: parts.easing, target: context.textCss };
 }
-/** [Manual edit] Hàm xử lí các tag nhóm 2.4 — Layout Local (2.4.1 + 2.4.2 tĩnh; \t → anim).
- * chú ý: karaoke \k/\kf/\ko KHÔNG xử lí ở 2.4 — thuộc 2.3 (classifyDecoration, đã làm 11sep26).
+/** Định nghĩa/chú thích object mục base sau khi tách
+ * @typedef {object} parsedDataFormat.baseItem Đơn vị nhỏ nhất trong base: 1 cụm tag + 1 đoạn text.
+ * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
+ * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm tầng cuối).
+ *   (classify KHÔNG xóa tags khi tiêu thụ: nhóm sau 2.3/2.2/2.1 + renderer/debug đọc lại được.)
+ * @property {parsedDataFormat.baseItemDelta} [delta] classify (tagProcess.js) sinh: mức text
+ *   (layout tĩnh \fs\fsc\fsp + \fn\b\i + \r → '--base-style-name', \q → '--wrap-style') /
+ *   data (marker \h\N\n; karaoke CHƯA — về 2.3, tags giữ raw). text không tag thì KHÔNG có delta/anim.
+ * @property {parsedDataFormat.baseItemAnim} [anim] classify sinh metadata nội suy \t:
+ *   MẢNG trực tiếp, mỗi \t → { t1, t2, easing, target } (không bọc { t: [...] }). Karaoke không anim.k.
+ */
+/** Định nghĩa/chú thích delta theo mức node của mục base
+ * ĐỊNH HƯỚNG cho classify (bước 4-7): parser xử lí đến base thì mỗi mục base mang
+ * delta tách theo 3 mức giống styleParsedToCss (container / text / data).
+ * Renderer chuyển mục base thành node container-text TÙY MỨC ĐỘ DELTA:
+ * - delta có container → phải sinh CẶP node container+text MỚI (delta chạm vỏ dòng).
+ * - delta chỉ có text  → chỉ sinh node text bên trong container hiện có (đổi ruột chữ).
+ * - delta chỉ có data  → không sinh node, chỉ là số liệu cho đo chữ / collision.
+ * @typedef {object} parsedDataFormat.baseItemDelta
+ * @property {Object} [container] Tag chạm vỏ dòng (vd \bord/\4c khi borderStyle==3, \clip) → renderer tách container mới.
+ * @property {Object} [text] Tag đổi ruột chữ (\fs, \c, \b, \fr...) → renderer chỉ thêm node text.
+ * @property {Object} [data] Chỉ số liệu đo/collision (không có CSS tương ứng) → không sinh node.
+ */
+/** Field màu của styleRef theo kênh ASS (1=primary, 2=secondary, 3=outline, 4=back). */
+const STYLE_COLOR_FIELD = Object.freeze({ 1: 'primaryColour', 2: 'secondaryColour', 3: 'outlineColour', 4: 'backColour' });
+/** [arena.ai] Chuyển đổi hệ số skew ASS (\\fax/\\fay: x' = x + f·y) → góc deg cho CSS skewX/Y: θ = atan(f). */
+function skewFactorToDeg(f) { return Number((Math.atan(f) * 180 / Math.PI).toFixed(4)); }
+
+
+// to-do: sửa lại hàm classifyLayoutLocal này -> classifyBase (chạy for item + for tag cho cả 4 phần 2.x trong này)
+/** [Manual edit] Hàm thực hiện vòng lặp for..do quét các tag.
  * @param {Array<{tags: string[], text: string}>} base Mảng base item (đầu ra của processLineText).
  * @param {Object} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
- * @returns {Array<{tags: string[], text: string, delta?: Object, anim?: Array<Object>}>} base đã classify.
+ * @returns {Array<{tags: string[], text: string, delta?: parsedDataFormat.baseItemDelta, anim?: parsedDataFormat.baseItemAnim}>} base đã classify.
  */
-function classifyLayoutLocal(base, styleRef) {
+function classifyBase(base, styleRef) {
 	if (!Array.isArray(base)) return base;
 	for (const item of base) {
 		// item là mục base của line, mỗi item = { tags: string[], text: string } (đầu ra của processLineText).
@@ -283,14 +300,19 @@ function classifyLayoutLocal(base, styleRef) {
 		const tags = item.tags;
 		// Tự động bỏ qua nếu line ko có tag nào (tránh tạo delta rỗng).
 		if (!Array.isArray(tags) || tags.length === 0) continue;
-		const textCss = {}; // Phần ghi vào item.delta.text.
+		// Khởi tạo context cục bộ cho item trong base.
+		const tempAnim = []; // Phần ghi vào item.anim dự kiến.
+
+
 		const data = {}; // Phần ghi vào item.delta.data.
-		const animT = []; // Phần ghi vào item.anim.
-		const context = { textCss, scaleX: undefined, scaleY: undefined, styleRef };
+		const context = { scaleX: undefined, scaleY: undefined, styleRef };
+
+
+
 		for (const tag of tags) {
 			if (tag.startsWith('\\t')) {
 				const entry = parseTransformTag(tag, styleRef, context);
-				if (entry) animT.push(entry);
+				if (entry) tempAnim.push(entry);
 				continue;
 			}
 			// Nếu là tag \t.
@@ -302,70 +324,27 @@ function classifyLayoutLocal(base, styleRef) {
 			applyLayoutLocalTransformable(tag, context); // 2.4.1
 			applyLayoutLocalNonTransformable(tag, context); // 2.4.2
 		}
-		// finalizeSmartScale(context.textCss, context.scaleX, context.scaleY);
 		if (Object.keys(context.textCss).length > 0 || Object.keys(data).length > 0) {
 			const delta = {}; // Phần ghi vào item.delta.
 			if (Object.keys(context.textCss).length > 0) delta.text = context.textCss;
 			if (Object.keys(data).length > 0) delta.data = data;
 			item.delta = delta;
 		}
-		if (animT.length > 0) item.anim = animT;
+
+		if (tempAnim.length > 0) item.anim = tempAnim;
 	}
 	return base;
 }
-/** Field màu của styleRef theo kênh ASS (1=primary, 2=secondary, 3=outline, 4=back). */
-const STYLE_COLOR_FIELD = Object.freeze({ 1: 'primaryColour', 2: 'secondaryColour', 3: 'outlineColour', 4: 'backColour' });
-
-
-
-
-
 
 
 
 // to-do: sửa đoạn này
 
-// /** [arena.ai] Parse màu inline của tag 2.3 (&HBBGGRR& hoặc &HAABBGGRR&) → { r, g, b, alpha }
-//  * (alpha: 0..1 tính ngược Aegisub; NULL khi hex ≤ 6 chữ số = tag không kèm byte alpha → alpha
-//  * kế thừa trạng thái đang theo dõi / alpha của style lúc emit). Null khi không có hex.
-//  * Khớp convertAegisubColorToCss của parser.js về thứ tự byte AABBGGRR.
-//  * Nhân bản local vì tagProcess.js KHÔNG import parser.js (tránh vòng tròn — precedent splitOverrideTagsTransform). */
-// function parseTagColor(raw) {
-// 	// Chỉ GIỮ ký tự hex — tag tới đây có thể còn dạng 'HBBGGRR&' (đã cắt '&'); lọc sạch là chắc ăn nhất.
-// 	const hex0 = String(raw).replace(/[^0-9a-f]/gi, '');
-// 	if (hex0 === '') return null;
-// 	const hasAlphaByte = hex0.length > 6; // >6 chữ số = có byte AA (AABBGGRR)
-// 	const hex = hex0.padStart(8, '0');
-// 	const alpha = hasAlphaByte ? (255 - Number.parseInt(hex.slice(0, 2), 16)) / 255 : null;
-// 	const b = Number.parseInt(hex.slice(2, 4), 16);
-// 	const g = Number.parseInt(hex.slice(4, 6), 16);
-// 	const r = Number.parseInt(hex.slice(6, 8), 16);
-// 	if ([alpha, b, g, r].some(v => v !== null && Number.isNaN(v))) return null;
-// 	return { r, g, b, alpha };
-// }
-// /** [arena.ai] Parse alpha của tag 2.3 (&HAA&) → 0..1 (Aegisub tính ngược), null khi vô giá trị. */
-// function parseTagAlpha(raw) {
-// 	const hex = String(raw).replace(/[^0-9a-f]/gi, '');
-// 	if (hex === '') return null;
-// 	const aa = Number.parseInt(hex.padStart(2, '0').slice(0, 2), 16);
-// 	if (Number.isNaN(aa)) return null;
-// 	return (255 - aa) / 255;
-// }
-// /** [arena.ai] Nấu { r, g, b, a } → chuỗi rgba() đúng format convertAegisubColorToCss (space sau dấu phẩy, a 2 số lẻ). */
-// function cookRgba({ r, g, b, a }) {
-// 	return `rgba(${r}, ${g}, ${b}, ${a.toFixed(2)})`;
-// }
-/** [arena.ai] Parse ngược chuỗi rgba() đã nấu (màu style của styleRef) → { r, g, b, a }, null khi không khớp. */
-function parseCssRgba(css) {
-	const m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/.exec(String(css ?? ''));
-	if (!m) return null;
-	return { r: Number(m[1]), g: Number(m[2]), b: Number(m[3]), a: m[4] != null ? Number(m[4]) : 1 };
-}
 
-/** [arena.ai] Nấu hệ số skew ASS (\\fax/\\fay: x' = x + f·y) → góc deg cho CSS skewX/Y: θ = atan(f). */
-function skewFactorToDeg(f) {
-	return Number((Math.atan(f) * 180 / Math.PI).toFixed(4));
-}
+
+
+
+
 /** [arena.ai] Trạng thái decoration tạm của 1 item — caller tạo MỚI mỗi item (last-wins = ghi đè field). */
 function newDecorationState() {
 	return {
@@ -384,35 +363,35 @@ function newDecorationState() {
  * @param {Object} st Trạng thái decoration tạm của item (caller tạo mới mỗi item).
  * @returns {boolean} true = đã tiêu thụ tag; false = không thuộc nhóm 2.3.
  */
-function applyDecorationTag(tag, st) {
+function applyDecorationTag(tag, state) {
 	// \\1c..\\4c + alias \\c (= \\1c) — màu kênh 1..4 (Aegisub: last-wins mỗi kênh).
 	let m = /^\\([1-4])c&(.*)$/.exec(tag);
 	if (!m && tag.startsWith('\\c&')) m = [tag, '1', tag.slice(3)];
 	if (m) {
-		const c = parseTagColor(m[2]);
-		if (c) st.colors[Number(m[1])] = c;
+		const c = utils.parseAegisubHex(m[2]);
+		if (c) state.colors[Number(m[1])] = c;
 		return true;
 	}
 	// \\blur<r> / \\be<n> — CÙNG họ blur, last-wins CHÉO giữa hai tag (\\be coi như passes ≈ px, xấp xỉ ADR 0004).
 	if (tag.startsWith('\\blur')) {
 		const v = Number.parseFloat(tag.slice(5));
-		if (!Number.isNaN(v)) st.blur = v;
+		if (!Number.isNaN(v)) state.blur = v;
 		return true;
 	}
 	if (tag.startsWith('\\be')) {
 		const v = Number.parseFloat(tag.slice(3));
-		if (!Number.isNaN(v)) st.blur = v;
+		if (!Number.isNaN(v)) state.blur = v;
 		return true;
 	}
 	// \\fax/\\fay — hệ số skew (\\faxy không tồn tại trong ASS).
 	if (tag.startsWith('\\fax')) {
 		const v = Number.parseFloat(tag.slice(4));
-		if (!Number.isNaN(v)) st.skew.x = v;
+		if (!Number.isNaN(v)) state.skew.x = v;
 		return true;
 	}
 	if (tag.startsWith('\\fay')) {
 		const v = Number.parseFloat(tag.slice(4));
-		if (!Number.isNaN(v)) st.skew.y = v;
+		if (!Number.isNaN(v)) state.skew.y = v;
 		return true;
 	}
 	// \\frx/\\fry/\\frz + alias \\fr (= \\frz) — góc xoay, giữ RAW deg (renderer đổi dấu khi gộp).
@@ -420,51 +399,51 @@ function applyDecorationTag(tag, st) {
 	if (frM || tag.startsWith('\\fr')) {
 		const axis = frM ? frM[1] : 'z';
 		const v = Number.parseFloat(tag.slice(frM ? 4 : 3));
-		if (!Number.isNaN(v)) st.angle[axis] = v;
+		if (!Number.isNaN(v)) state.angle[axis] = v;
 		return true;
 	}
 	// \\bord<w> cả hai chiều; \\xbord/\\ybord từng chiều (Aegisub: last-wins mỗi chiều).
 	if (tag.startsWith('\\bord')) {
 		const v = Number.parseFloat(tag.slice(5));
-		if (!Number.isNaN(v)) st.bord.w = v;
+		if (!Number.isNaN(v)) state.bord.w = v;
 		return true;
 	}
 	if (tag.startsWith('\\xbord')) {
 		const v = Number.parseFloat(tag.slice(6));
-		if (!Number.isNaN(v)) st.bord.x = v;
+		if (!Number.isNaN(v)) state.bord.x = v;
 		return true;
 	}
 	if (tag.startsWith('\\ybord')) {
 		const v = Number.parseFloat(tag.slice(6));
-		if (!Number.isNaN(v)) st.bord.y = v;
+		if (!Number.isNaN(v)) state.bord.y = v;
 		return true;
 	}
 	// \\shad<d> cả hai chiều; \\xshad/\\yshad từng chiều (nhận giá trị âm — bóng hất ngược).
 	if (tag.startsWith('\\shad')) {
 		const v = Number.parseFloat(tag.slice(5));
-		if (!Number.isNaN(v)) st.shad.d = v;
+		if (!Number.isNaN(v)) state.shad.d = v;
 		return true;
 	}
 	if (tag.startsWith('\\xshad')) {
 		const v = Number.parseFloat(tag.slice(6));
-		if (!Number.isNaN(v)) st.shad.x = v;
+		if (!Number.isNaN(v)) state.shad.x = v;
 		return true;
 	}
 	if (tag.startsWith('\\yshad')) {
 		const v = Number.parseFloat(tag.slice(6));
-		if (!Number.isNaN(v)) st.shad.y = v;
+		if (!Number.isNaN(v)) state.shad.y = v;
 		return true;
 	}
 	// \\alpha&HAA& — alpha MỌI kênh; \\1a..\\4a&HAA& — alpha từng kênh (last-wins theo thứ tự tag).
 	if (tag.startsWith('\\alpha&')) {
-		const a = parseTagAlpha(tag.slice(7));
-		if (a !== null) st.alpha.all = a;
+		const a = (255 - utils.hexToAlpha(tag.slice(7)))/255;
+		if (a !== null) state.alpha.all = a;
 		return true;
 	}
 	m = /^\\([1-4])a&(.*)$/.exec(tag);
 	if (m) {
-		const a = parseTagAlpha(m[2]);
-		if (a !== null) st.alpha[Number(m[1])] = a;
+		const a = (255 - utils.hexToAlpha(m[2]))/255;
+		if (a !== null) state.alpha[Number(m[1])] = a;
 		return true;
 	}
 	return false;
@@ -472,19 +451,19 @@ function applyDecorationTag(tag, st) {
 /** [arena.ai] Nấu trạng thái decoration `st` của item → textCss/containerCss (CSS-cooked,
  * khóa khớp styleCss.text của styleParsedToCss để renderer Object.assign).
  * Alpha hiệu dụng mỗi kênh: byte alpha của tag màu > \\Na > \\alpha > alpha màu style. */
-function emitDecoration(st, styleRef, textCss, containerCss) {
+function emitDecoration(state, styleRef, textCss, containerCss) {
 	const isBox = styleRef?.borderStyle === 3;
 	const styleCols = {};
-	for (const n of [1, 2, 3, 4]) styleCols[n] = parseCssRgba(styleRef?.[STYLE_COLOR_FIELD[n]]);
+	for (const n of [1, 2, 3, 4]) styleCols[n] = utils.parseCssRgba(styleRef?.[STYLE_COLOR_FIELD[n]]);
 	for (const n of [1, 2, 3, 4]) {
-		const tagC = st.colors[n];
-		const trackedA = st.alpha[n] ?? st.alpha.all ?? null;
+		const tagC = state.colors[n];
+		const trackedA = state.alpha[n] ?? state.alpha.all ?? null;
 		if (tagC === null && trackedA === null) continue; // kênh không bị đụng
 		const baseC = styleCols[n];
 		const rgb = tagC ?? (baseC ? { r: baseC.r, g: baseC.g, b: baseC.b } : null);
 		if (rgb === null) continue; // tag chỉ alpha mà style thiếu màu → bỏ qua kênh này
 		const a = (tagC && tagC.alpha !== null) ? tagC.alpha : (trackedA ?? baseC?.a ?? 1);
-		const css = cookRgba({ r: rgb.r, g: rgb.g, b: rgb.b, a });
+		const css = utils.hexToRgba({ r: rgb.r, g: rgb.g, b: rgb.b, a });
 		if (n === 1) { textCss['color'] = css; textCss['--primary-color'] = css; }
 		if (n === 2) textCss['--secondary-color'] = css;
 		if (n === 3) {
@@ -499,28 +478,28 @@ function emitDecoration(st, styleRef, textCss, containerCss) {
 		}
 	}
 	// \\bord* — XẤP XỈ max(x,y) vì CSS stroke không tách được chiều (chốt 11sep26); ÂM → 0.
-	if (st.bord.w !== null || st.bord.x !== null || st.bord.y !== null) {
+	if (state.bord.w !== null || state.bord.x !== null || state.bord.y !== null) {
 		const styleBord = Number(styleRef?.outline) || 0;
-		const ex = Math.max(0, st.bord.x ?? st.bord.w ?? styleBord);
-		const ey = Math.max(0, st.bord.y ?? st.bord.w ?? styleBord);
+		const ex = Math.max(0, state.bord.x ?? state.bord.w ?? styleBord);
+		const ey = Math.max(0, state.bord.y ?? state.bord.w ?? styleBord);
 		const eff = Math.max(ex, ey);
 		if (isBox) containerCss['padding'] = `${eff}px`; // borderStyle 3: \bord là padding của box
 		else textCss['-webkit-text-stroke-width'] = `${eff * 2}px`; // ×2 — ADR 0007 (stroke vẽ cân giữa)
 		textCss['--outline-width'] = `${eff}px`;
 	}
 	// \\be/\\blur → CSS filter (xấp xỉ theo ADR 0004); 0 = tắt.
-	if (st.blur !== null) textCss['filter'] = st.blur > 0 ? `blur(${st.blur}px)` : 'none';
+	if (state.blur !== null) textCss['filter'] = state.blur > 0 ? `blur(${state.blur}px)` : 'none';
 	// \\fr*/\\fa* → CSS variables RAW deg — renderer gộp với scale/style transform (chốt 03sep26: gộp là việc renderer).
 	for (const axis of ['x', 'y', 'z']) {
-		if (st.angle[axis] !== null) textCss[`--angle-${axis}`] = `${st.angle[axis]}deg`;
+		if (state.angle[axis] !== null) textCss[`--angle-${axis}`] = `${state.angle[axis]}deg`;
 	}
-	if (st.skew.x !== null) textCss['--skew-x'] = `${skewFactorToDeg(st.skew.x)}deg`;
-	if (st.skew.y !== null) textCss['--skew-y'] = `${skewFactorToDeg(st.skew.y)}deg`;
+	if (state.skew.x !== null) textCss['--skew-x'] = `${skewFactorToDeg(state.skew.x)}deg`;
+	if (state.skew.y !== null) textCss['--skew-y'] = `${skewFactorToDeg(state.skew.y)}deg`;
 	// \\shad* — offset x/y CHÍNH XÁC (text-shadow nhận offset thật); màu = --back-color hiệu dụng.
-	if (st.shad.d !== null || st.shad.x !== null || st.shad.y !== null) {
+	if (state.shad.d !== null || state.shad.x !== null || state.shad.y !== null) {
 		const styleShad = Number(styleRef?.shadow) || 0;
-		const ex = st.shad.x ?? st.shad.d ?? styleShad;
-		const ey = st.shad.y ?? st.shad.d ?? styleShad;
+		const ex = state.shad.x ?? state.shad.d ?? styleShad;
+		const ey = state.shad.y ?? state.shad.d ?? styleShad;
 		textCss['--shadow-depth'] = `${Math.max(Math.abs(ex), Math.abs(ey))}px`;
 		if (ex === 0 && ey === 0) {
 			if (isBox) containerCss['box-shadow'] = 'none';
@@ -536,11 +515,11 @@ function emitDecoration(st, styleRef, textCss, containerCss) {
 /** [arena.ai] Áp MỘT tag 2.3 đứng TRONG \t(...) → target của anim (nấu độc lập theo styleRef,
  * không cộng dồn trạng thái với tag khác trong cùng \t). Karaoke trả false (bỏ im lặng — SAI SỐ #17). */
 function applyDecorationToTarget(tag, context) {
-	const st = newDecorationState();
-	if (!applyDecorationTag(tag, st)) return false;
+	const state = newDecorationState();
+	if (!applyDecorationTag(tag, state)) return false;
 	const textCss = {};
 	const containerCss = {};
-	emitDecoration(st, context.styleRef, textCss, containerCss);
+	emitDecoration(state, context.styleRef, textCss, containerCss);
 	// target CHỈ nhận khóa mức text (container-level trong \t rất hiếm — v1 không tween).
 	Object.assign(context.textCss, textCss);
 	return true;
@@ -568,11 +547,17 @@ function classifyDecoration(base, styleRef) {
 	for (const item of base) {
 		const tags = item.tags;
 		if (!Array.isArray(tags) || tags.length === 0) continue;
-		const st = newDecorationState();
+
+
+
+		const state = newDecorationState();
 		let consumed = false;
 		/** Karaoke của item: tag \k* CUỐI trong item thắng (nhiều \k* liên tiếp không text xen giữa
 		 * = các syllable rỗng đứng trước; syllable hiển thị là cái cuối). */
 		let karaoke = null;
+
+
+
 		for (const tag of tags) {
 			const km = KARAOKE_RE.exec(tag);
 			if (km) {
@@ -582,12 +567,12 @@ function classifyDecoration(base, styleRef) {
 				consumed = true;
 				continue;
 			}
-			if (applyDecorationTag(tag, st)) consumed = true;
+			if (applyDecorationTag(tag, state)) consumed = true;
 		}
 		if (!consumed) continue;
 		const textCss = {};
 		const containerCss = {};
-		emitDecoration(st, styleRef, textCss, containerCss);
+		emitDecoration(state, styleRef, textCss, containerCss);
 		mergeDecorationIntoItem(item, textCss, containerCss, karaoke);
 	}
 	return base;
@@ -613,12 +598,24 @@ function classifyClip(base, styleRef) {
 	return { rawList: [], effectiveType: null, effectiveRaw: null };
 }
 
-/** [arena.ai] Classify — 2.4 → 2.3 → 2.2 → 2.1. */
-export function classify(entry, styleRef) {
-	const base = Array.isArray(entry?.base) ? entry.base : [];
-	classifyLayoutLocal(base, styleRef);
-	classifyDecoration(base, styleRef);
+/** [arena.ai] Classify — 2.4 → 2.3 → 2.2 → 2.1.
+ * @param {Array<parsedDataFormat.baseItem>} baseRaw Mảng base item (đầu ra của processLineText).
+ * @param {parsedDataFormat.style} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
+ * @returns {{base: Array<{tags: string[], text: string, delta?: Object, anim?: Array<Object>}>, collision: {t: boolean}, clip: {rawList: string[], effectiveType: ('clip'|'iclip'|null), effectiveRaw: (string|null)}}}
+ */
+export function classify(base, styleRef) {
+	base = classifyBase(base, styleRef);
 	const collision = classifyCollision(base, styleRef);
 	const clip = classifyClip(base, styleRef);
 	return { base, collision, clip };
 }
+// Cấu trúc mới: loại bỏ hàm này, và viết 1 hàm mới (có thể sau 2.1) để gộp style thành CSS-cooked.
+// /** [arena.ai] Gộp scaleX/scaleY thành chuỗi 'transform' dạng CSS để tối ưu riêng.
+//  * KHÔNG lọc identity 100: scaleX(1)/scaleY(1) vẫn emit (chốt 09sep26 — renderer áp trực tiếp,
+//  * không tốn logic lọc ở parser). */
+// function finalizeSmartScale(textCss, scaleX, scaleY) {
+// 	const parts = [];
+// 	if (scaleX !== undefined) parts.push(`scaleX(${scaleX / 100})`);
+// 	if (scaleY !== undefined) parts.push(`scaleY(${scaleY / 100})`);
+// 	if (parts.length) textCss['transform'] = parts.join(' ');
+// }
