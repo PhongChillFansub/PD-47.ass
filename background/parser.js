@@ -329,10 +329,10 @@ function cachedGlobalCss(info) {
  *   liền mạch, không hở khe — đúng hiệu ứng union của libass.
  *   Chiều DỌC không cần bù: padding dọc của inline box không làm cao line box (chiều cao dòng do
  *   line-height quyết định), nền vẫn tràn ra ngoài — chỉ cần lineSub đừng cắt (overflow visible).
- *   SAI SỐ ĐÃ BIẾT: nếu màu box trong suốt một phần (alpha < 1) thì dải chồng rộng \bord ở mỗi mối
- *   nối sẽ ĐẬM GẤP ĐÔI (libass hợp hình rồi mới tô, nên không bị). Giảm thiểu: renderer GỘP các
- *   segment liền kề có cùng màu nền + cùng \bord vào MỘT node nền — khi đó chỉ còn mối nối ở chỗ
- *   thật sự đổi \3c/\bord, là chỗ màu vốn đã khác nên khó lộ.
+ *   VÙNG CHỒNG: nếu màu box trong suốt một phần (alpha < 1) thì dải chồng rộng \bord ở mỗi mối nối
+ *   ĐẬM GẤP ĐÔI. KHÔNG phải bug, KHÔNG cần chữa (chủ repo chốt 26sep26): đó đúng là hành vi của
+ *   VSFilter — box vẽ theo từng khúc rồi đè lên nhau, chỗ giao đậm hơn (libass hợp hình rồi mới tô
+ *   nên mới không bị). Renderer cứ để chồng tự nhiên; KHÔNG gộp node nền, KHÔNG bù alpha.
  * @property {string} [margin-left] [tùy chọn] chỉ khi borderStyle 3: '-<bord>px' — phần bù cho padding
  *   (xem NGUYÊN LÍ BÙ MARGIN ÂM ở trên). KHÔNG liên quan marginL/R/V của style (cái đó là định vị dòng).
  * @property {string} [margin-right] [tùy chọn] chỉ khi borderStyle 3: '-<bord>px' — phần bù cho padding.
