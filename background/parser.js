@@ -243,8 +243,9 @@ function cachedGlobalCss(info) {
  *
  * VỎ NGOÀI của một dòng sub, parent của các segmentSub. Chỉ chứa prop mà TOÀN LINE chịu ảnh hưởng:
  * - tag mức dòng: 2.2 (\an, \pos, \move, \org) và 2.1 (\clip, \iclip);
- * - dữ liệu KHÔNG phải tag ở mức dòng: alignment + marginL/R/V của style, WrapStyle của info (globalCss).
- * KHÔNG chứa typography (font / màu / viền / box) — những thứ đó thuộc segmentSubCss.
+ * - dữ liệu KHÔNG phải tag ở mức dòng: alignment + marginL/R/V của style, WrapStyle của info (globalCss),
+ *   borderStyle 3 (border box: nền / padding / bóng của box bao CẢ DÒNG).
+ * KHÔNG chứa typography (font / màu chữ / viền chữ) — những thứ đó thuộc segmentSubCss.
  *
  * Mọi px giữ theo PlayRes; renderer mới scale (videoSize / PlayRes) và xử lí collision.
  * styleParsedToCss chỉ dựng phần suy TỪ STYLE + INFO; các key do tag sinh ra (đánh dấu [tùy chọn])
@@ -262,8 +263,15 @@ function cachedGlobalCss(info) {
  *   info.WrapStyle. Lưu ý: \q là tag 2.4.2 (mức segment) nên KHÔNG ghi đè key này; nó đi qua
  *   '--wrap-style' của segmentSub, renderer tự quy đổi.
  * @property {string} max-width '100%' — globalCss, chặn dòng tràn ra ngoài khung video.
- * @property {string} [transform-origin] [tùy chọn] gốc quay/neo Ở MỨC DÒNG khi có \org (2.2).
- *   Không có \org thì không emit — gốc quay mặc định nằm ở segmentSub (theo \an).
+ * @property {string} transform-origin gốc quay/neo của dòng — LUÔN emit. Mặc định suy từ \an của style
+ *   (map TRANSFORM_ORIGIN_MAP), ghi đè bởi \org (2.2 — nên key này thuộc mức DÒNG, không phải segment).
+ *   \fr* (2.3) ở mức segment quay quanh chính gốc này.
+ * @property {string} [background-color] [tùy chọn] chỉ khi borderStyle 3 (opaque box): style.outlineColour
+ *   là MÀU NỀN của box; \3c (2.3) ghi đè vào đây thay vì vào màu viền chữ. borderStyle 1 → 'transparent'.
+ * @property {string} [padding] [tùy chọn] chỉ khi borderStyle 3: padding box CHÍNH LÀ \bord (style.outline),
+ *   KHÔNG phải margin (margin là định vị dòng); \bord (2.3) ghi đè.
+ * @property {string} [box-shadow] [tùy chọn] chỉ khi borderStyle 3: style.shadow + style.backColour;
+ *   \shad (2.3) ghi đè. borderStyle 1 dùng text-shadow ở segmentSub, KHÔNG dùng key này.
  * @property {string} [clip-path] [tùy chọn] chỉ có khi dòng bị \clip / \iclip (2.1); \iclip là phần bù
  *   (dựng bằng fill-rule evenodd hoặc path bao ngoài — chốt khi làm 2.1, ticket #16).
  */
@@ -278,6 +286,12 @@ function cachedGlobalCss(info) {
  *
  * styleParsedToCss dựng bộ GỐC của style; mỗi tag cục bộ chỉ tạo một segment mới ghi đè vài key.
  * Kèm bộ CSS variables giữ SỐ LIỆU THÔ để tag override và renderer đọc lại mà không phải parse ngược CSS.
+ *
+ * Lưu ý 2 key KHÔNG nằm ở đây dù trông như chuyện của chữ:
+ * - transform-origin → lineSubCss (gốc quay đến từ \org, tag 2.2 mức dòng);
+ * - border box của borderStyle 3 (background-color / padding / box-shadow) → lineSubCss; khi
+ *   borderStyle 3, \3c / \bord / \shad (2.3) ghi thẳng vào lineSub, còn ở đây bị reset
+ *   (stroke 0px + transparent, paint-order normal, text-shadow none) để node chữ không dính viền cũ.
  *
  * @property {string} font-family '"<fontName>", sans-serif' — từ style.fontName; \fn (2.4.2) ghi đè
  *   (\fn rỗng = về font của styleRef).
@@ -295,8 +309,6 @@ function cachedGlobalCss(info) {
  *   đồng hồ nên phải đổi dấu). Nguồn: style.angle/scaleX/scaleY; \frx/\fry/\frz + \fax/\fay (2.3)
  *   và \fscx/\fscy/\fsc (2.4.1). Gộp chuỗi transform cuối cùng là việc của RENDERER (chốt 03sep26),
  *   tag chỉ đẩy số liệu qua --angle-x/y/z và --skew-x/y.
- * @property {string} transform-origin gốc quay theo \an của style (luôn emit, vô hại); \org (2.2) ở mức
- *   dòng và \fr* (2.3) ở mức segment đọc lại qua đây.
  * @property {string} paint-order 'stroke fill markers' (borderStyle 1) | 'normal' (borderStyle 3) —
  *   để stroke không che fill khi dùng -webkit-text-stroke (Chromium 123+ mới áp cho HTML text).
  * @property {string} -webkit-text-stroke-width px — borderStyle 1: style.outline × 2 (ADR 0007 — stroke
@@ -308,12 +320,6 @@ function cachedGlobalCss(info) {
  *   \shad (2.3, x = y), \xshad/\yshad (2.3, tách chiều CHÍNH XÁC), màu theo \4c/\4a. 'none' khi borderStyle 3.
  * @property {string} [filter] [tùy chọn] 'blur(Npx)' — chỉ khi có \be / \blur (2.3, cùng họ, last-wins chéo);
  *   style gốc không sinh key này.
- * @property {string} [background-color] [tùy chọn] chỉ khi borderStyle 3 (opaque box): style.outlineColour
- *   là MÀU NỀN box; \3c (2.3) ghi đè.
- * @property {string} [padding] [tùy chọn] chỉ khi borderStyle 3: padding box CHÍNH LÀ \bord (style.outline),
- *   KHÔNG phải margin (margin là định vị dòng, thuộc lineSub); \bord (2.3) ghi đè.
- * @property {string} [box-shadow] [tùy chọn] chỉ khi borderStyle 3: style.shadow + style.backColour;
- *   \shad (2.3) ghi đè.
  * @property {string} --primary-color số liệu thô màu chính (\1c/\c, và màu chữ CHƯA hát của karaoke).
  * @property {string} --secondary-color số liệu thô màu phụ (\2c) — màu chữ ĐÃ hát của karaoke.
  * @property {string} --outline-color số liệu thô màu viền (\3c).
