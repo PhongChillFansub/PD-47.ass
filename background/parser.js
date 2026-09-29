@@ -1,4 +1,4 @@
-// v0.1.0 19sep26
+// v0.1.0 29sep26
 // beta mode (đã viết xong, sửa lỗi khi chạy)
 // Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
@@ -268,6 +268,7 @@ function cachedGlobalCss(info) {
  * @property {string} [clip-path] [tùy chọn] chỉ có khi dòng bị \clip / \iclip (2.1); \iclip là phần bù
  *   (dựng bằng fill-rule evenodd hoặc path bao ngoài — chốt khi làm 2.1, ticket #16).
  */
+
 /** Định nghĩa/chú thích segmentSubCss
  * @typedef {object} parsedDataFormat.segmentSubCss các thuộc tính CSS cho segment (tương đương tag 2.4, 2.3)
  *
@@ -366,13 +367,12 @@ function cachedGlobalCss(info) {
  */
 /** [Manual edit] Hàm chuyển đỏi style đã chuẩn hóa thành object CSS (lineSub, segmentSub, data)
  * Cấu trúc: lineSub là parent cho các segmentSub; data lưu dữ liệu (cả line và segment để renderer xử lí)
- * 
  * - Ghi chú: parser chỉ dựa trên PlayRes, renderer chỉ xử lí scale và collision, 
  * tất cả dữ liệu khác phải xử lí trước trong parser/tagProcess.
- * 
- * 
  */
+function styleToCss () {
 
+}
 
 
 /** [arena.ai] to-do: sửa hàm này. Chuyển đổi style đã chuẩn hóa thành object CSS.
