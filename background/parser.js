@@ -367,11 +367,118 @@ function cachedGlobalCss(info) {
  */
 /** [Manual edit] Hàm chuyển đỏi style đã chuẩn hóa thành object CSS (lineSub, segmentSub, data)
  * Cấu trúc: lineSub là parent cho các segmentSub; data lưu dữ liệu (cả line và segment để renderer xử lí)
- * - Ghi chú: parser chỉ dựa trên PlayRes, renderer chỉ xử lí scale và collision, 
+ * - Ghi chú: parser chỉ dựa trên PlayRes, renderer chỉ xử lí scale và collision,
  * tất cả dữ liệu khác phải xử lí trước trong parser/tagProcess.
+ *
+ * Bản viết lại của styleParsedToCss theo 3 typedef mới (29sep26): trả về
+ * { lineSub, segmentSub, data } — shape mới, KHÁC {container, text, data} của hàm cũ.
+ * Hai khác biệt kiến trúc so với hàm cũ (đều đã ghi trong typedef):
+ *   1. transform-origin CHUYỂN LÊN lineSub (gốc quay đến từ \org — tag 2.2 mức DÒNG),
+ *      không còn nằm ở ruột chữ.
+ *   2. line-height CHUYỂN XUỐNG segmentSub (19sep26 — đổi cùng \fs), không còn ở vỏ dòng.
+ *   3. borderStyle 3 (opaque box): background/padding/box-shadow CHUYỂN XUỐNG segmentSub
+ *      (box thừa hưởng màu/độ dày/cỡ chữ của TỪNG khúc chữ), kèm bù margin âm để advance
+ *      width chữ không đổi — xem NGUYÊN LÍ BÙ MARGIN ÂM trong typedef segmentSubCss.
+ *
+ * lineSub (vỏ ngoài — định vị dòng, tag 2.2/2.1):
+ *   - display/position/text-align (từ \an) + bộ globalCss chuẩn (white-space/word-break/
+ *     overflow-wrap/text-wrap/max-width, nhúng sẵn không merge ở renderer) + transform-origin.
+ *   - KHÔNG chứa font/color/box — những thứ đó thuộc segmentSub.
+ *   - clip-path chỉ sinh khi có \clip/\iclip (2.1) → không emit từ style.
+ *
+ * segmentSub (ruột chữ — typography + trang trí, tag 2.4/2.3):
+ *   - font/color/weight/style/decoration/letter-spacing + line-height, transform (R1+R3),
+ *     outline/shadow (borderStyle 1) hoặc box (borderStyle 3), kèm CSS variables số liệu thô.
+ *   - transform: CHỈ emit khi khác identity (R3); rotate(-angle) đứng TRƯỚC scaleX/scaleY (R1 —
+ *     CSS áp phải→trái khớp VSFilter, và \frz dương của ASS quay ngược chiều nên đổi dấu).
+ *   - borderStyle 1: -webkit-text-stroke-width = outline × 2 (ADR 0007) + paint-order 'stroke fill
+ *     markers'; --outline-width vẫn giữ giá trị GỐC (số thô cho tag override/renderer).
+ *   - borderStyle 3: không stroke (reset về 0/transparent + paint-order normal + text-shadow none);
+ *     background-color = outlineColour, padding = \bord, margin-left/right = -\bord (bù), box-shadow.
+ *
+ * data (số liệu cho renderer): CHƯA CHỐT (19sep26) → cố ý để TRỐNG {}. Bổ sung @property vào
+ * typedef dataCss tới đâu thì điền tới đó; KHÔNG bê nguyên data cũ ({...style, isBox, hAlign,
+ * transformOrigin, styleIndex}) của styleParsedToCss vào (chủ repo chốt 29sep26).
+ *
+ * @param {parsedDataFormat.style} style Style đã chuẩn hóa.
+ * @param {parsedDataFormat.info} [info] Info đã (hoặc chưa) chuẩn hóa — chỉ đọc WrapStyle cho globalCss.
+ * @returns {{lineSub: Object, segmentSub: Object, data: Object}} lineSub (vỏ dòng), segmentSub (ruột chữ), data (trống, chờ chốt).
  */
-function styleToCss () {
+function styleToCss (style, info = {}) {
+	const alignment = style.alignment;
+	// hAlign: 1,4,7 → left; 2,5,8 → center; 3,6,9 → right
+	const hAlign = alignment % 3 === 1 ? 'left' : alignment % 3 === 2 ? 'center' : 'right';
+	// transform-origin theo anchor \an (để \fr* quay quanh đúng điểm neo) — map hoisted; \org (2.2) ghi đè.
+	const transformOrigin = TRANSFORM_ORIGIN_MAP[alignment] || '50% 50%';
+	// borderStyle 3: opaque box; 1: viền thường (stroke + shadow bám chữ).
+	const isBox = style.borderStyle === 3;
+	// globalCss chuẩn (frozen, cache theo WrapStyle) — spread vào lineSub, không merge ở renderer.
+	const globalCss = cachedGlobalCss(info);
 
+	// lineSub: định vị + wrap + gốc quay. KHÔNG chứa font/color/box.
+	const lineSub = {
+		'display': 'inline-block',
+		'position': 'absolute', // renderer set left/top/right/bottom theo \an + margin + \pos/\move
+		'text-align': hAlign,   // \an (2.2) ghi đè
+		...globalCss,           // white-space/word-break/overflow-wrap/text-wrap/max-width
+		'transform-origin': transformOrigin, // LUÔN emit; \org (2.2) ghi đè. clip-path chỉ có khi \clip/\iclip (2.1).
+	};
+
+	// text-decoration gốc từ style.underline/strikeOut; \u,\s (2.3) ghi đè.
+	const decoration = [style.underline ? 'underline' : '', style.strikeOut ? 'line-through' : '']
+		.filter(Boolean).join(' ') || 'none';
+
+	// transform (R1+R3): CHỈ emit khi KHÁC identity; rotate(-angle) TRƯỚC scaleX/scaleY.
+	const transformParts = [];
+	if (style.angle !== 0) transformParts.push(`rotate(${-style.angle}deg)`);
+	if (style.scaleX !== 100) transformParts.push(`scaleX(${style.scaleX / 100})`);
+	if (style.scaleY !== 100) transformParts.push(`scaleY(${style.scaleY / 100})`);
+
+	// segmentSub: typography + line-height (19sep26 xuống đây) + transform + outline/shadow hoặc box.
+	const segmentSub = {
+		'font-family': `"${style.fontName}", sans-serif`,
+		'font-size': `${style.fontSize}px`,   // PlayRes px; \fs (2.4.1) ghi đè, renderer scale sau
+		'line-height': `${style.fontSize}px`, // 19sep26: mức segment, đổi cùng \fs
+		'color': style.primaryColour,
+		'font-weight': style.bold ? '700' : '400',
+		'font-style': style.italic ? 'italic' : 'normal',
+		'text-decoration': decoration,
+		'letter-spacing': `${style.spacing}px`,
+		// R3: key transform chỉ xuất hiện khi thật sự cần (tránh compositing thừa).
+		...(transformParts.length ? { 'transform': transformParts.join(' ') } : {}),
+		'paint-order': isBox ? 'normal' : 'stroke fill markers',
+		...(isBox ? {
+			// borderStyle 3: KHÔNG stroke chữ (reset đủ bộ để renderer reuse node không dính cache),
+			// outlineColour là MÀU NỀN box, \bord là padding, kèm bù margin âm giữ advance width.
+			'-webkit-text-stroke-width': '0px',
+			'-webkit-text-stroke-color': 'transparent',
+			'text-shadow': 'none',
+			'background-color': style.outlineColour,
+			'padding': `${style.outline}px`,
+			'margin-left': `-${style.outline}px`,
+			'margin-right': `-${style.outline}px`,
+			'box-shadow': style.shadow ? `${style.shadow}px ${style.shadow}px ${style.backColour}` : 'none',
+		} : {
+			// borderStyle 1: stroke ×2 (ADR 0007) — vẽ cân giữa đường bao glyph, paint-order 'stroke fill'
+			// để fill che nửa trong → nửa ngoài đúng \bord px như Aegisub; shadow bám chữ (text-shadow).
+			'-webkit-text-stroke-width': style.outline ? `${style.outline * 2}px` : '0px',
+			'-webkit-text-stroke-color': style.outlineColour,
+			'text-shadow': style.shadow ? `${style.shadow}px ${style.shadow}px ${style.backColour}` : 'none',
+		}),
+		// CSS variables giữ SỐ LIỆU THÔ cho tag override (2.3) + renderer đọc lại (không parse ngược CSS).
+		'--primary-color': style.primaryColour,
+		'--secondary-color': style.secondaryColour,
+		'--outline-color': style.outlineColour,
+		'--back-color': style.backColour,
+		'--outline-width': `${style.outline}px`, // GỐC (CHƯA ×2)
+		'--shadow-depth': `${style.shadow}px`,   // max(|x|,|y|); style gốc x=y=shadow
+		'--font-size': `${style.fontSize}px`,    // GỐC của \fs
+	};
+
+	// data: CHƯA CHỐT (19sep26) — để trống, bổ sung khi typedef dataCss được điền @property.
+	const data = {};
+
+	return { lineSub, segmentSub, data };
 }
 
 
