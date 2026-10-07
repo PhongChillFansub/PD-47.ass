@@ -1,12 +1,12 @@
-// v0.1.0 29sep26
+// v0.1.0 07oct26
 // beta mode (đã viết xong, sửa lỗi khi chạy)
 // Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
-import { classify } from './tagProcess.js'; // 03sep26: classify biến base → lineCss[i] đầy đủ { base, collision, clip }; 09sep26: tagProcess CHỈ export classify
+import { classify } from './tagProcess.js';
 /** Định nghĩa/chú thích object FALLBACK_DEFAULT_STYLE (parsedDataFormat.style) 
- * @typedef {object} parsedDataFormat.style Kiểu style nguyên bản 
  * 
  * (có thể sẽ thêm các biến khác như CSSResize?)
+ * @typedef {object} parsedDataFormat.style Kiểu style nguyên bản 
  * @property {string} name Tên style (style.name, line.styleref.name, syl.style.name)
  * @property {string} fontName Tên font (\fn)
  * @property {number} fontSize Font size (\fs, px, với PlayRes 640x480)
@@ -60,6 +60,132 @@ import { classify } from './tagProcess.js'; // 03sep26: classify biến base →
  * @property {boolean} ScaledBorderAndShadow yes -> true, no -> false. Nếu true/yes thì outline/shadow sẽ scale theo PlayRes
  * @property {number} PlayResX Kích thước video chuẩn mà sub dựa vào. Mọi thông số font, pos đều phụ thuộc vào nó
  * @property {number} PlayResY Kích thước video chuẩn mà sub dựa vào. Mọi thông số font, pos đều phụ thuộc vào nó
+ */
+/** Định nghĩa/chú thích lineSubCss 
+ * @typedef {object} parsedDataFormat.lineSubCss các thuộc tính CSS cho toàn line (tương đương tag 2.2, 2.1)
+ *
+ * VỎ NGOÀI của một dòng sub, parent của các segmentSub. Chỉ chứa prop mà TOÀN LINE chịu ảnh hưởng:
+ * - tag mức dòng: 2.2 (\an, \pos, \move, \org) và 2.1 (\clip, \iclip);
+ * - dữ liệu KHÔNG phải tag ở mức dòng: alignment + marginL/R/V của style, WrapStyle của info (globalCss).
+ * KHÔNG chứa typography (font / màu chữ / viền chữ / border box) — những thứ đó thuộc segmentSubCss.
+ *
+ * Mọi px giữ theo PlayRes; renderer mới scale (videoSize / PlayRes) và xử lí collision.
+ * styleParsedToCss chỉ dựng phần suy TỪ STYLE + INFO; các key do tag sinh ra (đánh dấu [tùy chọn])
+ * do tagProcess/classify ghi đè lên cùng bộ key này, renderer Object.assign là ra kết quả cuối.
+ *
+ * @property {string} display 'inline-block' — khung dòng ôm sát chữ, không chiếm cả hàng ngang.
+ * @property {string} position 'absolute' — chỗ dựa để renderer set left/top/right/bottom theo
+ *   alignment + marginL/R/V, ghi đè bởi \an / \pos / \move (2.2). Parser KHÔNG ghi sẵn tọa độ
+ *   (tọa độ là việc của renderer: cần videoSize thật + collision).
+ * @property {string} text-align 'left' | 'center' | 'right' — suy từ alignment (hAlign); \an (2.2) ghi đè.
+ * @property {string} white-space 'pre' (WrapStyle 2) | 'pre-wrap' — globalCss, theo info.WrapStyle.
+ * @property {string} word-break 'keep-all' — globalCss (hằng, không tag nào đụng).
+ * @property {string} overflow-wrap 'break-word' — globalCss (hằng, không tag nào đụng).
+ * @property {string} text-wrap 'balance' (WrapStyle 3) | 'wrap' (1) | 'pretty' (0, 2) — globalCss theo
+ *   info.WrapStyle. Lưu ý: \q là tag 2.4.2 (mức segment) nên KHÔNG ghi đè key này; nó đi qua
+ *   '--wrap-style' của segmentSub, renderer tự quy đổi.
+ * @property {string} max-width '100%' — globalCss, chặn dòng tràn ra ngoài khung video.
+ * @property {string} transform-origin gốc quay/neo của dòng — LUÔN emit. Mặc định suy từ \an của style
+ *   (map TRANSFORM_ORIGIN_MAP), ghi đè bởi \org (2.2 — nên key này thuộc mức DÒNG, không phải segment).
+ *   \fr* (2.3) ở mức segment quay quanh chính gốc này.
+ * @property {string} [clip-path] [tùy chọn] chỉ có khi dòng bị \clip / \iclip (2.1); \iclip là phần bù
+ *   (dựng bằng fill-rule evenodd hoặc path bao ngoài — chốt khi làm 2.1, ticket #16).
+ */
+/** Định nghĩa/chú thích segmentSubCss
+ * @typedef {object} parsedDataFormat.segmentSubCss các thuộc tính CSS cho segment (tương đương tag 2.4, 2.3)
+ *
+ * RUỘT CHỮ của một segment — một khúc chữ bên trong lineSub, là đơn vị nhỏ nhất mà tag CỤC BỘ
+ * tác động: 2.4 (layout cục bộ: \fs, \fsp, \fsc*, \b, \i, \fn, \r, \q, \-) và 2.3 (trang trí:
+ * màu/alpha, \bord, \shad, \be, \blur, \fa*, \fr*, karaoke).
+ * (Từ "segment" ở đây là đơn vị CSS của renderer, KHÔNG liên quan tới tên cũ "segment → base"
+ * của tokenizer — hai khái niệm khác nhau, đừng gộp.)
+ *
+ * styleParsedToCss dựng bộ GỐC của style; mỗi tag cục bộ chỉ tạo một segment mới ghi đè vài key.
+ * Kèm bộ CSS variables giữ SỐ LIỆU THÔ để tag override và renderer đọc lại mà không phải parse ngược CSS.
+ *
+ * Key DUY NHẤT trông như chuyện của chữ nhưng KHÔNG nằm ở đây: transform-origin → lineSubCss
+ * (gốc quay đến từ \org, tag 2.2 mức dòng).
+ *
+ * BORDER BOX (borderStyle 3) nằm Ở ĐÂY, không phải ở lineSub — vì libass dựng box bằng cách thay
+ * outline của TỪNG GLYPH bằng hộp bao rồi hợp lại, nên box thừa hưởng màu/độ dày/cỡ chữ của khúc
+ * chữ tại chỗ đó: \3c, \bord, \fs giữa dòng đều đổi box từ chỗ đó trở đi (một box phẳng mức dòng
+ * sẽ sai cả 3 ca). Box "một khối cho cả event" là BorderStyle=4 — extension riêng của libass,
+ * VSFilter render thành BorderStyle=1, KHÔNG phải thứ đang làm ở đây.
+ *
+ * @property {string} font-family '"<fontName>", sans-serif' — từ style.fontName; \fn (2.4.2) ghi đè
+ *   (\fn rỗng = về font của styleRef).
+ * @property {string} font-size px theo PlayRes — style.fontSize; \fs (2.4.1, nội suy được trong \t).
+ * @property {string} line-height px — style.fontSize (19sep26: chuyển XUỐNG mức segment, trước ở container;
+ *   đổi theo \fs cùng lúc với font-size).
+ * @property {string} color màu chữ chính — style.primaryColour; \1c/\c (2.3), alpha từ \1a/\alpha (2.3).
+ * @property {string} font-weight '700' | '400' — style.bold; \b (2.4.2).
+ * @property {string} font-style 'italic' | 'normal' — style.italic; \i (2.4.2).
+ * @property {string} text-decoration 'underline' | 'line-through' | cả hai | 'none' — style.underline/strikeOut;
+ *   \u, \s (2.3).
+ * @property {string} letter-spacing px — style.spacing; \fsp (2.4.1, nội suy được).
+ * @property {string} [transform] CHỈ emit khi khác identity (R3): chuỗi rotate(-angle) ĐỨNG TRƯỚC
+ *   scaleX/scaleY (R1 — CSS áp phải→trái, khớp VSFilter; \frz dương của ASS quay ngược chiều kim
+ *   đồng hồ nên phải đổi dấu). Nguồn: style.angle/scaleX/scaleY; \frx/\fry/\frz + \fax/\fay (2.3)
+ *   và \fscx/\fscy/\fsc (2.4.1). Gộp chuỗi transform cuối cùng là việc của RENDERER (chốt 03sep26),
+ *   tag chỉ đẩy số liệu qua --angle-x/y/z và --skew-x/y.
+ * @property {string} paint-order 'stroke fill markers' (borderStyle 1) | 'normal' (borderStyle 3) —
+ *   để stroke không che fill khi dùng -webkit-text-stroke (Chromium 123+ mới áp cho HTML text).
+ * @property {string} -webkit-text-stroke-width px — borderStyle 1: style.outline × 2 (ADR 0007 — stroke
+ *   vẽ cân giữa đường bao glyph, nhân đôi + paint-order để phần ngoài đúng \bord px như Aegisub);
+ *   borderStyle 3: '0px'. Tag: \bord (2.3); \xbord/\ybord → XẤP XỈ 2×max(x,y) (CSS không tách chiều).
+ * @property {string} -webkit-text-stroke-color màu viền — style.outlineColour; \3c/\3a (2.3);
+ *   'transparent' khi borderStyle 3.
+ * @property {string} text-shadow '<x>px <y>px <backColour>' | 'none' — style.shadow + style.backColour;
+ *   \shad (2.3, x = y), \xshad/\yshad (2.3, tách chiều CHÍNH XÁC), màu theo \4c/\4a. 'none' khi borderStyle 3.
+ * @property {string} [filter] [tùy chọn] 'blur(Npx)' — chỉ khi có \be / \blur (2.3, cùng họ, last-wins chéo);
+ *   style gốc không sinh key này.
+ * @property {string} [background-color] [tùy chọn] chỉ khi borderStyle 3 (opaque box): style.outlineColour
+ *   là MÀU NỀN của box (không phải màu viền chữ); \3c/\3a (2.3) ghi đè. borderStyle 1 → không emit.
+ * @property {string} [padding] [tùy chọn] chỉ khi borderStyle 3: độ nở của box = \bord (style.outline),
+ *   KHÔNG phải margin (margin là định vị dòng, thuộc lineSub); \bord (2.3) ghi đè.
+ *   NGUYÊN LÍ BÙ MARGIN ÂM (chốt 26sep26) — libass nở hộp bao của từng glyph thêm \bord rồi HỢP
+ *   (union) các hộp: box to ra nhưng VỊ TRÍ CHỮ KHÔNG ĐỔI. CSS thì ngược: padding của một inline box
+ *   CHIẾM CHỖ trong luồng, nên mỗi mối nối giữa 2 segment chữ sẽ bị nới thêm 2×\bord. Cách bù:
+ *     padding: <bord>px; margin-left: -<bord>px; margin-right: -<bord>px;
+ *   → luồng chữ trở lại đúng advance width gốc (padding cộng vào, margin âm trừ đi), trong khi nền
+ *   vẫn được VẼ đủ phần nở ra; vùng nở của 2 segment kề nhau đè lên nhau đúng bằng \bord nên dải box
+ *   liền mạch, không hở khe — đúng hiệu ứng union của libass.
+ *   Chiều DỌC không cần bù: padding dọc của inline box không làm cao line box (chiều cao dòng do
+ *   line-height quyết định), nền vẫn tràn ra ngoài — chỉ cần lineSub đừng cắt (overflow visible).
+ *   VÙNG CHỒNG: nếu màu box trong suốt một phần (alpha < 1) thì dải chồng rộng \bord ở mỗi mối nối
+ *   ĐẬM GẤP ĐÔI. KHÔNG phải bug, KHÔNG cần chữa (chủ repo chốt 26sep26): đó đúng là hành vi của
+ *   VSFilter — box vẽ theo từng khúc rồi đè lên nhau, chỗ giao đậm hơn (libass hợp hình rồi mới tô
+ *   nên mới không bị). Renderer cứ để chồng tự nhiên; KHÔNG gộp node nền, KHÔNG bù alpha.
+ * @property {string} [margin-left] [tùy chọn] chỉ khi borderStyle 3: '-<bord>px' — phần bù cho padding
+ *   (xem NGUYÊN LÍ BÙ MARGIN ÂM ở trên). KHÔNG liên quan marginL/R/V của style (cái đó là định vị dòng).
+ * @property {string} [margin-right] [tùy chọn] chỉ khi borderStyle 3: '-<bord>px' — phần bù cho padding.
+ * @property {string} [box-shadow] [tùy chọn] chỉ khi borderStyle 3: style.shadow + style.backColour
+ *   ('<x>px <y>px <backColour>'); \shad/\xshad/\yshad + \4c/\4a (2.3) ghi đè.
+ *   borderStyle 1 dùng text-shadow (bóng bám chữ), KHÔNG dùng key này.
+ * @property {string} --primary-color số liệu thô màu chính (\1c/\c, và màu chữ CHƯA hát của karaoke).
+ * @property {string} --secondary-color số liệu thô màu phụ (\2c) — màu chữ ĐÃ hát của karaoke.
+ * @property {string} --outline-color số liệu thô màu viền (\3c).
+ * @property {string} --back-color số liệu thô màu bóng/nền box (\4c).
+ * @property {string} --outline-width px GỐC của \bord (CHƯA ×2 — số thô cho renderer/tag override).
+ * @property {string} --shadow-depth px độ sâu bóng = max(|x|, |y|) của \shad / \xshad / \yshad.
+ * @property {string} --font-size px GỐC của \fs (số thô để đo chữ / quy đổi tương đối).
+ * @property {string} [--angle-x] [tùy chọn] deg RAW của \frx (2.3) — renderer đổi dấu khi gộp transform.
+ * @property {string} [--angle-y] [tùy chọn] deg RAW của \fry (2.3).
+ * @property {string} [--angle-z] [tùy chọn] deg RAW của \frz / \fr (2.3).
+ * @property {string} [--skew-x] [tùy chọn] deg đã NẤU SẴN = atan(f) của \fax (2.3).
+ * @property {string} [--skew-y] [tùy chọn] deg đã NẤU SẴN = atan(f) của \fay (2.3).
+ * @property {string} [--inline-fx] [tùy chọn] tên hiệu ứng inline của \- (2.4.2) — parser không diễn giải.
+ * @property {string} [--base-style-name] [tùy chọn] tên style để reset của \r (2.4.2); rỗng = style của dòng.
+ * @property {number} [--wrap-style] [tùy chọn] số WrapStyle override của \q (2.4.2) — renderer tự quy đổi
+ *   sang white-space/text-wrap của lineSub.
+ */
+/** Định nghĩa/chú thích dataCss
+ * @typedef {object} parsedDataFormat.dataCss các biến dữ liệu chung
+ *
+ * CHƯA CHỐT (19sep26) — cố ý để trống. Đây là chỗ chứa SỐ LIỆU (không sinh node, không phải CSS)
+ * cho renderer dùng: dữ liệu mức LINE lẫn mức SEGMENT đều nằm chung ở đây.
+ * Chốt tới đâu thì bổ sung @property tới đó; đừng suy diễn từ `data` của hàm styleParsedToCss cũ
+ * ({ ...style, isBox, hAlign, transformOrigin, styleIndex }) — bộ đó thuộc cấu trúc cũ container/text/data.
  */
 /** Mẫu style sau chuẩn hóa, với PlayRes 640x480
  * @readonly Chỉ đọc để so chuẩn với các style trong parsedData
@@ -208,16 +334,18 @@ function processLineText(doStripTags, text) {
  * Nếu sau này có prop mức text thì nhúng vào phần text của styleParsedToCss tương ứng.
  *
  * @param {parsedDataFormat.info} [info] Info đã (hoặc chưa) chuẩn hóa — chỉ đọc WrapStyle.
- * @returns {Object} Bộ props CSS chuẩn: white-space/word-break/overflow-wrap/text-wrap/max-width.
+ * @returns {Object} Bộ props CSS chuẩn: white-space/word-break/overflow-wrap/text-wrap/text-order.
  */
 function globalCssFromInfo(info = {}) {
 	const wrapStyle = Number(info.WrapStyle ?? 0); // chống string khi info chưa chuẩn hóa
 	return {
+		'position': 'absolute',
+		'width': 'max-content',
 		'white-space': (wrapStyle === 2 ? 'pre' : 'pre-wrap'), // WrapStyle 2: không word wrap
 		'word-break': 'keep-all',
 		'overflow-wrap': 'break-word',
 		'text-wrap': (wrapStyle === 3 ? 'balance' : wrapStyle === 1 ? 'wrap' : 'pretty'),
-		'max-width': '100%',
+		'text-order': 'stroke fill markers', // khóa text-order cho mọi borderStyle.
 	};
 }
 /** [arena.ai] Cache globalCss theo WrapStyle (chỉ 0..3 → tối đa 4 entry).
@@ -227,7 +355,7 @@ function globalCssFromInfo(info = {}) {
 const GLOBAL_CSS_CACHE = new Map();
 /** [arena.ai] Lấy globalCss từ cache theo WrapStyle (tạo + freeze nếu chưa có). 
  * @param {parsedDataFormat.info} [info] Info đã (hoặc chưa) chuẩn hóa — chỉ đọc WrapStyle.
- * @returns {{Object<'white-space': string, 'word-break': string, 'overflow-wrap': string, 'text-wrap': string, 'max-width': string>}} Bộ props CSS chuẩn: white-space/word-break/overflow-wrap/text-wrap/max-width.
+ * @returns {{Object<'white-space': string, 'word-break': string, 'overflow-wrap': string, 'text-wrap': string, 'text-order': string>}} Bộ props CSS chuẩn: white-space/word-break/overflow-wrap/text-wrap/text-order.
 */
 function cachedGlobalCss(info) {
 	const wrapStyle = Number(info?.WrapStyle ?? 0);
@@ -238,134 +366,7 @@ function cachedGlobalCss(info) {
 	}
 	return cached;
 }
-/** Định nghĩa/chú thích lineSubCss
- * @typedef {object} parsedDataFormat.lineSubCss các thuộc tính CSS cho toàn line (tương đương tag 2.2, 2.1)
- *
- * VỎ NGOÀI của một dòng sub, parent của các segmentSub. Chỉ chứa prop mà TOÀN LINE chịu ảnh hưởng:
- * - tag mức dòng: 2.2 (\an, \pos, \move, \org) và 2.1 (\clip, \iclip);
- * - dữ liệu KHÔNG phải tag ở mức dòng: alignment + marginL/R/V của style, WrapStyle của info (globalCss).
- * KHÔNG chứa typography (font / màu chữ / viền chữ / border box) — những thứ đó thuộc segmentSubCss.
- *
- * Mọi px giữ theo PlayRes; renderer mới scale (videoSize / PlayRes) và xử lí collision.
- * styleParsedToCss chỉ dựng phần suy TỪ STYLE + INFO; các key do tag sinh ra (đánh dấu [tùy chọn])
- * do tagProcess/classify ghi đè lên cùng bộ key này, renderer Object.assign là ra kết quả cuối.
- *
- * @property {string} display 'inline-block' — khung dòng ôm sát chữ, không chiếm cả hàng ngang.
- * @property {string} position 'absolute' — chỗ dựa để renderer set left/top/right/bottom theo
- *   alignment + marginL/R/V, ghi đè bởi \an / \pos / \move (2.2). Parser KHÔNG ghi sẵn tọa độ
- *   (tọa độ là việc của renderer: cần videoSize thật + collision).
- * @property {string} text-align 'left' | 'center' | 'right' — suy từ alignment (hAlign); \an (2.2) ghi đè.
- * @property {string} white-space 'pre' (WrapStyle 2) | 'pre-wrap' — globalCss, theo info.WrapStyle.
- * @property {string} word-break 'keep-all' — globalCss (hằng, không tag nào đụng).
- * @property {string} overflow-wrap 'break-word' — globalCss (hằng, không tag nào đụng).
- * @property {string} text-wrap 'balance' (WrapStyle 3) | 'wrap' (1) | 'pretty' (0, 2) — globalCss theo
- *   info.WrapStyle. Lưu ý: \q là tag 2.4.2 (mức segment) nên KHÔNG ghi đè key này; nó đi qua
- *   '--wrap-style' của segmentSub, renderer tự quy đổi.
- * @property {string} max-width '100%' — globalCss, chặn dòng tràn ra ngoài khung video.
- * @property {string} transform-origin gốc quay/neo của dòng — LUÔN emit. Mặc định suy từ \an của style
- *   (map TRANSFORM_ORIGIN_MAP), ghi đè bởi \org (2.2 — nên key này thuộc mức DÒNG, không phải segment).
- *   \fr* (2.3) ở mức segment quay quanh chính gốc này.
- * @property {string} [clip-path] [tùy chọn] chỉ có khi dòng bị \clip / \iclip (2.1); \iclip là phần bù
- *   (dựng bằng fill-rule evenodd hoặc path bao ngoài — chốt khi làm 2.1, ticket #16).
- */
-
-/** Định nghĩa/chú thích segmentSubCss
- * @typedef {object} parsedDataFormat.segmentSubCss các thuộc tính CSS cho segment (tương đương tag 2.4, 2.3)
- *
- * RUỘT CHỮ của một segment — một khúc chữ bên trong lineSub, là đơn vị nhỏ nhất mà tag CỤC BỘ
- * tác động: 2.4 (layout cục bộ: \fs, \fsp, \fsc*, \b, \i, \fn, \r, \q, \-) và 2.3 (trang trí:
- * màu/alpha, \bord, \shad, \be, \blur, \fa*, \fr*, karaoke).
- * (Từ "segment" ở đây là đơn vị CSS của renderer, KHÔNG liên quan tới tên cũ "segment → base"
- * của tokenizer — hai khái niệm khác nhau, đừng gộp.)
- *
- * styleParsedToCss dựng bộ GỐC của style; mỗi tag cục bộ chỉ tạo một segment mới ghi đè vài key.
- * Kèm bộ CSS variables giữ SỐ LIỆU THÔ để tag override và renderer đọc lại mà không phải parse ngược CSS.
- *
- * Key DUY NHẤT trông như chuyện của chữ nhưng KHÔNG nằm ở đây: transform-origin → lineSubCss
- * (gốc quay đến từ \org, tag 2.2 mức dòng).
- *
- * BORDER BOX (borderStyle 3) nằm Ở ĐÂY, không phải ở lineSub — vì libass dựng box bằng cách thay
- * outline của TỪNG GLYPH bằng hộp bao rồi hợp lại, nên box thừa hưởng màu/độ dày/cỡ chữ của khúc
- * chữ tại chỗ đó: \3c, \bord, \fs giữa dòng đều đổi box từ chỗ đó trở đi (một box phẳng mức dòng
- * sẽ sai cả 3 ca). Box "một khối cho cả event" là BorderStyle=4 — extension riêng của libass,
- * VSFilter render thành BorderStyle=1, KHÔNG phải thứ đang làm ở đây.
- *
- * @property {string} font-family '"<fontName>", sans-serif' — từ style.fontName; \fn (2.4.2) ghi đè
- *   (\fn rỗng = về font của styleRef).
- * @property {string} font-size px theo PlayRes — style.fontSize; \fs (2.4.1, nội suy được trong \t).
- * @property {string} line-height px — style.fontSize (19sep26: chuyển XUỐNG mức segment, trước ở container;
- *   đổi theo \fs cùng lúc với font-size).
- * @property {string} color màu chữ chính — style.primaryColour; \1c/\c (2.3), alpha từ \1a/\alpha (2.3).
- * @property {string} font-weight '700' | '400' — style.bold; \b (2.4.2).
- * @property {string} font-style 'italic' | 'normal' — style.italic; \i (2.4.2).
- * @property {string} text-decoration 'underline' | 'line-through' | cả hai | 'none' — style.underline/strikeOut;
- *   \u, \s (2.3).
- * @property {string} letter-spacing px — style.spacing; \fsp (2.4.1, nội suy được).
- * @property {string} [transform] CHỈ emit khi khác identity (R3): chuỗi rotate(-angle) ĐỨNG TRƯỚC
- *   scaleX/scaleY (R1 — CSS áp phải→trái, khớp VSFilter; \frz dương của ASS quay ngược chiều kim
- *   đồng hồ nên phải đổi dấu). Nguồn: style.angle/scaleX/scaleY; \frx/\fry/\frz + \fax/\fay (2.3)
- *   và \fscx/\fscy/\fsc (2.4.1). Gộp chuỗi transform cuối cùng là việc của RENDERER (chốt 03sep26),
- *   tag chỉ đẩy số liệu qua --angle-x/y/z và --skew-x/y.
- * @property {string} paint-order 'stroke fill markers' (borderStyle 1) | 'normal' (borderStyle 3) —
- *   để stroke không che fill khi dùng -webkit-text-stroke (Chromium 123+ mới áp cho HTML text).
- * @property {string} -webkit-text-stroke-width px — borderStyle 1: style.outline × 2 (ADR 0007 — stroke
- *   vẽ cân giữa đường bao glyph, nhân đôi + paint-order để phần ngoài đúng \bord px như Aegisub);
- *   borderStyle 3: '0px'. Tag: \bord (2.3); \xbord/\ybord → XẤP XỈ 2×max(x,y) (CSS không tách chiều).
- * @property {string} -webkit-text-stroke-color màu viền — style.outlineColour; \3c/\3a (2.3);
- *   'transparent' khi borderStyle 3.
- * @property {string} text-shadow '<x>px <y>px <backColour>' | 'none' — style.shadow + style.backColour;
- *   \shad (2.3, x = y), \xshad/\yshad (2.3, tách chiều CHÍNH XÁC), màu theo \4c/\4a. 'none' khi borderStyle 3.
- * @property {string} [filter] [tùy chọn] 'blur(Npx)' — chỉ khi có \be / \blur (2.3, cùng họ, last-wins chéo);
- *   style gốc không sinh key này.
- * @property {string} [background-color] [tùy chọn] chỉ khi borderStyle 3 (opaque box): style.outlineColour
- *   là MÀU NỀN của box (không phải màu viền chữ); \3c/\3a (2.3) ghi đè. borderStyle 1 → không emit.
- * @property {string} [padding] [tùy chọn] chỉ khi borderStyle 3: độ nở của box = \bord (style.outline),
- *   KHÔNG phải margin (margin là định vị dòng, thuộc lineSub); \bord (2.3) ghi đè.
- *   NGUYÊN LÍ BÙ MARGIN ÂM (chốt 26sep26) — libass nở hộp bao của từng glyph thêm \bord rồi HỢP
- *   (union) các hộp: box to ra nhưng VỊ TRÍ CHỮ KHÔNG ĐỔI. CSS thì ngược: padding của một inline box
- *   CHIẾM CHỖ trong luồng, nên mỗi mối nối giữa 2 segment chữ sẽ bị nới thêm 2×\bord. Cách bù:
- *     padding: <bord>px; margin-left: -<bord>px; margin-right: -<bord>px;
- *   → luồng chữ trở lại đúng advance width gốc (padding cộng vào, margin âm trừ đi), trong khi nền
- *   vẫn được VẼ đủ phần nở ra; vùng nở của 2 segment kề nhau đè lên nhau đúng bằng \bord nên dải box
- *   liền mạch, không hở khe — đúng hiệu ứng union của libass.
- *   Chiều DỌC không cần bù: padding dọc của inline box không làm cao line box (chiều cao dòng do
- *   line-height quyết định), nền vẫn tràn ra ngoài — chỉ cần lineSub đừng cắt (overflow visible).
- *   VÙNG CHỒNG: nếu màu box trong suốt một phần (alpha < 1) thì dải chồng rộng \bord ở mỗi mối nối
- *   ĐẬM GẤP ĐÔI. KHÔNG phải bug, KHÔNG cần chữa (chủ repo chốt 26sep26): đó đúng là hành vi của
- *   VSFilter — box vẽ theo từng khúc rồi đè lên nhau, chỗ giao đậm hơn (libass hợp hình rồi mới tô
- *   nên mới không bị). Renderer cứ để chồng tự nhiên; KHÔNG gộp node nền, KHÔNG bù alpha.
- * @property {string} [margin-left] [tùy chọn] chỉ khi borderStyle 3: '-<bord>px' — phần bù cho padding
- *   (xem NGUYÊN LÍ BÙ MARGIN ÂM ở trên). KHÔNG liên quan marginL/R/V của style (cái đó là định vị dòng).
- * @property {string} [margin-right] [tùy chọn] chỉ khi borderStyle 3: '-<bord>px' — phần bù cho padding.
- * @property {string} [box-shadow] [tùy chọn] chỉ khi borderStyle 3: style.shadow + style.backColour
- *   ('<x>px <y>px <backColour>'); \shad/\xshad/\yshad + \4c/\4a (2.3) ghi đè.
- *   borderStyle 1 dùng text-shadow (bóng bám chữ), KHÔNG dùng key này.
- * @property {string} --primary-color số liệu thô màu chính (\1c/\c, và màu chữ CHƯA hát của karaoke).
- * @property {string} --secondary-color số liệu thô màu phụ (\2c) — màu chữ ĐÃ hát của karaoke.
- * @property {string} --outline-color số liệu thô màu viền (\3c).
- * @property {string} --back-color số liệu thô màu bóng/nền box (\4c).
- * @property {string} --outline-width px GỐC của \bord (CHƯA ×2 — số thô cho renderer/tag override).
- * @property {string} --shadow-depth px độ sâu bóng = max(|x|, |y|) của \shad / \xshad / \yshad.
- * @property {string} --font-size px GỐC của \fs (số thô để đo chữ / quy đổi tương đối).
- * @property {string} [--angle-x] [tùy chọn] deg RAW của \frx (2.3) — renderer đổi dấu khi gộp transform.
- * @property {string} [--angle-y] [tùy chọn] deg RAW của \fry (2.3).
- * @property {string} [--angle-z] [tùy chọn] deg RAW của \frz / \fr (2.3).
- * @property {string} [--skew-x] [tùy chọn] deg đã NẤU SẴN = atan(f) của \fax (2.3).
- * @property {string} [--skew-y] [tùy chọn] deg đã NẤU SẴN = atan(f) của \fay (2.3).
- * @property {string} [--inline-fx] [tùy chọn] tên hiệu ứng inline của \- (2.4.2) — parser không diễn giải.
- * @property {string} [--base-style-name] [tùy chọn] tên style để reset của \r (2.4.2); rỗng = style của dòng.
- * @property {number} [--wrap-style] [tùy chọn] số WrapStyle override của \q (2.4.2) — renderer tự quy đổi
- *   sang white-space/text-wrap của lineSub.
- */
-/** Định nghĩa/chú thích dataCss
- * @typedef {object} parsedDataFormat.dataCss các biến dữ liệu chung
- *
- * CHƯA CHỐT (19sep26) — cố ý để trống. Đây là chỗ chứa SỐ LIỆU (không sinh node, không phải CSS)
- * cho renderer dùng: dữ liệu mức LINE lẫn mức SEGMENT đều nằm chung ở đây.
- * Chốt tới đâu thì bổ sung @property tới đó; đừng suy diễn từ `data` của hàm styleParsedToCss cũ
- * ({ ...style, isBox, hAlign, transformOrigin, styleIndex }) — bộ đó thuộc cấu trúc cũ container/text/data.
- */
-/** [Manual edit] Hàm chuyển đỏi style đã chuẩn hóa thành object CSS (lineSub, segmentSub, data)
+/** [Manual edit] Hàm chuyển đổi style đã chuẩn hóa thành object CSS (lineSub, segmentSub, data)
  * Cấu trúc: lineSub là parent cho các segmentSub; data lưu dữ liệu (cả line và segment để renderer xử lí)
  * - Ghi chú: parser chỉ dựa trên PlayRes, renderer chỉ xử lí scale và collision,
  * tất cả dữ liệu khác phải xử lí trước trong parser/tagProcess.
@@ -382,7 +383,7 @@ function cachedGlobalCss(info) {
  *
  * lineSub (vỏ ngoài — định vị dòng, tag 2.2/2.1):
  *   - display/position/text-align (từ \an) + bộ globalCss chuẩn (white-space/word-break/
- *     overflow-wrap/text-wrap/max-width, nhúng sẵn không merge ở renderer) + transform-origin.
+ *     overflow-wrap/text-wrap/text-order, nhúng sẵn không merge ở renderer) + transform-origin.
  *   - KHÔNG chứa font/color/box — những thứ đó thuộc segmentSub.
  *   - clip-path chỉ sinh khi có \clip/\iclip (2.1) → không emit từ style.
  *
@@ -402,81 +403,133 @@ function cachedGlobalCss(info) {
  *
  * @param {parsedDataFormat.style} style Style đã chuẩn hóa.
  * @param {parsedDataFormat.info} [info] Info đã (hoặc chưa) chuẩn hóa — chỉ đọc WrapStyle cho globalCss.
- * @returns {{lineSub: Object, segmentSub: Object, data: Object}} lineSub (vỏ dòng), segmentSub (ruột chữ), data (trống, chờ chốt).
+ * @returns {{lineSub: parsedDataFormat.lineSubCss, segmentSub: parsedDataFormat.segmentSubCss, data: parsedDataFormat.dataCss}} lineSub (vỏ dòng), segmentSub (ruột chữ), data (trống, chờ chốt).
  */
 function styleToCss (style, info = {}) {
+	const globalCss = cachedGlobalCss(info);
+	const lineSub = {
+		...globalCss,
+		'--margin-left': style.marginL / info.PlayResX * 100 + 'cqw', 
+		// marginL/R/V của style là pixel theo PlayRes, parser quy đổi sang cqw/cqh để renderer scale.
+		'--margin-right': style.marginR / info.PlayResX * 100 + 'cqw',
+		'max-width': (info.PlayResX - style.marginL - style.marginR) / info.PlayResX * 100 + 'cqw',
+	};
+	// renderer đặt scale bằng CSS.registerProperty({ name: '--play-res-scale', syntax: '<number>', initialValue: '1', inherits: true });
+	// Chú ý vấn đề trùng tên với biến dùng trong page.
+	const segmentSub = {
+		'font-family': `${style.fontName}, sans-serif`,
+		'--font-size': style.fontSize,
+		'font-size': `var(--font-size / ${info.PlayResY}) * 100cqh)`,
+		'line-height': `var(--font-size / ${info.PlayResY}) * 100cqh)`,
+		'--color1': style.primaryColour,
+		'color': `var(--color1)`,
+		'--color2': style.secondaryColour,
+		'--color3': style.outlineColour,
+		'-background-color': `var(--color3)`,
+		'-webkit-text-stroke-color': `var(--color3)`,
+		'--color4': style.backColour,
+		'font-weight': utils.boldToWeight(style.bold),
+		'font-style': style.italic ? 'italic' : 'normal',
+		'--underline': style.underline,
+		'--strike-out': style.strikeOut,
+		'text-decoration': utils.decorationToCss(`var(--underline)`, `var(--strike-out)`),
+		'--spacing': style.spacing,
+		'letter-spacing': `var(--spacing / ${info.PlayResX}) * 100cqw)`,
+		'--border-style': style.borderStyle,
+		...utils.outlineToCss(style.outline, info.PlayResY),
+		'--shadow-x': style.shadow,
+		'--shadow-y': style.shadow,
+		'--blur': 0, // style ban đầu không có giá trị blur, chỉ có khi dùng \blur.
+		filter: utils.shadBlurToCss(`var(--shadow-x)`, `var(--shadow-y)`, `var(--blur)`, `var(--color4)`),
+	};
+	const data = {
+	};
+	/** Quy định phân vùng dữ liệu cho lineSub, segmentSub, data. (style[*] -> lineSub?/segmentSub?/data?.[*])
+	 * style.name -> data.name; (ghi tắt là .name -> data; do chỉ có từ object style nên ghi .name, và ko đổi tên nên chỉ ghi data mà ko ghi đủ data.name)
+	//  * .fontName -> segmentSub[font-family] (fallback sans-serif)
+	//  * // Chú ý: fontSize có liên quan tới line-height.
+	//  * .fontSize -> segmentSub[font-size]; -> segmentSub[line-height];
+	//  * // Chú ý: 4 màu lưu dưới dạng var trong segmentSub để renderer chạy lai CSS-native animation + can thiệp timeline bằng JS.
+	//  * .primaryColour -> segmentSub[--color1]; -> segmentSub[color]
+	//  * .secondaryColour -> segmentSub[--color2];
+	//  * // giữ nguyên segmentSub[-webkit-text-stroke-color] bất kể có isBox hay ko. isBox chỉ cần sửa
+	//  * .outlineColour -> segmentSub[--color3]; -> segmentSub[background-color]; -> segmentSub[-webkit-text-stroke-color];
+	//  * .backColour -> segmentSub[--color4];
+	//  * .bold -> segmentSub[font-weight] = utils.boldToWeight(style.bold);
+	//  * // Chú ý: utils.boldToWeight trong tagProcess ko dùng để xử lí trực tiếp tag \b (do \b chỉ nhận khi có giá trị số.)
+	//  * .italic -> segmentSub[font-style] = style.italic ? 'italic' : 'normal';
+	//  * .underline, .strikeOut -> segmentSub[text-decoration] = decoration (ở trên);
+	 * (sai) .scaleX-Y, .angle -> segmentSub: ...(transformParts.length ? { 'transform': transformParts.join(' ') } : {}); -> segmentSub[--scale-x/y], segmentSub[--angle-x/y/z];
+	//  * .spacing -> segmentSub[letter-spacing]; -> segmentSub[--spacing];
+	//  * .borderStyle -> segmentSub[--border-style] (thay thế isBox);
+	//  * // Chú ý: paint-order luôn là 'stroke fill markers'. (đã ghi ở globalCss)
+	//  * .outline -> segmentSub: ...utils.outlineToCss(style.outline, info.PlayResY);
+	//  * .shadow -> segmentSub[--shadow-x/y]; (để đưa vào filter: drop-shadow().)
+	 * .alignment -> segmentSub[--align-x/y] -> lineSub[transform-origin]; -> transform;
+	 * // segmentSub[--align-x] -> lineSub[text-align];
+	 * .marginL/R/V -> lineSub[left/top/max-width]; (ko có inline override tag)
+	 */
 	const alignment = style.alignment;
 	// hAlign: 1,4,7 → left; 2,5,8 → center; 3,6,9 → right
 	const hAlign = alignment % 3 === 1 ? 'left' : alignment % 3 === 2 ? 'center' : 'right';
 	// transform-origin theo anchor \an (để \fr* quay quanh đúng điểm neo) — map hoisted; \org (2.2) ghi đè.
 	const transformOrigin = TRANSFORM_ORIGIN_MAP[alignment] || '50% 50%';
-	// borderStyle 3: opaque box; 1: viền thường (stroke + shadow bám chữ).
-	const isBox = style.borderStyle === 3;
-	// globalCss chuẩn (frozen, cache theo WrapStyle) — spread vào lineSub, không merge ở renderer.
-	const globalCss = cachedGlobalCss(info);
 
 	// lineSub: định vị + wrap + gốc quay. KHÔNG chứa font/color/box.
-	const lineSub = {
-		'display': 'inline-block',
-		'position': 'absolute', // renderer set left/top/right/bottom theo \an + margin + \pos/\move
-		'text-align': hAlign,   // \an (2.2) ghi đè
-		...globalCss,           // white-space/word-break/overflow-wrap/text-wrap/max-width
-		'transform-origin': transformOrigin, // LUÔN emit; \org (2.2) ghi đè. clip-path chỉ có khi \clip/\iclip (2.1).
-	};
+	// lineSub = {
+	// 	'display': 'inline-block',
+	// 	'position': 'absolute', // renderer set left/top/right/bottom theo \an + margin + \pos/\move
+	// 	'text-align': hAlign,   // \an (2.2) ghi đè
+	// 	...globalCss,           // white-space/word-break/overflow-wrap/text-wrap/text-order
+	// 	'transform-origin': transformOrigin, // LUÔN emit; \org (2.2) ghi đè. clip-path chỉ có khi \clip/\iclip (2.1).
+	// };
 
-	// text-decoration gốc từ style.underline/strikeOut; \u,\s (2.3) ghi đè.
-	const decoration = [style.underline ? 'underline' : '', style.strikeOut ? 'line-through' : '']
-		.filter(Boolean).join(' ') || 'none';
+	
 
 	// transform (R1+R3): CHỈ emit khi KHÁC identity; rotate(-angle) TRƯỚC scaleX/scaleY.
-	const transformParts = [];
-	if (style.angle !== 0) transformParts.push(`rotate(${-style.angle}deg)`);
-	if (style.scaleX !== 100) transformParts.push(`scaleX(${style.scaleX / 100})`);
-	if (style.scaleY !== 100) transformParts.push(`scaleY(${style.scaleY / 100})`);
-
 	// segmentSub: typography + line-height (19sep26 xuống đây) + transform + outline/shadow hoặc box.
-	const segmentSub = {
-		'font-family': `"${style.fontName}", sans-serif`,
-		'font-size': `${style.fontSize}px`,   // PlayRes px; \fs (2.4.1) ghi đè, renderer scale sau
-		'line-height': `${style.fontSize}px`, // 19sep26: mức segment, đổi cùng \fs
-		'color': style.primaryColour,
-		'font-weight': style.bold ? '700' : '400',
-		'font-style': style.italic ? 'italic' : 'normal',
-		'text-decoration': decoration,
-		'letter-spacing': `${style.spacing}px`,
-		// R3: key transform chỉ xuất hiện khi thật sự cần (tránh compositing thừa).
-		...(transformParts.length ? { 'transform': transformParts.join(' ') } : {}),
-		'paint-order': isBox ? 'normal' : 'stroke fill markers',
-		...(isBox ? {
-			// borderStyle 3: KHÔNG stroke chữ (reset đủ bộ để renderer reuse node không dính cache),
-			// outlineColour là MÀU NỀN box, \bord là padding, kèm bù margin âm giữ advance width.
-			'-webkit-text-stroke-width': '0px',
-			'-webkit-text-stroke-color': 'transparent',
-			'text-shadow': 'none',
-			'background-color': style.outlineColour,
-			'padding': `${style.outline}px`,
-			'margin-left': `-${style.outline}px`,
-			'margin-right': `-${style.outline}px`,
-			'box-shadow': style.shadow ? `${style.shadow}px ${style.shadow}px ${style.backColour}` : 'none',
-		} : {
-			// borderStyle 1: stroke ×2 (ADR 0007) — vẽ cân giữa đường bao glyph, paint-order 'stroke fill'
-			// để fill che nửa trong → nửa ngoài đúng \bord px như Aegisub; shadow bám chữ (text-shadow).
-			'-webkit-text-stroke-width': style.outline ? `${style.outline * 2}px` : '0px',
-			'-webkit-text-stroke-color': style.outlineColour,
-			'text-shadow': style.shadow ? `${style.shadow}px ${style.shadow}px ${style.backColour}` : 'none',
-		}),
-		// CSS variables giữ SỐ LIỆU THÔ cho tag override (2.3) + renderer đọc lại (không parse ngược CSS).
-		'--primary-color': style.primaryColour,
-		'--secondary-color': style.secondaryColour,
-		'--outline-color': style.outlineColour,
-		'--back-color': style.backColour,
-		'--outline-width': `${style.outline}px`, // GỐC (CHƯA ×2)
-		'--shadow-depth': `${style.shadow}px`,   // max(|x|,|y|); style gốc x=y=shadow
-		'--font-size': `${style.fontSize}px`,    // GỐC của \fs
-	};
+	// segmentSub = {
+	// 	'font-family': `${style.fontName}, sans-serif`,
+	// 	'font-size': `${style.fontSize}px`,   // PlayRes px; \fs (2.4.1) ghi đè, renderer scale sau
+	// 	'line-height': `${style.fontSize}px`, // 19sep26: mức segment, đổi cùng \fs
+	// 	'color': style.primaryColour,
+	// 	'font-weight': style.bold ? '700' : '400',
+	// 	'font-style': style.italic ? 'italic' : 'normal',
+	// 	'text-decoration': decoration,
+	// 	'letter-spacing': `${style.spacing}px`,
+	// 	// R3: key transform chỉ xuất hiện khi thật sự cần (tránh compositing thừa).
+	// 	...(transformParts.length ? { 'transform': transformParts.join(' ') } : {}),
+	// 	'paint-order': isBox ? 'normal' : 'stroke fill markers',
+	// 	...(isBox ? {
+	// 		// borderStyle 3: KHÔNG stroke chữ (reset đủ bộ để renderer reuse node không dính cache),
+	// 		// outlineColour là MÀU NỀN box, \bord là padding, kèm bù margin âm giữ advance width.
+	// 		'-webkit-text-stroke-width': '0px',
+	// 		'-webkit-text-stroke-color': 'transparent',
+	// 		'text-shadow': 'none',
+	// 		'background-color': style.outlineColour,
+	// 		'padding': `${style.outline}px`,
+	// 		'margin-left': `-${style.outline}px`,
+	// 		'margin-right': `-${style.outline}px`,
+	// 		'box-shadow': style.shadow ? `${style.shadow}px ${style.shadow}px ${style.backColour}` : 'none',
+	// 	} : {
+	// 		// borderStyle 1: stroke ×2 (ADR 0007) — vẽ cân giữa đường bao glyph, paint-order 'stroke fill'
+	// 		// để fill che nửa trong → nửa ngoài đúng \bord px như Aegisub; shadow bám chữ (text-shadow).
+	// 		'-webkit-text-stroke-width': style.outline ? `${style.outline * 2}px` : '0px',
+	// 		'-webkit-text-stroke-color': style.outlineColour,
+	// 		'text-shadow': style.shadow ? `${style.shadow}px ${style.shadow}px ${style.backColour}` : 'none',
+	// 	}),
+	// 	// CSS variables giữ SỐ LIỆU THÔ cho tag override (2.3) + renderer đọc lại (không parse ngược CSS).
+	// 	'--primary-color': style.primaryColour,
+	// 	'--secondary-color': style.secondaryColour,
+	// 	'--outline-color': style.outlineColour,
+	// 	'--back-color': style.backColour,
+	// 	'--outline-width': `${style.outline}px`, // GỐC (CHƯA ×2)
+	// 	'--shadow-depth': `${style.shadow}px`,   // max(|x|,|y|); style gốc x=y=shadow
+	// 	'--font-size': `${style.fontSize}px`,    // GỐC của \fs
+	// };
 
 	// data: CHƯA CHỐT (19sep26) — để trống, bổ sung khi typedef dataCss được điền @property.
-	const data = {};
+	
 
 	return { lineSub, segmentSub, data };
 }
@@ -494,7 +547,7 @@ function styleToCss (style, info = {}) {
  * container (vỏ ngoài — định vị dòng):
  *   - Nhiệm vụ: đặt khung dòng trong video theo \an + marginL/R/V (+ \pos/\move sau này).
  *   - Chứa: display, position, text-align (từ \an), line-height,
- *           bộ globalCss chuẩn (white-space/word-break/overflow-wrap/text-wrap/max-width,
+ *           bộ globalCss chuẩn (white-space/word-break/overflow-wrap/text-wrap/text-order,
  *           31aug26 Chú ý 2: nhúng sẵn, không phải merge ở renderer),
  *           background/box-shadow khi borderStyle==3 (opaque box).
  *   - KHÔNG chứa font/color/transform — những thứ đó thuộc text.
