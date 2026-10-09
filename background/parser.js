@@ -1,4 +1,4 @@
-// v0.1.0 07oct26
+// v0.1.0 10oct26
 // beta mode (đã viết xong, sửa lỗi khi chạy)
 // Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
@@ -345,7 +345,7 @@ function globalCssFromInfo(info = {}) {
 		'word-break': 'keep-all',
 		'overflow-wrap': 'break-word',
 		'text-wrap': (wrapStyle === 3 ? 'balance' : wrapStyle === 1 ? 'wrap' : 'pretty'),
-		'text-order': 'stroke fill markers', // khóa text-order cho mọi borderStyle.
+		'paint-order': 'stroke fill markers', // khóa paint-order cho mọi borderStyle.
 	};
 }
 /** [arena.ai] Cache globalCss theo WrapStyle (chỉ 0..3 → tối đa 4 entry).
@@ -355,7 +355,7 @@ function globalCssFromInfo(info = {}) {
 const GLOBAL_CSS_CACHE = new Map();
 /** [arena.ai] Lấy globalCss từ cache theo WrapStyle (tạo + freeze nếu chưa có). 
  * @param {parsedDataFormat.info} [info] Info đã (hoặc chưa) chuẩn hóa — chỉ đọc WrapStyle.
- * @returns {{Object<'white-space': string, 'word-break': string, 'overflow-wrap': string, 'text-wrap': string, 'text-order': string>}} Bộ props CSS chuẩn: white-space/word-break/overflow-wrap/text-wrap/text-order.
+ * @returns {{Object<'position': string, 'width': string, 'white-space': string, 'word-break': string, 'overflow-wrap': string, 'text-wrap': string, 'paint-order': string>}} Bộ props CSS chuẩn: white-space/word-break/overflow-wrap/text-wrap/paint-order.
 */
 function cachedGlobalCss(info) {
 	const wrapStyle = Number(info?.WrapStyle ?? 0);
@@ -383,7 +383,7 @@ function cachedGlobalCss(info) {
  *
  * lineSub (vỏ ngoài — định vị dòng, tag 2.2/2.1):
  *   - display/position/text-align (từ \an) + bộ globalCss chuẩn (white-space/word-break/
- *     overflow-wrap/text-wrap/text-order, nhúng sẵn không merge ở renderer) + transform-origin.
+ *     overflow-wrap/text-wrap/paint-order, nhúng sẵn không merge ở renderer) + transform-origin.
  *   - KHÔNG chứa font/color/box — những thứ đó thuộc segmentSub.
  *   - clip-path chỉ sinh khi có \clip/\iclip (2.1) → không emit từ style.
  *
@@ -409,18 +409,19 @@ function styleToCss (style, info = {}) {
 	const globalCss = cachedGlobalCss(info);
 	const lineSub = {
 		...globalCss,
-		'--margin-left': style.marginL / info.PlayResX * 100 + 'cqw', 
-		// marginL/R/V của style là pixel theo PlayRes, parser quy đổi sang cqw/cqh để renderer scale.
-		'--margin-right': style.marginR / info.PlayResX * 100 + 'cqw',
-		'max-width': (info.PlayResX - style.marginL - style.marginR) / info.PlayResX * 100 + 'cqw',
-	};
+		...utils.alignmentToCss(style, info.PlayResX, info.PlayResY),
+	}
 	// renderer đặt scale bằng CSS.registerProperty({ name: '--play-res-scale', syntax: '<number>', initialValue: '1', inherits: true });
 	// Chú ý vấn đề trùng tên với biến dùng trong page.
 	const segmentSub = {
-		'font-family': `${style.fontName}, sans-serif`,
+		'--base-style-name': style.name, // Lưu style mặc định để \r rỗng đưa --style-name về.
+		'--style-name': style.name, // Lưu style hiện tại để \r không rỗng ghi dữ liệu vào.
+		'--font-name': style.fontName,
+		'font-family': `var(--font-name), sans-serif`,
 		'--font-size': style.fontSize,
-		'font-size': `var(--font-size / ${info.PlayResY}) * 100cqh)`,
-		'line-height': `var(--font-size / ${info.PlayResY}) * 100cqh)`,
+		'--css-resize': 1,
+		'font-size': `calc(var(--font-size) / ${info.PlayResY} * 100cqh * var(--css-resize))`,
+		'line-height': `calc(var(--font-size) / ${info.PlayResY} * 100cqh)`,
 		'--color1': style.primaryColour,
 		'color': `var(--color1)`,
 		'--color2': style.secondaryColour,
@@ -434,7 +435,7 @@ function styleToCss (style, info = {}) {
 		'--strike-out': style.strikeOut,
 		'text-decoration': utils.decorationToCss(`var(--underline)`, `var(--strike-out)`),
 		'--spacing': style.spacing,
-		'letter-spacing': `var(--spacing / ${info.PlayResX}) * 100cqw)`,
+		'letter-spacing': `calc(var(--spacing) / ${info.PlayResX} * 100cqw)`,
 		'--border-style': style.borderStyle,
 		...utils.outlineToCss(style.outline, info.PlayResY),
 		'--shadow-x': style.shadow,
@@ -442,8 +443,10 @@ function styleToCss (style, info = {}) {
 		'--blur': 0, // style ban đầu không có giá trị blur, chỉ có khi dùng \blur.
 		filter: utils.shadBlurToCss(`var(--shadow-x)`, `var(--shadow-y)`, `var(--blur)`, `var(--color4)`),
 	};
-	const data = {
-	};
+	// to-do: vẫn còn scaleX-Y, angle của style chưa xử lí.
+	// transform-origin, inline-fx, base-style-name, wrap-style chưa emit.
+	// const data = {
+	// };
 	/** Quy định phân vùng dữ liệu cho lineSub, segmentSub, data. (style[*] -> lineSub?/segmentSub?/data?.[*])
 	 * style.name -> data.name; (ghi tắt là .name -> data; do chỉ có từ object style nên ghi .name, và ko đổi tên nên chỉ ghi data mà ko ghi đủ data.name)
 	//  * .fontName -> segmentSub[font-family] (fallback sans-serif)
@@ -465,228 +468,9 @@ function styleToCss (style, info = {}) {
 	//  * // Chú ý: paint-order luôn là 'stroke fill markers'. (đã ghi ở globalCss)
 	//  * .outline -> segmentSub: ...utils.outlineToCss(style.outline, info.PlayResY);
 	//  * .shadow -> segmentSub[--shadow-x/y]; (để đưa vào filter: drop-shadow().)
-	 * .alignment -> segmentSub[--align-x/y] -> lineSub[transform-origin]; -> transform;
-	 * // segmentSub[--align-x] -> lineSub[text-align];
-	 * .marginL/R/V -> lineSub[left/top/max-width]; (ko có inline override tag)
+	//  * .marginL/R/V, .alignment -> lineSub: ...utils.alignmentToCss(style, info.PlayResX, info.PlayResY);
 	 */
-	const alignment = style.alignment;
-	// hAlign: 1,4,7 → left; 2,5,8 → center; 3,6,9 → right
-	const hAlign = alignment % 3 === 1 ? 'left' : alignment % 3 === 2 ? 'center' : 'right';
-	// transform-origin theo anchor \an (để \fr* quay quanh đúng điểm neo) — map hoisted; \org (2.2) ghi đè.
-	const transformOrigin = TRANSFORM_ORIGIN_MAP[alignment] || '50% 50%';
-
-	// lineSub: định vị + wrap + gốc quay. KHÔNG chứa font/color/box.
-	// lineSub = {
-	// 	'display': 'inline-block',
-	// 	'position': 'absolute', // renderer set left/top/right/bottom theo \an + margin + \pos/\move
-	// 	'text-align': hAlign,   // \an (2.2) ghi đè
-	// 	...globalCss,           // white-space/word-break/overflow-wrap/text-wrap/text-order
-	// 	'transform-origin': transformOrigin, // LUÔN emit; \org (2.2) ghi đè. clip-path chỉ có khi \clip/\iclip (2.1).
-	// };
-
-	
-
-	// transform (R1+R3): CHỈ emit khi KHÁC identity; rotate(-angle) TRƯỚC scaleX/scaleY.
-	// segmentSub: typography + line-height (19sep26 xuống đây) + transform + outline/shadow hoặc box.
-	// segmentSub = {
-	// 	'font-family': `${style.fontName}, sans-serif`,
-	// 	'font-size': `${style.fontSize}px`,   // PlayRes px; \fs (2.4.1) ghi đè, renderer scale sau
-	// 	'line-height': `${style.fontSize}px`, // 19sep26: mức segment, đổi cùng \fs
-	// 	'color': style.primaryColour,
-	// 	'font-weight': style.bold ? '700' : '400',
-	// 	'font-style': style.italic ? 'italic' : 'normal',
-	// 	'text-decoration': decoration,
-	// 	'letter-spacing': `${style.spacing}px`,
-	// 	// R3: key transform chỉ xuất hiện khi thật sự cần (tránh compositing thừa).
-	// 	...(transformParts.length ? { 'transform': transformParts.join(' ') } : {}),
-	// 	'paint-order': isBox ? 'normal' : 'stroke fill markers',
-	// 	...(isBox ? {
-	// 		// borderStyle 3: KHÔNG stroke chữ (reset đủ bộ để renderer reuse node không dính cache),
-	// 		// outlineColour là MÀU NỀN box, \bord là padding, kèm bù margin âm giữ advance width.
-	// 		'-webkit-text-stroke-width': '0px',
-	// 		'-webkit-text-stroke-color': 'transparent',
-	// 		'text-shadow': 'none',
-	// 		'background-color': style.outlineColour,
-	// 		'padding': `${style.outline}px`,
-	// 		'margin-left': `-${style.outline}px`,
-	// 		'margin-right': `-${style.outline}px`,
-	// 		'box-shadow': style.shadow ? `${style.shadow}px ${style.shadow}px ${style.backColour}` : 'none',
-	// 	} : {
-	// 		// borderStyle 1: stroke ×2 (ADR 0007) — vẽ cân giữa đường bao glyph, paint-order 'stroke fill'
-	// 		// để fill che nửa trong → nửa ngoài đúng \bord px như Aegisub; shadow bám chữ (text-shadow).
-	// 		'-webkit-text-stroke-width': style.outline ? `${style.outline * 2}px` : '0px',
-	// 		'-webkit-text-stroke-color': style.outlineColour,
-	// 		'text-shadow': style.shadow ? `${style.shadow}px ${style.shadow}px ${style.backColour}` : 'none',
-	// 	}),
-	// 	// CSS variables giữ SỐ LIỆU THÔ cho tag override (2.3) + renderer đọc lại (không parse ngược CSS).
-	// 	'--primary-color': style.primaryColour,
-	// 	'--secondary-color': style.secondaryColour,
-	// 	'--outline-color': style.outlineColour,
-	// 	'--back-color': style.backColour,
-	// 	'--outline-width': `${style.outline}px`, // GỐC (CHƯA ×2)
-	// 	'--shadow-depth': `${style.shadow}px`,   // max(|x|,|y|); style gốc x=y=shadow
-	// 	'--font-size': `${style.fontSize}px`,    // GỐC của \fs
-	// };
-
-	// data: CHƯA CHỐT (19sep26) — để trống, bổ sung khi typedef dataCss được điền @property.
-	
-
-	return { lineSub, segmentSub, data };
-}
-
-
-/** [arena.ai] to-do: sửa hàm này. Chuyển đổi style đã chuẩn hóa thành object CSS.
- * 31aug26 — Chú ý 2 pipeline: container chứa sẵn globalCss (chuẩn); delta theo mức node
- *           {container, text, data} cho classify (bước 4-7) — xem typedef
- *           parsedDataFormat.baseItemDelta bên dưới baseFromTokens.
- *
- * Triết lý:
- * - Parser KHÔNG đo chữ thật, KHÔNG scale sang video thật. Mọi px giữ theo PlayRes.
- * - Renderer mới scale (videoSize / PlayRes) và đo chữ thật (pretext).
- *
- * container (vỏ ngoài — định vị dòng):
- *   - Nhiệm vụ: đặt khung dòng trong video theo \an + marginL/R/V (+ \pos/\move sau này).
- *   - Chứa: display, position, text-align (từ \an), line-height,
- *           bộ globalCss chuẩn (white-space/word-break/overflow-wrap/text-wrap/text-order,
- *           31aug26 Chú ý 2: nhúng sẵn, không phải merge ở renderer),
- *           background/box-shadow khi borderStyle==3 (opaque box).
- *   - KHÔNG chứa font/color/transform — những thứ đó thuộc text.
- *   - alignment → hAlign (left/center/right) để set text-align, và transformOrigin cho \fr.
- *
- * text (ruột — chữ):
- *   - Nhiệm vụ: typography gốc của dòng, làm base cho delta tag \b,\i,\fn,\fs,\fsc,\fsp,\fr,\c...
- *   - Chứa: font-family, font-size (PlayRes px), color (primaryColour),
- *           font-weight/style, text-decoration (u/s), letter-spacing (fsp),
- *           transform (02sep26 — review từ hàm cũ styleObjToCss): CHỈ emit khi khác identity
- *             (R3 — scaleX/Y=100 và angle=0 thì KHÔNG có key transform, tránh compositing thừa);
- *             thứ tự chuỗi: rotate TRƯỚC scale (R1 — CSS áp phải→trái: scale trước, xoay sau,
- *             khớp VSFilter scale glyph rồi mới xoay) và rotate(-angle) (R1 — \frz dương của ASS
- *             quay NGƯỢC chiều kim đồng hồ, CSS rotate dương quay THUẬN → phải đổi dấu).
- *             transform-origin từ \an LUÔN emit (vô hại, sẵn cho tag \fr override sau).
- *           outline/shadow: nếu borderStyle==1 dùng -webkit-text-stroke + text-shadow,
- *             (02sep26 — chốt Chromium 131+): stroke-width = outline * 2 vì -webkit-text-stroke
- *             vẽ viền CÂN GIỮA đường bao glyph (nửa trong nửa ngoài) còn \bord của Aegisub vẽ
- *             HOÀN TOÀN ra ngoài; nhân đôi + paint-order stroke fill (Chromium 123+ mới áp dụng
- *             cho HTML text) → nửa trong bị fill che, nửa ngoài đúng outline px như Aegisub.
- *             --outline-width vẫn giữ giá trị GỐC outline (số liệu thô cho tag override/renderer).
- *           nếu borderStyle==3 thì không stroke (box lo chứa background).
- *   - Kèm CSS variables --primary/--secondary/--outline/--back để tag \1c..\4c override nhanh.
- *
- *  * data (bổ sung — renderer tính toán):
- *   - 02sep26 (tối ưu): data = { ...style } (spread toàn bộ field style gốc — field mới tự theo,
- *     không liệt kê tay 20+ field) + các field suy ra TỪ STYLE: isBox, hAlign, transformOrigin,
- *     styleIndex (02sep26 — chỉ số trong parsedData.styles, chuyển từ lineCss vào đây).
- *   - 02sep26 (chốt vai trò từng thuộc tính — tránh đổi nhầm):
- *     + marginL/R/V → DÙNG CHO ĐỊNH VỊ dòng (safe margin): renderer set left/top/right/bottom
- *       theo \an + margin + \pos/\move, rồi scale về videoSize/PlayRes. KHÔNG phải padding box.
- *     + Khi borderStyle==3 (opaque box), PADDING của box chính là OUTLINE (\bord) — cụ thể
- *       'padding': outline px, 'background-color': outlineColour, 'box-shadow': shadow+backColour.
- *       Margin KHÔNG tham gia padding box (đó là vị trí, không phải độ đệm quanh chữ).
- *     + hAlign (left/center/right) → text-align / transform-origin; nằm trong data cho renderer.
- *   - 02sep26 bản 3: KHÔNG lưu playResX/playResY/scaledBorderAndShadow vào data nữa —
- *     chúng là hằng số TOÀN FILE, đã có trong parsedData.info (renderer nhận cả parsedData);
- *     duplicate vào từng style vừa thừa vừa rủi ro stale (file dị dạng đặt [V4+ Styles]
- *     trước [Script Info] → data chụp fallback, info sau đó mới có giá trị thật).
- *
- * @param {parsedDataFormat.style} style Style đã chuẩn hóa.
- * @param {parsedDataFormat.info} [info] Info đã (hoặc chưa) chuẩn hóa — chỉ dùng lấy globalCss (WrapStyle) nhúng vào container (02sep26 bản 3).
- * @param {number} [styleIndex=-1] Chỉ số của style trong parsedData.styles (02sep26 — lưu vào data.styleIndex; -1 nếu gọi rời không biết chỉ số).
- * @returns {{container: Object, text: Object, data: Object}}
- */
-function styleParsedToCss (style, info = {}, styleIndex = -1) {
-	const alignment = style.alignment;
-	// hAlign: 1,4,7 → left; 2,5,8 → center; 3,6,9 → right
-	const hAlign = alignment % 3 === 1 ? 'left' : alignment % 3 === 2 ? 'center' : 'right';
-	// transform-origin theo anchor \an (để \fr quay quanh đúng điểm neo) — map hoisted
-	const transformOrigin = TRANSFORM_ORIGIN_MAP[alignment] || '50% 50%';
-	// 3: box, 1: thường
-	const isBox = style.borderStyle === 3;
-	/** cache để tối ưu */
-	const globalCss = cachedGlobalCss(info);
-	// container: định vị, không chứa font
-	// nhúng globalCss vào container: white-space/word-break/overflow-wrap/text-wrap/max-width
-	const container = {
-		'display': 'inline-block',
-		'position': 'absolute', // renderer sẽ set left/top/right/bottom theo an + margin + pos/move
-		'text-align': hAlign,
-		'line-height': `${style.fontSize}px`, // to-do: line-height theo text/segment, ko phải container/line
-		...globalCss, // globalCssFromInfo(info): chuẩn wrap/khung dòng, renderer không cần merge riêng
-		...(isBox ? {
-			// borderStyle 3: opaque box — theo spec Aegisub, outlineColour là màu nền box,
-			// outline là padding của box, shadow là box-shadow (hoặc vẫn là text-shadow? tạm dùng box-shadow)
-			'background-color': style.outlineColour,
-			'padding': `${style.outline}px`,
-			'box-shadow': style.shadow ? `${style.shadow}px ${style.shadow}px ${style.backColour}` : 'none',
-		} : {
-			'background-color': 'transparent',
-		}),
-	};
-
-	const decoration = [style.underline ? 'underline' : '', style.strikeOut ? 'line-through' : ''].filter(Boolean).join(' ') || 'none';
-
-	// transform (02sep26 — R1+R3, review từ hàm cũ styleObjToCss):
-	// R3: chỉ emit key transform khi KHÁC identity (đa số style thường sẽ không có key này).
-	// R1: rotate đứng TRƯỚC trong chuỗi (CSS áp phải→trái = scale trước, xoay sau — khớp VSFilter)
-	//     và rotate(-angle) vì \frz dương của ASS quay ngược chiều kim đồng hồ, CSS thì thuận.
-	const transformParts = [];
-	if (style.angle !== 0) transformParts.push(`rotate(${-style.angle}deg)`);
-	if (style.scaleX !== 100) transformParts.push(`scaleX(${style.scaleX / 100})`);
-	if (style.scaleY !== 100) transformParts.push(`scaleY(${style.scaleY / 100})`);
-
-	// text: typography + base transform + outline/shadow
-	const text = {
-		'font-family': `"${style.fontName}", sans-serif`,
-		'font-size': `${style.fontSize}px`, // PlayRes px, renderer scale và CSSResize sau: videoHeight/PlayResY
-		'color': style.primaryColour,
-		'font-weight': style.bold ? '700' : '400',
-		'font-style': style.italic ? 'italic' : 'normal',
-		'text-decoration': decoration,
-		'letter-spacing': `${style.spacing}px`,
-		// R3 (02sep26): không có transform identity — key chỉ xuất hiện khi thật sự cần
-		...(transformParts.length ? { 'transform': transformParts.join(' ') } : {}),
-		'transform-origin': transformOrigin,
-		'paint-order': 'stroke fill markers', // để stroke không che fill khi dùng -webkit-text-stroke
-		// CSS variables cho tag override nhanh (\c, \2c, \3c, \4c, \bord, \shad)
-		'--primary-color': style.primaryColour,
-		'--secondary-color': style.secondaryColour,
-		'--outline-color': style.outlineColour,
-		'--back-color': style.backColour,
-		'--outline-width': `${style.outline}px`,
-		'--shadow-depth': `${style.shadow}px`,
-		'--font-size': `${style.fontSize}px`,
-		...(isBox ? {
-			// R2 (02sep26 — adopt từ hàm cũ styleObjToCss): reset ĐỦ BỘ khi box —
-			// thêm stroke-color transparent + paint-order normal (đè 'stroke fill markers' phía trên)
-			// để renderer reuse node không dính cache style của nhánh outline.
-			'-webkit-text-stroke-width': '0px',
-			'-webkit-text-stroke-color': 'transparent',
-			'paint-order': 'normal',
-			'text-shadow': 'none',
-		} : {
-			// 02sep26 (chốt Chromium 131+): outline * 2 — stroke vẽ cân giữa, fill che nửa trong
-			// (paint-order stroke fill, HTML text cần Chromium 123+) → viền ngoài đúng outline px như \bord.
-			'-webkit-text-stroke-width': style.outline ? `${style.outline * 2}px` : '0px',
-			'-webkit-text-stroke-color': style.outlineColour,
-			'text-shadow': style.shadow ? `${style.shadow}px ${style.shadow}px ${style.backColour}` : 'none',
-		}),
-	};
-
-	// data (02sep26 — tối ưu): spread toàn bộ style gốc + field suy ra TỪ STYLE. Field style mới
-	// tự theo, không cần liệt kê tay. styleIndex chuyển từ lineCss vào đây (chốt 02sep26).
-	// 02sep26 bản 3: BỎ playResX/playResY/scaledBorderAndShadow — renderer đọc từ parsedData.info
-	// (hằng số toàn file, 1 nguồn sự thật, tránh stale khi section đặt sai thứ tự).
-	// 02sep26 (chốt): marginL/R/V là ĐỊNH VỊ dòng (renderer set left/top/right/bottom theo
-	// \an + margin + \pos/\move). KHÔNG dùng làm padding box — padding box khi borderStyle==3
-	// là OUTLINE (\bord), như ở container phía trên. Tránh đổi margin thành padding.
-	const data = {
-		...style,
-		isBox,
-		hAlign,
-		transformOrigin,
-		styleIndex,
-	};
-
-	return { container, text, data };
+	return { lineSub, segmentSub };
 }
 /** [arena.ai] Token là marker đứng riêng {\h} / {\N} / {\n} (renderer quyết định ngữ nghĩa) không? */
 function isStandaloneToken(tok) {
@@ -1087,12 +871,12 @@ export function parser(doStripTags = false, rawText) {
 				if (existingIdx !== -1) {
 				parsedData.styles[existingIdx] = style;
 				// 02sep26: last-wins giữ NGUYÊN chỉ số cũ → styleIndex = existingIdx
-				parsedData.styleCss[existingIdx] = styleParsedToCss(style, parsedData.info, existingIdx);
+				parsedData.styleCss[existingIdx] = styleToCss(style, parsedData.info, existingIdx);
 				continue;
 				}
 				parsedData.styles.push(style);
 				// 02sep26: style vừa push nằm cuối → styleIndex = length - 1 (lưu vào data.styleIndex)
-				parsedData.styleCss.push(styleParsedToCss(style, parsedData.info, parsedData.styles.length - 1));
+				parsedData.styleCss.push(styleToCss(style, parsedData.info, parsedData.styles.length - 1));
 			}
 		} else if (currentSection === '[Events]') {
 			// Trong đoạn Events, cấu trúc cũng tương tự đoạn Styles.

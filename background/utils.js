@@ -1,4 +1,4 @@
-// v0.1.0 07oct26
+// v0.1.0 10oct26
 "use strict";
 const extensionName = "PD-47.ass";
 const HTML_ENTITIES = {
@@ -233,4 +233,80 @@ export function shadBlurToCss(shadowX, shadowY, blur, color) {
 	const dropShadow = `drop-shadow(${sx}px ${sy}px ${color})`;
 	const blurFilter = b > 0 ? `blur(${b}px)` : '';
 	return [dropShadow, blurFilter].filter(Boolean).join(' ');
+}
+/** [arena.ai] Chuẩn hóa ASS alignment và trả về vị trí tương đối của anchor.
+ *
+ * x/y là tỉ lệ anchor trong vùng:
+ * - x: 0 = left, 0.5 = center, 1 = right
+ * - y: 0 = top, 0.5 = middle, 1 = bottom
+ *
+ * @param {number|string} value
+ * @return {{
+ *   an: number,
+ *   horizontal: number,
+ *   vertical: number,
+ *   translate: string
+ * }}
+ */
+export function resolveAlignment(value) {
+	let an = Number(value);
+	if (!Number.isInteger(an) || an < 1 || an > 9) an = 5;
+	const column = (an - 1) % 3;        // 0 left, 1 center, 2 right
+	const row = Math.floor((an - 1) / 3); // 0 bottom, 1 middle, 2 top
+	return {
+		an, // Để debug, chắc thế?
+		// Tỉ lệ tính từ left / top.
+		horizontal: column / 2,       // 0, 0.5, 1
+		vertical: 1 - row / 2,      // 1, 0.5, 0
+		translate: (
+			`${['0', '-50%', '-100%'][column]} `
+			+ `${['-100%', '-50%', '0'][row]}`
+		),
+	};
+}
+/** [arena.ai] Chuyển đổi default alignment/style margin sang CSS.
+ * Không áp dụng cho \pos hoặc \move: renderer sẽ override left/right/top/bottom.
+ *
+ * @param {parsedDataFormat.style} style
+ * @param {number} playResX
+ * @param {number} playResY
+ * @return {{
+ *   left: string,
+ *   right: string,
+ *   top: string,
+ *   bottom: string,
+ *   width: string,
+ *   'max-width': string,
+ *   translate: string
+ * }}
+ */
+export function alignmentToCss(style, playResX, playResY) {
+	const px = Number(playResX);
+	const py = Number(playResY);
+	// if (!Number.isFinite(px) || px <= 0) throw new RangeError(`Invalid PlayResX: ${playResX}`);
+	// if (!Number.isFinite(py) || py <= 0) throw new RangeError(`Invalid PlayResY: ${playResY}`);
+	const marginValue = (value) => {
+		const n = Number(value);
+		return Number.isInteger(n) && n >= 0 ? n : 0;
+	};
+	const marginLPct = marginValue(style.marginL) / px * 100;
+	const marginRPct = marginValue(style.marginR) / px * 100;
+	const marginVPct = marginValue(style.marginV) / py * 100;
+	const alignment = resolveAlignment(style.alignment);
+	const safeWidthPct = 100 - marginLPct - marginRPct;
+	// x=0: MarginL
+	// x=.5: center của safe area
+	// x=1: 100cqw - MarginR
+	const leftPct = marginLPct + safeWidthPct * alignment.horizontal;
+	// y=1: 100cqh - MarginV
+	// y=.5: 50cqh
+	// y=0: MarginV
+	const topPct = (marginVPct + (100 - marginVPct * 2) * alignment.vertical);
+	return {
+		left: `${leftPct}cqw`,	// \pos, \move sẽ override chỗ này
+		top: `${topPct}cqh`,	// \pos, \move sẽ override chỗ này
+		width: 'fit-content',
+		'max-width': `calc(100cqw - ${marginLPct}cqw - ${marginRPct}cqw)`,
+		translate: alignment.translate,	// \an sẽ override chỗ này
+	};
 }
