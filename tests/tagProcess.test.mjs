@@ -147,7 +147,19 @@ test('parser supplies classifier input as a base array and retains line result s
 	});
 });
 
-// classifyDecoration calls the removed utils.parseCssRgba() helper as soon as it
-// encounters color, alpha, karaoke, or other decoration tags. Keep the intended
-// public-contract coverage visible without encoding that throw as correct behavior.
-test.todo('classify decoration and karaoke tags after tagProcess stops calling missing utils.parseCssRgba');
+test('classify cooks color and karaoke decoration metadata using the style color channels', () => {
+	const entry = classify(mkBase([['\\c&HFF&', '\\k20'], 'x']), {
+		...DEFAULT_STYLE_REF,
+		primaryColour: 'rgba(255, 255, 255, 1.00)',
+		secondaryColour: 'rgba(255, 0, 0, 1.00)',
+		outlineColour: 'rgba(0, 0, 0, 1.00)',
+		backColour: 'rgba(0, 0, 0, 1.00)',
+	});
+	assert.deepEqual(entry.base[0].delta, {
+		text: {
+			color: 'rgba(255, 0, 0, 1.00)',
+			'--primary-color': 'rgba(255, 0, 0, 1.00)',
+		},
+		data: { k: { type: 'k', durationMs: 200, startMs: 0 } },
+	});
+});

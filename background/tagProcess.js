@@ -476,7 +476,7 @@ function emitDecoration(state, styleRef, textCss, containerCss) {
 		const baseC = styleCols[n];
 		const rgb = tagC ?? (baseC ? { r: baseC.r, g: baseC.g, b: baseC.b } : null);
 		if (rgb === null) continue; // tag chỉ alpha mà style thiếu màu → bỏ qua kênh này
-		const a = (tagC && tagC.alpha !== null) ? tagC.alpha : (trackedA ?? baseC?.a ?? 1);
+		const a = (tagC && tagC.a !== null) ? tagC.a : (trackedA ?? baseC?.a ?? 1);
 		const css = utils.hexToRgba({ r: rgb.r, g: rgb.g, b: rgb.b, a });
 		if (n === 1) { textCss['color'] = css; textCss['--primary-color'] = css; }
 		if (n === 2) textCss['--secondary-color'] = css;

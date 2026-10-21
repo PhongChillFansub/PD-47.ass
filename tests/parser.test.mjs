@@ -7,6 +7,7 @@ import {
 	decorationToCss,
 	outlineStyleToCss,
 	outlineWidthToCss,
+	parseCssRgba,
 	scaleAngleToCss,
 	shadBlurToCss,
 } from '../background/utils.js';
@@ -275,6 +276,25 @@ test('scaleAngleToCss emits perspective and the current rotate/scale order', () 
 	});
 });
 
-// The parser has the correct direct classify(base, styleRef) call shape, but a
-// decoration tag currently reaches a missing utils.parseCssRgba() function.
-test.todo('parser classifies color/alpha/karaoke decoration tags after tagProcess stops calling missing utils.parseCssRgba');
+test('parseCssRgba reads the parser-produced CSS color shape and rejects unsupported CSS colors', () => {
+	assert.deepEqual(parseCssRgba('rgba(255, 0, 128, 0.50)'), { r: 255, g: 0, b: 128, a: 0.5 });
+	assert.deepEqual(parseCssRgba({ r: 1, g: 2, b: 3 }), { r: 1, g: 2, b: 3, a: 1 });
+	assert.equal(parseCssRgba('rgb(255, 0, 0)'), null);
+	assert.equal(parseCssRgba('var(--color1)'), null);
+	assert.equal(parseCssRgba(null), null);
+});
+
+test('parser classifies color and karaoke decoration tags with parsed style colors', () => {
+	const parsed = parser(false, assWithText('{\\c&HFF&\\k20}x'));
+	assert.deepEqual(parsed.lineCss[0].base, [{
+		tags: ['\\c&HFF&', '\\k20'],
+		text: 'x',
+		delta: {
+			text: {
+				color: 'rgba(255, 0, 0, 1.00)',
+				'--primary-color': 'rgba(255, 0, 0, 1.00)',
+			},
+			data: { k: { type: 'k', durationMs: 200, startMs: 0 } },
+		},
+	}]);
+});
