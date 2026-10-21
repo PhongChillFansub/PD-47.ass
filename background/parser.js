@@ -404,7 +404,18 @@ function styleToCss (style, info = {}) {
 		'--angle-x': 0,
 		'--angle-y': 0,
 		'--angle-z': style.angle,
-// to-do: transform-origin ở dòng này
+		/**
+		 * transform-origin KHÔNG thể chốt tại parser: nhiều segmentSub cùng line phải quay/scale
+		 * quanh một pivot ASS chung, trong khi parser chưa biết offset layout thật của từng segment.
+		 * Renderer phải append lineSub + segmentSub, đợi browser layout, rồi tính cho MỖI segment:
+		 *   originPx = commonPivotInSubRootPx - untransformedSegmentTopLeftInSubRootPx;
+		 *   originXCqw = originPx.x / subRoot.clientWidth * 100;
+		 *   originYCqh = originPx.y / subRoot.clientHeight * 100;
+		 * commonPivot là \org đã đổi PlayRes → subRoot px; nếu không có \org thì là alignment
+		 * anchor của lineSub. Ghi kết quả: segment.style.transformOrigin = '<x>cqw <y>cqh'.
+		 * Không dùng transform-origin: inherit / var(--origin): chúng không trừ offset từng segment.
+		 * Tính lại sau resize/font load/split segment; \move + \org cần origin thay đổi theo line.
+		 */
 		
 		/** Khi override, gọi -scale-x, -scale-y, '--angle-x', '--angle-y', '--angle-z' */
 		...utils.scaleAngleToCss(style.scaleX,style.scaleY,0,0,style.angle,info.LayoutResY),
