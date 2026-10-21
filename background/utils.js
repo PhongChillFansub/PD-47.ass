@@ -111,6 +111,34 @@ export function parseAegisubHex(raw) {
 	return {r, g, b, a};
 }
 /**
+ * Phân tích một CSS `rgba(r, g, b, a)` đã được parser lưu trong style để
+ * tagProcess có thể giữ RGB của style khi override chỉ thay alpha. Hàm cũng
+ * nhận object kênh màu nội bộ để các caller không cần serialize rồi parse lại.
+ *
+ * Chỉ hỗ trợ cú pháp `rgba()` bốn thành phần, phân cách bằng dấu phẩy — đúng
+ * định dạng mà `hexToRgba()` phát ra. CSS màu khác (`rgb()`, tên màu, `var()`
+ * và `transparent`) trả về `null` vì chúng không cho đủ bốn kênh số để nấu
+ * alpha override an toàn.
+ *
+ * @param {string|{r: number, g: number, b: number, a?: number}|null|undefined} raw CSS rgba hoặc các kênh màu.
+ * @returns {{r: number, g: number, b: number, a: number}|null} Các kênh màu số, hoặc `null` khi input không hợp lệ/không hỗ trợ.
+ */
+export function parseCssRgba(raw) {
+	if (raw && typeof raw === 'object'
+		&& Number.isFinite(raw.r) && Number.isFinite(raw.g) && Number.isFinite(raw.b)) {
+		return { r: raw.r, g: raw.g, b: raw.b, a: Number.isFinite(raw.a) ? raw.a : 1 };
+	}
+	if (typeof raw !== 'string') return null;
+	const match = /^rgba\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*\)$/i.exec(raw.trim());
+	if (!match) return null;
+	const r = Number(match[1]);
+	const g = Number(match[2]);
+	const b = Number(match[3]);
+	const a = Number(match[4]);
+	if (![r, g, b, a].every(Number.isFinite)) return null;
+	return { r, g, b, a };
+}
+/**
  * Chuyển đổi màu hex Aegisub sang định dạng rgba() cho CSS
  * @param {string|Object<{r: number, g: number, b: number, a: number}>} raw 
  * @returns {string|null} Chuỗi rgba(r, g, b, a) hoặc null nếu đầu vào không hợp lệ

@@ -101,72 +101,46 @@ import { classify } from './tagProcess.js';
  * 
  * Kèm bộ CSS variables giữ SỐ LIỆU THÔ để tag override và renderer đọc lại mà không phải parse ngược CSS.
  *
- * @property {string} font-family '"<fontName>", sans-serif' — từ style.fontName; \fn (2.4.2) ghi đè
- *   (\fn rỗng = về font của styleRef).
- * @property {string} font-size px theo PlayRes — style.fontSize; \fs (2.4.1, nội suy được trong \t).
- * @property {string} line-height px — style.fontSize (19sep26: chuyển XUỐNG mức segment, trước ở container;
- *   đổi theo \fs cùng lúc với font-size).
- * @property {string} color màu chữ chính — style.primaryColour; \1c/\c (2.3), alpha từ \1a/\alpha (2.3).
- * @property {string} font-weight '700' | '400' — style.bold; \b (2.4.2).
- * @property {string} font-style 'italic' | 'normal' — style.italic; \i (2.4.2).
- * @property {string} text-decoration 'underline' | 'line-through' | cả hai | 'none' — style.underline/strikeOut;
- *   \u, \s (2.3).
- * @property {string} letter-spacing px — style.spacing; \fsp (2.4.1, nội suy được).
- * @property {string} [transform] CHỈ emit khi khác identity (R3): chuỗi rotate(-angle) ĐỨNG TRƯỚC
- *   scaleX/scaleY (R1 — CSS áp phải→trái, khớp VSFilter; \frz dương của ASS quay ngược chiều kim
- *   đồng hồ nên phải đổi dấu). Nguồn: style.angle/scaleX/scaleY; \frx/\fry/\frz + \fax/\fay (2.3)
- *   và \fscx/\fscy/\fsc (2.4.1). Gộp chuỗi transform cuối cùng là việc của RENDERER (chốt 03sep26),
- *   tag chỉ đẩy số liệu qua --angle-x/y/z và --skew-x/y.
- * @property {string} paint-order 'stroke fill markers' (borderStyle 1) | 'normal' (borderStyle 3) —
- *   để stroke không che fill khi dùng -webkit-text-stroke (Chromium 123+ mới áp cho HTML text).
- * @property {string} -webkit-text-stroke-width px — borderStyle 1: style.outline × 2 (ADR 0007 — stroke
- *   vẽ cân giữa đường bao glyph, nhân đôi + paint-order để phần ngoài đúng \bord px như Aegisub);
- *   borderStyle 3: '0px'. Tag: \bord (2.3); \xbord/\ybord → XẤP XỈ 2×max(x,y) (CSS không tách chiều).
- * @property {string} -webkit-text-stroke-color màu viền — style.outlineColour; \3c/\3a (2.3);
- *   'transparent' khi borderStyle 3.
- * @property {string} text-shadow '<x>px <y>px <backColour>' | 'none' — style.shadow + style.backColour;
- *   \shad (2.3, x = y), \xshad/\yshad (2.3, tách chiều CHÍNH XÁC), màu theo \4c/\4a. 'none' khi borderStyle 3.
- * @property {string} [filter] [tùy chọn] 'blur(Npx)' — chỉ khi có \be / \blur (2.3, cùng họ, last-wins chéo);
- *   style gốc không sinh key này.
- * @property {string} [background-color] [tùy chọn] chỉ khi borderStyle 3 (opaque box): style.outlineColour
- *   là MÀU NỀN của box (không phải màu viền chữ); \3c/\3a (2.3) ghi đè. borderStyle 1 → không emit.
- * @property {string} [padding] [tùy chọn] chỉ khi borderStyle 3: độ nở của box = \bord (style.outline),
- *   KHÔNG phải margin (margin là định vị dòng, thuộc lineSub); \bord (2.3) ghi đè.
- *   NGUYÊN LÍ BÙ MARGIN ÂM (chốt 26sep26) — libass nở hộp bao của từng glyph thêm \bord rồi HỢP
- *   (union) các hộp: box to ra nhưng VỊ TRÍ CHỮ KHÔNG ĐỔI. CSS thì ngược: padding của một inline box
- *   CHIẾM CHỖ trong luồng, nên mỗi mối nối giữa 2 segment chữ sẽ bị nới thêm 2×\bord. Cách bù:
- *     padding: <bord>px; margin-left: -<bord>px; margin-right: -<bord>px;
- *   → luồng chữ trở lại đúng advance width gốc (padding cộng vào, margin âm trừ đi), trong khi nền
- *   vẫn được VẼ đủ phần nở ra; vùng nở của 2 segment kề nhau đè lên nhau đúng bằng \bord nên dải box
- *   liền mạch, không hở khe — đúng hiệu ứng union của libass.
- *   Chiều DỌC không cần bù: padding dọc của inline box không làm cao line box (chiều cao dòng do
- *   line-height quyết định), nền vẫn tràn ra ngoài — chỉ cần lineSub đừng cắt (overflow visible).
- *   VÙNG CHỒNG: nếu màu box trong suốt một phần (alpha < 1) thì dải chồng rộng \bord ở mỗi mối nối
- *   ĐẬM GẤP ĐÔI. KHÔNG phải bug, KHÔNG cần chữa (chủ repo chốt 26sep26): đó đúng là hành vi của
- *   VSFilter — box vẽ theo từng khúc rồi đè lên nhau, chỗ giao đậm hơn (libass hợp hình rồi mới tô
- *   nên mới không bị). Renderer cứ để chồng tự nhiên; KHÔNG gộp node nền, KHÔNG bù alpha.
- * @property {string} [margin-left] [tùy chọn] chỉ khi borderStyle 3: '-<bord>px' — phần bù cho padding
- *   (xem NGUYÊN LÍ BÙ MARGIN ÂM ở trên). KHÔNG liên quan marginL/R/V của style (cái đó là định vị dòng).
- * @property {string} [margin-right] [tùy chọn] chỉ khi borderStyle 3: '-<bord>px' — phần bù cho padding.
- * @property {string} [box-shadow] [tùy chọn] chỉ khi borderStyle 3: style.shadow + style.backColour
- *   ('<x>px <y>px <backColour>'); \shad/\xshad/\yshad + \4c/\4a (2.3) ghi đè.
- *   borderStyle 1 dùng text-shadow (bóng bám chữ), KHÔNG dùng key này.
- * @property {string} --primary-color số liệu thô màu chính (\1c/\c, và màu chữ CHƯA hát của karaoke).
- * @property {string} --secondary-color số liệu thô màu phụ (\2c) — màu chữ ĐÃ hát của karaoke.
- * @property {string} --outline-color số liệu thô màu viền (\3c).
- * @property {string} --back-color số liệu thô màu bóng/nền box (\4c).
- * @property {string} --outline-width px GỐC của \bord (CHƯA ×2 — số thô cho renderer/tag override).
- * @property {string} --shadow-depth px độ sâu bóng = max(|x|, |y|) của \shad / \xshad / \yshad.
- * @property {string} --font-size px GỐC của \fs (số thô để đo chữ / quy đổi tương đối).
- * @property {string} [--angle-x] [tùy chọn] deg RAW của \frx (2.3) — renderer đổi dấu khi gộp transform.
- * @property {string} [--angle-y] [tùy chọn] deg RAW của \fry (2.3).
- * @property {string} [--angle-z] [tùy chọn] deg RAW của \frz / \fr (2.3).
- * @property {string} [--skew-x] [tùy chọn] deg đã NẤU SẴN = atan(f) của \fax (2.3).
- * @property {string} [--skew-y] [tùy chọn] deg đã NẤU SẴN = atan(f) của \fay (2.3).
- * @property {string} [--inline-fx] [tùy chọn] tên hiệu ứng inline của \- (2.4.2) — parser không diễn giải.
- * @property {string} [--base-style-name] [tùy chọn] tên style để reset của \r (2.4.2); rỗng = style của dòng.
- * @property {number} [--wrap-style] [tùy chọn] số WrapStyle override của \q (2.4.2) — renderer tự quy đổi
- *   sang white-space/text-wrap của lineSub.
+ * @property {string} display 'inline-block' — segment là transformable box và không auto-wrap.
+ * @property {string} --base-style-name tên style gốc để \r rỗng reset.
+ * @property {string} --style-name tên style hiệu dụng, để \r<name> đổi style.
+ * @property {string} --font-name tên font thô từ style.fontName / \fn.
+ * @property {string} font-family 'var(--font-name), sans-serif'.
+ * @property {number} --font-size cỡ chữ thô theo PlayRes từ style.fontSize / \fs.
+ * @property {number} --css-resize hệ số renderer quy đổi font VSFilter → CSS, ban đầu là 1.
+ * @property {string} font-size cỡ chữ CSS theo cqh.
+ * @property {string} line-height chiều cao dòng CSS theo cqh.
+ * @property {string} --color1 màu chính thô từ style.primaryColour / \1c / \c.
+ * @property {string} color 'var(--color1)'.
+ * @property {string} --color2 màu phụ thô từ style.secondaryColour / \2c.
+ * @property {string} --color3 màu outline thô từ style.outlineColour / \3c.
+ * @property {number} --border-style BorderStyle hiệu dụng.
+ * @property {string} --color4 màu shadow / box thô từ style.backColour / \4c.
+ * @property {string} background-color do outlineStyleToCss() route paint theo BorderStyle.
+ * @property {string} -webkit-text-stroke-color do outlineStyleToCss() route paint theo BorderStyle.
+ * @property {string} font-weight '400' | '700' | '<weight>' từ style.bold / \b.
+ * @property {string} font-style 'italic' | 'normal' từ style.italic / \i.
+ * @property {boolean} --underline trạng thái thô của \u.
+ * @property {boolean} --strike-out trạng thái thô của \s.
+ * @property {string} text-decoration 'underline' | 'line-through' | cả hai | 'none'.
+ * @property {number} --spacing khoảng cách chữ thô theo PlayRes từ style.spacing / \fsp.
+ * @property {string} letter-spacing khoảng cách chữ CSS theo cqw.
+ * @property {number} --outline độ dày \bord thô.
+ * @property {string} -webkit-text-stroke-width độ dày stroke CSS do outlineWidthToCss() tạo.
+ * @property {string} padding độ nở box / geometry CSS do outlineWidthToCss() tạo.
+ * @property {string} margin bù geometry CSS do outlineWidthToCss() tạo.
+ * @property {number} --shadow-x offset shadow X thô.
+ * @property {number} --shadow-y offset shadow Y thô.
+ * @property {string} --blur blur CSS, style gốc là '0px'.
+ * @property {string} filter drop-shadow(...) và/hoặc blur(...).
+ * @property {string} --inline-fx tên hiệu ứng inline của \-; parser không diễn giải.
+ * @property {number} --scale-x scale X thô (%) từ style.scaleX / \fscx.
+ * @property {number} --scale-y scale Y thô (%) từ style.scaleY / \fscy.
+ * @property {number} --angle-x góc X thô (deg) từ \frx.
+ * @property {number} --angle-y góc Y thô (deg) từ \fry.
+ * @property {number} --angle-z góc Z thô (deg) từ style.angle / \frz / \fr.
+ * @property {string} [transform] chuỗi perspective → fry → frx → frz → scale do scaleAngleToCss() tạo;
+ *   chỉ có khi khác identity. transform-origin được renderer tính sau layout cho từng segment.
  */
 /** [Copilot] Định nghĩa/chú thích segmentSubCss 
  * @typedef {parsedDataFormat.segmentSubCssIndependentProperties
@@ -404,7 +378,18 @@ function styleToCss (style, info = {}) {
 		'--angle-x': 0,
 		'--angle-y': 0,
 		'--angle-z': style.angle,
-// to-do: transform-origin ở dòng này
+		/**
+		 * transform-origin KHÔNG thể chốt tại parser: nhiều segmentSub cùng line phải quay/scale
+		 * quanh một pivot ASS chung, trong khi parser chưa biết offset layout thật của từng segment.
+		 * Renderer phải append lineSub + segmentSub, đợi browser layout, rồi tính cho MỖI segment:
+		 *   originPx = commonPivotInSubRootPx - untransformedSegmentTopLeftInSubRootPx;
+		 *   originXCqw = originPx.x / subRoot.clientWidth * 100;
+		 *   originYCqh = originPx.y / subRoot.clientHeight * 100;
+		 * commonPivot là \org đã đổi PlayRes → subRoot px; nếu không có \org thì là alignment
+		 * anchor của lineSub. Ghi kết quả: segment.style.transformOrigin = '<x>cqw <y>cqh'.
+		 * Không dùng transform-origin: inherit / var(--origin): chúng không trừ offset từng segment.
+		 * Tính lại sau resize/font load/split segment; \move + \org cần origin thay đổi theo line.
+		 */
 		
 		/** Khi override, gọi -scale-x, -scale-y, '--angle-x', '--angle-y', '--angle-z' */
 		...utils.scaleAngleToCss(style.scaleX,style.scaleY,0,0,style.angle,info.LayoutResY),
