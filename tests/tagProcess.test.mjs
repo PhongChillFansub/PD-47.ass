@@ -194,6 +194,17 @@ const DECOR_STYLE_REF = {
 	borderStyle: 1, outline: 2, shadow: 2, angle: 0, scaleX: 100, scaleY: 100,
 };
 
+test('classify 2.3: \\u / \\s chỉ cập nhật fragment custom property tương ứng', () => {
+	const entry = classify(
+		mkBase([['\\u1'], 'A'], [['\\s1'], 'B'], [['\\u0'], 'C'], [['\\s0'], 'D']),
+		DECOR_STYLE_REF
+	);
+	assert.deepEqual(entry.base[0].delta.text, { '--underline': 'underline' });
+	assert.deepEqual(entry.base[1].delta.text, { '--strike-out': 'line-through' });
+	assert.deepEqual(entry.base[2].delta.text, { '--underline': ' ' });
+	assert.deepEqual(entry.base[3].delta.text, { '--strike-out': ' ' });
+});
+
 test('classify 2.3: \\1c/\\c → delta.text color + --primary-color (rgba nấu từ &HBBGGRR&)', () => {
 	const entry = classify({
 		base: mkBase([['\\1c&H00FF00&'], 'A'], [['\\c&HFF&'], 'B']),

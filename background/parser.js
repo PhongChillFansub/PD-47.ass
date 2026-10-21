@@ -1,19 +1,17 @@
-// v0.1.0 10oct26
-// beta mode (đã viết xong, sửa lỗi khi chạy)
+// v0.1.0 21oct26
+// alpha mode
 // Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
 import { classify } from './tagProcess.js';
-/** Định nghĩa/chú thích object FALLBACK_DEFAULT_STYLE (parsedDataFormat.style) 
- * 
- * (có thể sẽ thêm các biến khác như CSSResize?)
+/** [Manual edit] Định nghĩa/chú thích object FALLBACK_DEFAULT_STYLE (parsedDataFormat.style) 
  * @typedef {object} parsedDataFormat.style Kiểu style nguyên bản 
  * @property {string} name Tên style (style.name, line.styleref.name, syl.style.name)
  * @property {string} fontName Tên font (\fn)
  * @property {number} fontSize Font size (\fs, px, với PlayRes 640x480)
- * @property {string} primaryColour Màu 1, main (\1c)
- * @property {string} secondaryColour Màu 2, pre-kara (\2c)
- * @property {string} outlineColour Màu 3, outline (\3c)
- * @property {string} backColour Màu 4, shadow (\4c)
+ * @property {string} primaryColour Màu 1, main (\1c), đã qua utils.hexToRgba, alpha = 1.0 nếu không có \1a
+ * @property {string} secondaryColour Màu 2, pre-kara (\2c), đã qua utils.hexToRgba, alpha = 1.0 nếu không có \2a
+ * @property {string} outlineColour Màu 3, outline (\3c), đã qua utils.hexToRgba, alpha = 1.0 nếu không có \3a
+ * @property {string} backColour Màu 4, shadow (\4c), đã qua utils.hexToRgba, alpha = 1.0 nếu không có \4a
  * @property {boolean} bold In đậm (\b, boolean)
  * @property {boolean} italic In nghiêng (\i, boolean)
  * @property {boolean} underline Gạch dưới (\u, boolean)
@@ -21,7 +19,7 @@ import { classify } from './tagProcess.js';
  * @property {number} scaleX ScaleX (\fscx, %)
  * @property {number} scaleY ScaleY (\fscy, %)
  * @property {number} spacing Khoảng cách ký tự (\fsp, px)
- * @property {number} angle Góc xoay (\fr hoặc \frz, degree)
+ * @property {number} angle Góc xoay (\frz, degree)
  * @property {number} borderStyle Kiểu border (1: viền thường, 3: box)
  * @property {number} outline Độ dày viền (\bord, px. Có \xbord và \ybord)
  * @property {number} shadow Độ đổ bóng (\shad, px. Có \xshad và \yshad)
@@ -31,20 +29,36 @@ import { classify } from './tagProcess.js';
  * @property {number} marginV Lề dọc (px)
  * @property {number} encoding Encoding (\fe, nên bị bỏ qua)
  */
-/** Định nghĩa/chú thích object parsedData, sau xử lí 
+/** [Manual edit] Định nghĩa/chú thích object parsedData, sau xử lí 
  * @typedef {object} parsedDataFormat.global Tương ứng với các phần [Script Info], [V4+ Styles], [Events]. Bỏ qua phần [Aegisub Project Garbage].
  * @property {parsedDataFormat.info} info lưu dưới dạng obj do file sub có cấu trúc key: value
- * @property {Array<parsedDataFormat.style>} styles lưu các style của file sub (nếu style không được chuẩn thì fallback cả style về FALLBACK_DEFAULT_STYLE resize)
+ * @property {Array<parsedDataFormat.style>} styles lưu các style của file sub (nếu style không chuẩn thì fallback cả style về FALLBACK_DEFAULT_STYLE)
  * @property {Array<parsedDataFormat.event>} events lưu các events (dialogue) của file sub
  * @property {object} globalCss định dạng các thuộc tính info (có thể chuyển) thành CSS
- * @property {Array} styleCss định dạng các style thành CSS ({container, text, data} — data chứa cả styleIndex, 02sep26)
- * @property {Array} lineCss mỗi phần tử { base, collision, clip } cùng chỉ số với events.
+ * @property {Array<{
+ * 	lineSub: parsedDataFormat.lineSubCss, 
+ * 	segmentSub: parsedDataFormat.segmentSubCss
+ * }>} styleCss định dạng các style thành CSS
+ * @property {parsedDataFormat.lineCss} lineCss mỗi phần tử { base, collision, clip } cùng chỉ số với events.
  *   (02sep26: đổi tên segments → base; classify ghi trực tiếp vào base + thêm collision, clip.
  *   03sep26: lineCss[i] = classify(processLineText(...)) — { base, collision, clip }; 2.4 layout +
  *   \t metadata làm thật; 09sep26: karaoke KHÔNG ở 2.4 (về 2.3), 2.3/2.2/2.1 để session sau
  *   — xem background/tagProcess.js)
  */
-/** Định nghĩa/chú thích object parsedData.info sau xử lí 
+/** [arena.ai] Định nghĩa/chú thích lineCss[i] sau classify (struct đích — mục 3 prompt 03sep26)
+ * @typedef {object} parsedDataFormat.lineCss
+ * @property {Array<parsedDataFormat.baseItem>} base Mục base đã classify: mỗi mục giữ nguyên
+ *   { tags, text } + thêm { delta?, anim? } (delta/anim chỉ xuất hiện khi có nội dung).
+ *   delta.data chứa marker (\h/\N/\n) + karaoke k (2.3, 11sep26: { type, durationMs, startMs })
+ *   — số liệu thuần. \r/\q KHÔNG vào data: ghi vào delta.text dưới dạng CSS var — '--base-style-name'
+ *   (\r, rỗng = style dòng) / '--wrap-style' (\q, last-wins). Karaoke \k* do 2.3 xử lí.
+ * @property {{t: boolean}} collision Nhóm 2.2 — mức DÒNG (bản này CHỈ signal \t, chốt 03sep26:
+ *   an/pos/move/org để session 2.2 làm đầy). collision.t = true khi dòng có \t → renderer tự
+ *   disable collision (KHÔNG lưu payload \t ở đây — payload chỉ ở base[i].anim).
+ * @property {{rawList: string[], effectiveType: ('clip'|'iclip'|null), effectiveRaw: (string|null)}} clip
+ *   Nhóm 2.1 — mức DÒNG, last-wins (bản này STUB default — session 2.1 làm đầy).
+ */
+/** [Manual edit] Định nghĩa/chú thích object parsedData.info sau xử lí 
  * @typedef {object} parsedDataFormat.info
  * @property {string} Title Phần text để hiển thị trong tab Thông tin chung
  * @property {string} ScriptType chỉ hỗ trợ "v4.00+", nếu ko thì xử lí file sub sẽ không đảm bảo
@@ -58,59 +72,34 @@ import { classify } from './tagProcess.js';
  * 
  * 3: Smart wrapping, bottom line is wider
  * @property {boolean} ScaledBorderAndShadow yes -> true, no -> false. Nếu true/yes thì outline/shadow sẽ scale theo PlayRes
- * @property {number} PlayResX Kích thước video chuẩn mà sub dựa vào. Mọi thông số font, pos đều phụ thuộc vào nó
- * @property {number} PlayResY Kích thước video chuẩn mà sub dựa vào. Mọi thông số font, pos đều phụ thuộc vào nó
+ * @property {number} PlayResX Kích thước video cho xử lí vị trí phụ đề.
+ * @property {number} PlayResY Kích thước video cho xử lí vị trí phụ đề.
+ * @property {number} LayoutResX Kích thước video cho xử lí hiệu ứng liên quan đến scaleRes.
+ * @property {number} LayoutResY Kích thước video cho xử lí hiệu ứng liên quan đến scaleRes.
  */
-/** Định nghĩa/chú thích lineSubCss 
- * @typedef {object} parsedDataFormat.lineSubCss các thuộc tính CSS cho toàn line (tương đương tag 2.2, 2.1)
- *
- * VỎ NGOÀI của một dòng sub, parent của các segmentSub. Chỉ chứa prop mà TOÀN LINE chịu ảnh hưởng:
- * - tag mức dòng: 2.2 (\an, \pos, \move, \org) và 2.1 (\clip, \iclip);
- * - dữ liệu KHÔNG phải tag ở mức dòng: alignment + marginL/R/V của style, WrapStyle của info (globalCss).
- * KHÔNG chứa typography (font / màu chữ / viền chữ / border box) — những thứ đó thuộc segmentSubCss.
- *
- * Mọi px giữ theo PlayRes; renderer mới scale (videoSize / PlayRes) và xử lí collision.
- * styleParsedToCss chỉ dựng phần suy TỪ STYLE + INFO; các key do tag sinh ra (đánh dấu [tùy chọn])
- * do tagProcess/classify ghi đè lên cùng bộ key này, renderer Object.assign là ra kết quả cuối.
- *
- * @property {string} display 'inline-block' — khung dòng ôm sát chữ, không chiếm cả hàng ngang.
- * @property {string} position 'absolute' — chỗ dựa để renderer set left/top/right/bottom theo
- *   alignment + marginL/R/V, ghi đè bởi \an / \pos / \move (2.2). Parser KHÔNG ghi sẵn tọa độ
- *   (tọa độ là việc của renderer: cần videoSize thật + collision).
- * @property {string} text-align 'left' | 'center' | 'right' — suy từ alignment (hAlign); \an (2.2) ghi đè.
- * @property {string} white-space 'pre' (WrapStyle 2) | 'pre-wrap' — globalCss, theo info.WrapStyle.
- * @property {string} word-break 'keep-all' — globalCss (hằng, không tag nào đụng).
- * @property {string} overflow-wrap 'break-word' — globalCss (hằng, không tag nào đụng).
- * @property {string} text-wrap 'balance' (WrapStyle 3) | 'wrap' (1) | 'pretty' (0, 2) — globalCss theo
- *   info.WrapStyle. Lưu ý: \q là tag 2.4.2 (mức segment) nên KHÔNG ghi đè key này; nó đi qua
- *   '--wrap-style' của segmentSub, renderer tự quy đổi.
- * @property {string} max-width '100%' — globalCss, chặn dòng tràn ra ngoài khung video.
- * @property {string} transform-origin gốc quay/neo của dòng — LUÔN emit. Mặc định suy từ \an của style
- *   (map TRANSFORM_ORIGIN_MAP), ghi đè bởi \org (2.2 — nên key này thuộc mức DÒNG, không phải segment).
- *   \fr* (2.3) ở mức segment quay quanh chính gốc này.
- * @property {string} [clip-path] [tùy chọn] chỉ có khi dòng bị \clip / \iclip (2.1); \iclip là phần bù
- *   (dựng bằng fill-rule evenodd hoặc path bao ngoài — chốt khi làm 2.1, ticket #16).
+/** [Manual edit] Định nghĩa/chú thích lineSubCss 
+ * @typedef {typeof utils.globalCss & ReturnType<typeof utils.alignmentToCss>} parsedDataFormat.lineSubCss
+ * Ghép thuộc tính từ utils.globalCss và utils.alignmentToCss (2.2). to-do: clip (2.1)?
+ * 
+ * Đo bằng cqw/cqh để giảm khối lượng tính.
  */
-/** Định nghĩa/chú thích segmentSubCss
- * @typedef {object} parsedDataFormat.segmentSubCss các thuộc tính CSS cho segment (tương đương tag 2.4, 2.3)
- *
- * RUỘT CHỮ của một segment — một khúc chữ bên trong lineSub, là đơn vị nhỏ nhất mà tag CỤC BỘ
- * tác động: 2.4 (layout cục bộ: \fs, \fsp, \fsc*, \b, \i, \fn, \r, \q, \-) và 2.3 (trang trí:
- * màu/alpha, \bord, \shad, \be, \blur, \fa*, \fr*, karaoke).
+/** [Manual edit] Định nghĩa/chú thích các thuộc tính trực tiếp trong segmentSubCss 
+ * @typedef {object} parsedDataFormat.segmentSubCssIndependentProperties
  * (Từ "segment" ở đây là đơn vị CSS của renderer, KHÔNG liên quan tới tên cũ "segment → base"
- * của tokenizer — hai khái niệm khác nhau, đừng gộp.)
+ * 
+ * của tokenizer — hai khái niệm khác nhau, không nhầm lẫn, không gộp.)
+ * 
+ * RUỘT CHỮ của một segment = một đoạn chữ bên trong lineSub, là đơn vị nhỏ nhất mà tag CỤC BỘ
+ * 
+ * tác động: 2.4 (layout cục bộ: \fs, \fsp, \fsc*, \b, \i, \fn, \r, \q, \-) và 2.3 (trang trí:
+ * 
+ * màu/alpha, \bord, \shad, \be, \blur, \fa*, \fr*, karaoke).
  *
- * styleParsedToCss dựng bộ GỐC của style; mỗi tag cục bộ chỉ tạo một segment mới ghi đè vài key.
+ * styleParsedToCss dựng bộ GỐC của style; mỗi tag cục bộ chỉ tạo một segment mới ghi đè vài key
+ * 
+ * (bằng delta, xem lineCss[line index in sub file].base[index segment in line].delta).
+ * 
  * Kèm bộ CSS variables giữ SỐ LIỆU THÔ để tag override và renderer đọc lại mà không phải parse ngược CSS.
- *
- * Key DUY NHẤT trông như chuyện của chữ nhưng KHÔNG nằm ở đây: transform-origin → lineSubCss
- * (gốc quay đến từ \org, tag 2.2 mức dòng).
- *
- * BORDER BOX (borderStyle 3) nằm Ở ĐÂY, không phải ở lineSub — vì libass dựng box bằng cách thay
- * outline của TỪNG GLYPH bằng hộp bao rồi hợp lại, nên box thừa hưởng màu/độ dày/cỡ chữ của khúc
- * chữ tại chỗ đó: \3c, \bord, \fs giữa dòng đều đổi box từ chỗ đó trở đi (một box phẳng mức dòng
- * sẽ sai cả 3 ca). Box "một khối cho cả event" là BorderStyle=4 — extension riêng của libass,
- * VSFilter render thành BorderStyle=1, KHÔNG phải thứ đang làm ở đây.
  *
  * @property {string} font-family '"<fontName>", sans-serif' — từ style.fontName; \fn (2.4.2) ghi đè
  *   (\fn rỗng = về font của styleRef).
@@ -179,15 +168,26 @@ import { classify } from './tagProcess.js';
  * @property {number} [--wrap-style] [tùy chọn] số WrapStyle override của \q (2.4.2) — renderer tự quy đổi
  *   sang white-space/text-wrap của lineSub.
  */
-/** Định nghĩa/chú thích dataCss
- * @typedef {object} parsedDataFormat.dataCss các biến dữ liệu chung
- *
- * CHƯA CHỐT (19sep26) — cố ý để trống. Đây là chỗ chứa SỐ LIỆU (không sinh node, không phải CSS)
- * cho renderer dùng: dữ liệu mức LINE lẫn mức SEGMENT đều nằm chung ở đây.
- * Chốt tới đâu thì bổ sung @property tới đó; đừng suy diễn từ `data` của hàm styleParsedToCss cũ
- * ({ ...style, isBox, hAlign, transformOrigin, styleIndex }) — bộ đó thuộc cấu trúc cũ container/text/data.
+/** [Copilot] Định nghĩa/chú thích segmentSubCss 
+ * @typedef {parsedDataFormat.segmentSubCssIndependentProperties
+ *   & ReturnType<typeof utils.outlineStyleToCss>
+ *   & ReturnType<typeof utils.outlineWidthToCss>
+ *   & ReturnType<typeof utils.scaleAngleToCss>
+ *   & {
+ *     'font-weight': ReturnType<typeof utils.boldToWeight>,
+ *     'text-decoration': ReturnType<typeof utils.decorationToCss>,
+ *     filter: ReturnType<typeof utils.shadBlurToCss>
+ *   }
+ * } parsedDataFormat.segmentSubCss
+ * Gồm các thuộc tính độc lập và cụm thuộc tính (do các hàm utils xử lí) cho segment 
+ * 
+ * (tương đương tag 2.4, 2.3)
  */
-/** Mẫu style sau chuẩn hóa, với PlayRes 640x480
+/** [Manual edit] Định nghĩa/chú thích dataCss 
+ * @typedef {object} parsedDataFormat.dataCss các biến dữ liệu chung
+ * Ko có gì.
+ */
+/** [Manual edit] Mẫu style sau chuẩn hóa, với PlayRes 640x480
  * @readonly Chỉ đọc để so chuẩn với các style trong parsedData
  * @type {parsedDataFormat.style} */
 const FALLBACK_DEFAULT_STYLE = {
@@ -220,14 +220,7 @@ Object.freeze(FALLBACK_DEFAULT_STYLE); // Khóa chỉ đọc
 const REQUIRED_STYLE_KEYS = Object.keys(FALLBACK_DEFAULT_STYLE);
 /** LogPrefix của parser (utils.logger đã tự thêm "[PD-47.ass] " nên chỉ cần "parser:"). */
 const parserLogPrefix = "parser:";
-/** [arena.ai] Map \an (1-9) → transform-origin, hoisted ra module scope
- * (tối ưu: không tạo lại object mỗi lần gọi styleParsedToCss). */
-const TRANSFORM_ORIGIN_MAP = Object.freeze({
-	1: '0% 100%', 2: '50% 100%', 3: '100% 100%',
-	4: '0% 50%',  5: '50% 50%',  6: '100% 50%',
-	7: '0% 0%',   8: '50% 0%',   9: '100% 0%',
-});
-/** Chuyển tên trường từ định dạng ASS sang camelCase để sử dụng làm key JavaScript.
+/** [arena.ai] Chuyển tên trường từ định dạng ASS sang camelCase để sử dụng làm key JavaScript.
  * Ví dụ: "Fontname" -> "fontName", "PrimaryColour" -> "primaryColour".
  *
  * @param {string} str Chuỗi cần chuyển đổi.
@@ -238,7 +231,7 @@ const toCamelCase = (str, indices = [0]) => {
     if (!str) return ''; // Vào trống thì ra trống.
     return Array.from(str, (char, index) => indices.includes(index) ? (char === char.toUpperCase() ? char.toLowerCase() : char.toUpperCase()) : char).join('');    
 };
-/** Chuyển thời gian ASS (h:mm:ss.cs) sang mili giây (ms — đơn vị dùng cho CSS timing).
+/** [arena.ai] Chuyển thời gian ASS (h:mm:ss.cs) sang mili giây (ms — đơn vị dùng cho CSS timing).
  * 
  * Tính toán theo số nguyên thay vì số thực để tránh lỗi làm tròn.
  * 
@@ -253,17 +246,17 @@ const convertTimeStringToMs = t => {
     const [h = 0, m = 0, s = 0, cs = 0] = Array(4 - p.length).fill(0).concat(p);
     return h * 36e5 + m * 6e4 + s * 1e3 + String(cs).padEnd(2, '0').slice(0, 2) * 10 || 0;
 };
-/** Parse và clamp một giá trị số từ file ASS về phạm vi hợp lệ.
+/** [Copilot] Parse một giá trị số từ file ASS và trả về mặc định nếu ngoài phạm vi hợp lệ.
  * @param {boolean} isInteger true nếu cần parse kiểu integer, false nếu cần parse kiểu float.
  * @param {string|number} v Giá trị đầu vào.
  * @param {number} def Giá trị mặc định khi parse thất bại.
  * @param {number} [min] Giá trị tối thiểu cho phép.
  * @param {number} [max] Giá trị tối đa cho phép.
- * @returns {number} Giá trị sau khi parse và clamp về phạm vi hợp lệ.
+ * @returns {number} Giá trị đã parse, hoặc def nếu không hợp lệ/ngoài phạm vi.
  */
 function parseClampedNum (isInteger, v, def, min, max) {
 	const raw = isInteger ? Number.parseInt(v, 10) : Number.parseFloat(v); 
-	return Number.isNaN(raw) ? def : Math.min(Math.max(raw, (min ?? -Infinity)), (max ?? Infinity));
+	return Number.isNaN(raw) || (min != null && raw < min) || (max != null && raw > max) ? def : raw;
 }
 /** Kiểm tra và chuẩn hóa một style từ ASS trước khi dùng trong renderer.
  * Nếu style thiếu thông tin bắt buộc hoặc giá trị không hợp lệ, hàm sẽ trả về false để loại bỏ style đó.
@@ -324,129 +317,99 @@ function processLineText(doStripTags, text) {
 	}
 	return [{ tags: [], text: stripped }];
 }
-/** [arena.ai] globalCss làm CHUẨN, suy từ info (đã chuẩn hóa).
- * Bộ props dùng chung cho MỌI dòng của file sub. Parser nhúng thẳng bộ này vào container
- * của từng styleCss (styleParsedToCss) → renderer áp container 1 chỗ là đủ, không cần
- * merge globalCss riêng theo từng style. parsedData.globalCss vẫn giữ làm bản chuẩn
- * để renderer tham chiếu cho lớp gốc (root layer) của phụ đề.
- *
- * Phân mức: toàn bộ props hiện tại đều thuộc mức CONTAINER (wrap/khung dòng).
- * Nếu sau này có prop mức text thì nhúng vào phần text của styleParsedToCss tương ứng.
- *
- * @param {parsedDataFormat.info} [info] Info đã (hoặc chưa) chuẩn hóa — chỉ đọc WrapStyle.
- * @returns {Object} Bộ props CSS chuẩn: white-space/word-break/overflow-wrap/text-wrap/text-order.
- */
-function globalCssFromInfo(info = {}) {
-	const wrapStyle = Number(info.WrapStyle ?? 0); // chống string khi info chưa chuẩn hóa
-	return {
-		'position': 'absolute',
-		'width': 'max-content',
-		'white-space': (wrapStyle === 2 ? 'pre' : 'pre-wrap'), // WrapStyle 2: không word wrap
-		'word-break': 'keep-all',
-		'overflow-wrap': 'break-word',
-		'text-wrap': (wrapStyle === 3 ? 'balance' : wrapStyle === 1 ? 'wrap' : 'pretty'),
-		'paint-order': 'stroke fill markers', // khóa paint-order cho mọi borderStyle.
-	};
-}
-/** [arena.ai] Cache globalCss theo WrapStyle (chỉ 0..3 → tối đa 4 entry).
- * CHỈ dùng nội bộ styleParsedToCss để spread vào container (frozen → an toàn chia sẻ);
- * parsedData.globalCss vẫn lấy object MỚI từ globalCssFromInfo (pure) để renderer tự do dùng.
- * @type {Map<number, Object>} */
-const GLOBAL_CSS_CACHE = new Map();
-/** [arena.ai] Lấy globalCss từ cache theo WrapStyle (tạo + freeze nếu chưa có). 
- * @param {parsedDataFormat.info} [info] Info đã (hoặc chưa) chuẩn hóa — chỉ đọc WrapStyle.
- * @returns {{Object<'position': string, 'width': string, 'white-space': string, 'word-break': string, 'overflow-wrap': string, 'text-wrap': string, 'paint-order': string>}} Bộ props CSS chuẩn: white-space/word-break/overflow-wrap/text-wrap/paint-order.
-*/
-function cachedGlobalCss(info) {
-	const wrapStyle = Number(info?.WrapStyle ?? 0);
-	let cached = GLOBAL_CSS_CACHE.get(wrapStyle);
-	if (!cached) {
-		cached = Object.freeze(globalCssFromInfo(info));
-		GLOBAL_CSS_CACHE.set(wrapStyle, cached);
-	}
-	return cached;
-}
 /** [Manual edit] Hàm chuyển đổi style đã chuẩn hóa thành object CSS (lineSub, segmentSub, data)
- * Cấu trúc: lineSub là parent cho các segmentSub; data lưu dữ liệu (cả line và segment để renderer xử lí)
- * - Ghi chú: parser chỉ dựa trên PlayRes, renderer chỉ xử lí scale và collision,
- * tất cả dữ liệu khác phải xử lí trước trong parser/tagProcess.
- *
- * Bản viết lại của styleParsedToCss theo 3 typedef mới (29sep26): trả về
- * { lineSub, segmentSub, data } — shape mới, KHÁC {container, text, data} của hàm cũ.
- * Hai khác biệt kiến trúc so với hàm cũ (đều đã ghi trong typedef):
- *   1. transform-origin CHUYỂN LÊN lineSub (gốc quay đến từ \org — tag 2.2 mức DÒNG),
- *      không còn nằm ở ruột chữ.
- *   2. line-height CHUYỂN XUỐNG segmentSub (19sep26 — đổi cùng \fs), không còn ở vỏ dòng.
- *   3. borderStyle 3 (opaque box): background/padding/box-shadow CHUYỂN XUỐNG segmentSub
- *      (box thừa hưởng màu/độ dày/cỡ chữ của TỪNG khúc chữ), kèm bù margin âm để advance
- *      width chữ không đổi — xem NGUYÊN LÍ BÙ MARGIN ÂM trong typedef segmentSubCss.
- *
- * lineSub (vỏ ngoài — định vị dòng, tag 2.2/2.1):
- *   - display/position/text-align (từ \an) + bộ globalCss chuẩn (white-space/word-break/
- *     overflow-wrap/text-wrap/paint-order, nhúng sẵn không merge ở renderer) + transform-origin.
- *   - KHÔNG chứa font/color/box — những thứ đó thuộc segmentSub.
- *   - clip-path chỉ sinh khi có \clip/\iclip (2.1) → không emit từ style.
- *
- * segmentSub (ruột chữ — typography + trang trí, tag 2.4/2.3):
- *   - font/color/weight/style/decoration/letter-spacing + line-height, transform (R1+R3),
- *     outline/shadow (borderStyle 1) hoặc box (borderStyle 3), kèm CSS variables số liệu thô.
- *   - transform: CHỈ emit khi khác identity (R3); rotate(-angle) đứng TRƯỚC scaleX/scaleY (R1 —
- *     CSS áp phải→trái khớp VSFilter, và \frz dương của ASS quay ngược chiều nên đổi dấu).
- *   - borderStyle 1: -webkit-text-stroke-width = outline × 2 (ADR 0007) + paint-order 'stroke fill
- *     markers'; --outline-width vẫn giữ giá trị GỐC (số thô cho tag override/renderer).
- *   - borderStyle 3: không stroke (reset về 0/transparent + paint-order normal + text-shadow none);
- *     background-color = outlineColour, padding = \bord, margin-left/right = -\bord (bù), box-shadow.
- *
- * data (số liệu cho renderer): CHƯA CHỐT (19sep26) → cố ý để TRỐNG {}. Bổ sung @property vào
- * typedef dataCss tới đâu thì điền tới đó; KHÔNG bê nguyên data cũ ({...style, isBox, hAlign,
- * transformOrigin, styleIndex}) của styleParsedToCss vào (chủ repo chốt 29sep26).
- *
+ * 
+ * Cấu trúc: node lineSub là parent cho các node segmentSub.
+ * 
+ * Khung hiển thị: parser chỉ dựa trên PlayRes-LayoutRes. Renderer chỉ xử lí scale và collision,
+ * 
+ * tất cả dữ liệu khác phải xử lí trước trong tagProcess/parser.
  * @param {parsedDataFormat.style} style Style đã chuẩn hóa.
  * @param {parsedDataFormat.info} [info] Info đã (hoặc chưa) chuẩn hóa — chỉ đọc WrapStyle cho globalCss.
- * @returns {{lineSub: parsedDataFormat.lineSubCss, segmentSub: parsedDataFormat.segmentSubCss, data: parsedDataFormat.dataCss}} lineSub (vỏ dòng), segmentSub (ruột chữ), data (trống, chờ chốt).
+ * @returns {{
+ * 	lineSub: parsedDataFormat.lineSubCss, 
+ * 	segmentSub: parsedDataFormat.segmentSubCss
+ * }} lineSub (vỏ dòng), segmentSub (ruột chữ)
  */
 function styleToCss (style, info = {}) {
-	const globalCss = cachedGlobalCss(info);
+	// Chú ý vấn đề trùng tên với biến dùng trong page.
+	/** @type {parsedDataFormat.lineSubCss} */
 	const lineSub = {
-		...globalCss,
+		...utils.globalCss,
 		...utils.alignmentToCss(style, info.PlayResX, info.PlayResY),
 	}
+	// const data = {
+	// };
 	// renderer đặt scale bằng CSS.registerProperty({ name: '--play-res-scale', syntax: '<number>', initialValue: '1', inherits: true });
-	// Chú ý vấn đề trùng tên với biến dùng trong page.
+// to-do: scale gì cơ?
+	/** @type {parsedDataFormat.segmentSubCss} */
 	const segmentSub = {
-		'--base-style-name': style.name, // Lưu style mặc định để \r rỗng đưa --style-name về.
-		'--style-name': style.name, // Lưu style hiện tại để \r không rỗng ghi dữ liệu vào.
+		/** Chủ đích không xây dựng tính năng tự động xuống dòng bằng thuộc tính "display: inline" */
+		'display': 'inline-block',
+		/** Lưu style mặc định để \r rỗng đưa --style-name về. */
+		'--base-style-name': style.name, 
+		/** Lưu style hiện tại để \r không rỗng ghi dữ liệu vào. */
+		'--style-name': style.name, 
+		/** Biến ghi tên font (\fn) */
 		'--font-name': style.fontName,
 		'font-family': `var(--font-name), sans-serif`,
+		/** Biến ghi cỡ font (\fs) */
 		'--font-size': style.fontSize,
+		/** Biến cho renderer ghi hệ số thu phóng chuyển đổi font VSFilter -> CSS. */
 		'--css-resize': 1,
 		'font-size': `calc(var(--font-size) / ${info.PlayResY} * 100cqh * var(--css-resize))`,
 		'line-height': `calc(var(--font-size) / ${info.PlayResY} * 100cqh)`,
+		/** Biến ghi màu chính (\1c) */
 		'--color1': style.primaryColour,
 		'color': `var(--color1)`,
+		/** Biến ghi màu thứ cấp (\2c) */
 		'--color2': style.secondaryColour,
+		/** Biến ghi màu viền (\3c) */
 		'--color3': style.outlineColour,
-		'-background-color': `var(--color3)`,
-		'-webkit-text-stroke-color': `var(--color3)`,
+		'--border-style': style.borderStyle,
+		/** Biến ghi màu bóng (\4c) */
 		'--color4': style.backColour,
+		// Ở lần đầu, các hàm utils ở đây lấy dữ liệu từ style. 
+		// Khi override, lấy dữ liệu từ các biến tên kiểu CSS (vd ở đây: --border-style, --color3, --color4) thay cho các biến của style.
+		// Hàm ghi màu viền (\3c), khi override tag (\3c,\3a thì gọi hàm này.)
+		...utils.outlineStyleToCss(style.borderStyle, style.outlineColour, style.backColour),
+		/** Hàm ghi độ dày chữ (\b) */
 		'font-weight': utils.boldToWeight(style.bold),
+		/** Biến ghi độ nghiêng chữ (\i) */
 		'font-style': style.italic ? 'italic' : 'normal',
+		/** Biến ghi gạch chân (phải giữ boolean) */
 		'--underline': style.underline,
+		/** Biến ghi gạch ngang (phải giữ boolean) */
 		'--strike-out': style.strikeOut,
-		'text-decoration': utils.decorationToCss(`var(--underline)`, `var(--strike-out)`),
+		/** Hàm ghi gạch chân/gạch ngang (\u, \s) */
+		'text-decoration': utils.decorationToCss(style.underline, style.strikeOut),
+		/** Biến ghi giãn cách chữ (\fsp), phải nhận số thuần, ko có đơn vị */
 		'--spacing': style.spacing,
 		'letter-spacing': `calc(var(--spacing) / ${info.PlayResX} * 100cqw)`,
-		'--border-style': style.borderStyle,
-		...utils.outlineToCss(style.outline, info.PlayResY),
+		/** Biến ghi độ dày viền (\bord. CSS ko hỗ trợ \xbord, \ybord), nhận số thuần, ko có đơn vị */
+		...utils.outlineWidthToCss(style.outline, info.PlayResY, info.LayoutResY),
+		/** Biến ghi vị trí bóng */
 		'--shadow-x': style.shadow,
 		'--shadow-y': style.shadow,
-		'--blur': 0, // style ban đầu không có giá trị blur, chỉ có khi dùng \blur.
-		filter: utils.shadBlurToCss(`var(--shadow-x)`, `var(--shadow-y)`, `var(--blur)`, `var(--color4)`),
+		/** style ban đầu không có giá trị blur, chỉ có khi dùng \blur. */
+		'--blur': '0px', 
+		/** Khi override, gọi --shadow-x, --shadow-y, --blur, --color4.
+		 * 
+		 * Nếu transform thì đưa nguyên cụm var() vào string (chấp nhận loại bỏ khả năng filter: none)
+		 */
+		filter: utils.shadBlurToCss(style.shadow, style.shadow, 0, style.backColour),
+		'--inline-fx': '',
+		'--scale-x': style.scaleX,
+		'--scale-y': style.scaleY,
+		'--angle-x': 0,
+		'--angle-y': 0,
+		'--angle-z': style.angle,
+// to-do: transform-origin ở dòng này
+		
+		/** Khi override, gọi -scale-x, -scale-y, '--angle-x', '--angle-y', '--angle-z' */
+		...utils.scaleAngleToCss(style.scaleX,style.scaleY,0,0,style.angle,info.LayoutResY),
 	};
-	// to-do: vẫn còn scaleX-Y, angle của style chưa xử lí.
-	// transform-origin, inline-fx, base-style-name, wrap-style chưa emit.
-	// const data = {
-	// };
+	// wrap-style tắt.
 	/** Quy định phân vùng dữ liệu cho lineSub, segmentSub, data. (style[*] -> lineSub?/segmentSub?/data?.[*])
 	 * style.name -> data.name; (ghi tắt là .name -> data; do chỉ có từ object style nên ghi .name, và ko đổi tên nên chỉ ghi data mà ko ghi đủ data.name)
 	//  * .fontName -> segmentSub[font-family] (fallback sans-serif)
@@ -462,7 +425,8 @@ function styleToCss (style, info = {}) {
 	//  * // Chú ý: utils.boldToWeight trong tagProcess ko dùng để xử lí trực tiếp tag \b (do \b chỉ nhận khi có giá trị số.)
 	//  * .italic -> segmentSub[font-style] = style.italic ? 'italic' : 'normal';
 	//  * .underline, .strikeOut -> segmentSub[text-decoration] = decoration (ở trên);
-	 * (sai) .scaleX-Y, .angle -> segmentSub: ...(transformParts.length ? { 'transform': transformParts.join(' ') } : {}); -> segmentSub[--scale-x/y], segmentSub[--angle-x/y/z];
+	// .scaleX-Y, .angle -> segmentSub: ...utils.scaleAngleToCss(style.scaleX,style.scaleY,0,0,style.angle,info.PlayResY),
+	// -> segmentSub[--scale-x/y], segmentSub[--angle-x/y/z];
 	//  * .spacing -> segmentSub[letter-spacing]; -> segmentSub[--spacing];
 	//  * .borderStyle -> segmentSub[--border-style] (thay thế isBox);
 	//  * // Chú ý: paint-order luôn là 'stroke fill markers'. (đã ghi ở globalCss)
@@ -471,7 +435,9 @@ function styleToCss (style, info = {}) {
 	//  * .marginL/R/V, .alignment -> lineSub: ...utils.alignmentToCss(style, info.PlayResX, info.PlayResY);
 	 */
 	return { lineSub, segmentSub };
+	
 }
+// to-do: sửa JSDoc của segmentSubCss
 /** [arena.ai] Token là marker đứng riêng {\h} / {\N} / {\n} (renderer quyết định ngữ nghĩa) không? */
 function isStandaloneToken(tok) {
 	return tok === '{\\h}' || tok === '{\\N}' || tok === '{\\n}';
@@ -742,7 +708,7 @@ export function parser(doStripTags = false, rawText) {
 	 * 
 	 * Styles và Events lưu dưới dạng array do có cấu trúc khác so với Info, và trong Lua Automation của Aegisub cũng xử lí tương tự.
 	 * @type {parsedDataFormat.global} */
-	const parsedData = { info: {}, styles: [], events: [], globalCss: {}, styleCss: [], lineCss: [] };
+	const parsedData = { info: {}, styles: [], events: [], styleCss: [], lineCss: [] };
 	if (!rawText) {
 		utils.warn(`${parserLogPrefix} Đã có ai làm gì đâu? Đã làm gì đâu? (cố tình nạp rawText trống?)`);
 		return parsedData; // Nếu ko có rawText, trả về Data trống và gửi log lỗi text trống.
@@ -805,7 +771,11 @@ export function parser(doStripTags = false, rawText) {
 			// 		WrapStyle: để xử lí phụ đề.
 			// 		PlayResX: để xử lí phụ đề.
 			// 		PlayResY: để xử lí phụ đề.
-			// 		ScaledBorderAndShadow: để xử lí phụ đề.
+			// 		LayoutResX: để xử lí phụ đề. (v3.5.0+)
+			// 		LayoutResY: để xử lí phụ đề. (v3.5.0+)
+			//		*Chú thích: LayoutRes liên quan xử lí hiệu ứng liên quan đến scaleRes, 
+			// 					PlayRes liên quan xử lí vị trí phụ đề.
+			// 		ScaledBorderAndShadow: để xử lí phụ đề, liên quan đến LayoutRes và PlayRes.
 			// Tuy nhiên, ở đây lưu tất cả dữ liệu.
 			const [, key, value] = line.match(/^([^:]+):(.*)$/) || []; 
 			// gán bằng Regex: tách thành phần trước và sau dấu ":" thứ nhất
@@ -817,6 +787,8 @@ export function parser(doStripTags = false, rawText) {
 					k === 'WrapStyle' ? parseClampedNum(true, v, 0, 0, 3) :
 					k === 'PlayResX' ? parseClampedNum(true, v, 640, 640) :
 					k === 'PlayResY' ? parseClampedNum(true, v, 480, 480) :
+					k === 'LayoutResX' ? parseClampedNum(true, v, parsedData.info.PlayResX, 1) :
+					k === 'LayoutResY' ? parseClampedNum(true, v, parsedData.info.PlayResY, 1) :
 					k === 'ScaledBorderAndShadow' ? v === 'yes' :
 					v; // key khác: giữ nguyên bản như cũ
 				if (k === 'ScriptType' && v !== 'v4.00+') { // Ko đảm bảo nếu ScriptType trong file ko phải v4.00+
@@ -940,7 +912,6 @@ export function parser(doStripTags = false, rawText) {
     		}
 		}
 	}
-	parsedData.globalCss = globalCssFromInfo(parsedData.info);
 	utils.log(`${parserLogPrefix} Đã xử lí xong.`, parsedData);	
 	return parsedData;
 }

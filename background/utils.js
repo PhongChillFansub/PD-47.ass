@@ -1,4 +1,4 @@
-// v0.1.0 10oct26
+// v0.1.0 21oct26
 "use strict";
 const extensionName = "PD-47.ass";
 const HTML_ENTITIES = {
@@ -132,6 +132,32 @@ export function hexToAlpha(raw) {
 	if (r == null) return null;
 	return r;
 }
+/** [Manual edit] Xử lí chung kiểu viền (bao quanh chữ hoặc hộp) và áp màu (\3c, \3a)
+ * @param {number} borderStyle Kiểu viền: 1 (viền chữ), 3 (hộp màu outline), 4 (hộp màu nền).
+ * @param {string|null} outlineColor Màu viền (\3c)
+ * @param {string|null} backColour Màu nền (\4c)
+ * @returns {{
+ *   '--color3': string,
+ *   '--border-style': number,
+ *   'background-color': string,
+ *   '-webkit-text-stroke-color': string
+ * }}
+ */
+export function outlineStyleToCss(borderStyle, outlineColor, backColour) {
+	const isBoxStyle = borderStyle === 3 || borderStyle === 4;
+	return {
+		'--color3': outlineColor ?? 'transparent',
+		'--border-style': borderStyle,
+		'background-color': (
+			borderStyle === 3 ? outlineColor
+				: borderStyle === 4 ? backColour
+					: 'transparent'
+		) ?? 'transparent',
+		'-webkit-text-stroke-color': isBoxStyle
+			? 'transparent'
+			: outlineColor ?? 'transparent',
+	};
+}
 /** [arena.ai] Chuyển giá trị đậm (style.bold hoặc \b) sang font-weight CSS.
  *
  * Ánh xạ theo ngữ nghĩa ASS của \b (như libass, hoặc học lỏm weizhenye/ASS):
@@ -153,99 +179,48 @@ export function boldToWeight(b) {
 	if (n === 1) return '700';
 	return String(n);
 }
-/** [arena.ai] Hàm quản lí padding và margin âm (của segmentSubCss) để bù cho outline (viền) trong CSS.
- * Xử lí \bord (style.outline) → phần CSS liên quan viền/nở hộp của segment.
- *
- * \bord mang HAI nghĩa tuỳ borderStyle, nhưng CẢ HAI đều phát cùng một bộ key (không rẽ nhánh):
- *  - borderStyle 1: viền stroke quanh glyph. -webkit-text-stroke vẽ CÂN GIỮA đường bao
- *    (½ trong, ½ ngoài) còn \bord vẽ HOÀN TOÀN ra ngoài → đặt 2n, kèm paint-order
- *    'stroke fill markers' để fill che nửa trong → nửa ngoài đúng n px như Aegisub (ADR 0007).
- *  - borderStyle 3: \bord là độ NỞ của nền box → padding n.
- *
- * Vì sao phát cả 4 thứ cùng lúc mà không cần biết borderStyle hay display:
- *  - Hình học sai chế độ là VÔ HÌNH, với điều kiện trục SƠN luôn phát đủ cặp
- *    (-webkit-text-stroke-color, background-color): bs1 → (outlineColour, transparent),
- *    bs3 → (transparent, outlineColour). Thiếu một vế là stroke/nền thừa lộ ra ngay.
- *  - Tập key CỐ ĐỊNH ở mọi ca → merge/tái dùng node không bao giờ rò key cũ.
- *
- * BÙ MARGIN ÂM cả 4 phía: padding của hộp CHIẾM CHỖ
- * trong luồng nên phải trừ lại, nếu không mỗi mối nối giữa 2 segment giãn thêm 2n. Đúng ở cả
- * hai loại node, vì margin DỌC bị bỏ qua trên inline non-replaced (CSS 2.1 §8.3) còn trên
- * inline-block thì nó kéo margin box về trùng content box (baseline không xê dịch). Nền vẫn
- * được VẼ đủ phần nở vì vùng padding nằm trong vùng tô background — đúng hiệu ứng union của
- * libass: hộp to ra, VỊ TRÍ CHỮ KHÔNG ĐỔI.
- *
- * padding/margin là BỘ ĐÔI NGUYÊN TỬ — luôn phát cùng nhau, cấm tách lẻ (ghi đè một phần còn
- * tệ hơn không ghi). Dùng shorthand cho cả hai; KHÔNG trộn longhand margin-left/right vào cùng
- * object, vì trong object JS shorthand và longhand là hai key khác nhau, không đè nhau.
- *
- * --outline-width giữ số GỐC n (CHƯA ×2) theo quy ước: var = THÔ, property = ĐÃ NẤU.
- *
- * Ép kiểu bằng Number() cho đồng bộ với boldToWeight: chuỗi số ('6') vẫn nhận.
- * Âm / NaN / Infinity / rác không ép được → 0. LƯU Ý: true → 1 (Number(true) === 1);
- * đầu vào lẽ ra luôn là number đã qua validateAndNormalizeStyle, boolean là dấu hiệu sai chỗ gọi.
- * 
- * @param {number} bord Chú ý: ko nhận "6px" -> 0; chỉ nhận số hoặc string thuần số.
- * @param {number} playResY Chiều cao PlayResY của video, dùng để scale sang cqh. (đã fallback ở đầu parser)
- * @returns {{'-webkit-text-stroke-width': string, 'padding': string, 'margin': string, '--outline-width': string}}
- */
-export function outlineToCss(bord, playResY) {
-	const v = Number(bord);
-	const n = Number.isFinite(v) && v > 0 ? v : 0;    // \bord âm / NaN / rác → 0
-	const py = Number(playResY);
-	const k = 100 / (Number.isFinite(py) && py); // PlayRes px → cqh
-	const cqh = (x) => `${+(x * k).toFixed(4)}cqh`;   // +() cắt số 0 thừa; -0 → '0'
-	return {
-		'-webkit-text-stroke-width': cqh(2 * n),
-		'padding': cqh(n),
-		'margin': cqh(-n),
-		'--outline-width': cqh(n),
-	};
-}
-/** [Manual edit] Chuyển đổi underline/strikeOut sang text-decoration CSS
- * 
- * Chú ý: khi dùng cho các tag \u, \s trong tagProcess, phải đọc lại --underline/strikeOut từ style nếu ko phải tag xử lí.
- * (vd: gọi hàm này để xử lí \u thì phải đọc --strikeOut từ style, vì \u ko thay đổi strikeOut)
- * @param {boolean} underline
+/** [Manual edit] Xử lí chung \u, \s trong thuộc tính decoration của CSS
+ * @param {boolean} underline 
  * @param {boolean} strikeOut
- * @returns {string} text-decoration CSS: 'underline', 'line-through', 'underline line-through', hoặc 'none' nếu cả hai false
+ * @returns {string}
  */
 export function decorationToCss(underline, strikeOut) {
 	return [underline ? 'underline' : '', strikeOut ? 'line-through' : '']
 		.filter(Boolean).join(' ') || 'none';
 }
-/** [Copilot] Chuyển đổi shadow và blur sang filter CSS
- * 
+/** [Manual edit] Chuyển đổi shadow và blur sang filter CSS.
  * Chú ý: khi dùng cho các tag \*shad, \blur, \4c, \4a trong tagProcess, phải đọc lại --shadow-x/y/blur/4c/4a từ style nếu ko phải tag xử lí.
  * (vd: gọi hàm này để xử lí \blur thì phải đọc --shadow-x/y, --4c, --4a từ style, vì \blur ko thay đổi shadow hay các màu)
- * @param {string|number} shadowX Giá trị shadow X (px)
- * @param {string|number} shadowY Giá trị shadow Y (px)
- * @param {string|number} blur Giá trị blur (px)
- * @param {string} color Giá trị màu shadow (CSS color)
+ * @param {number} shadowX Giá trị shadow X số thuần
+ * @param {number} shadowY Giá trị shadow Y số thuần
+ * @param {number} blur Giá trị blur số thuần
+ * @param {string} color Màu 4
  * @returns {string} filter CSS: 'drop-shadow(...) blur(...)' hoặc 'none' nếu shadowX/Y = 0 và blur = 0
  */
 export function shadBlurToCss(shadowX, shadowY, blur, color) {
-	const sx = Number(shadowX);
-	const sy = Number(shadowY);
-	const b = Number(blur);
-	if (!Number.isFinite(sx) || !Number.isFinite(sy) || !Number.isFinite(b)) return 'none';
-	if (sx === 0 && sy === 0 && b === 0) return 'none';
-	const dropShadow = `drop-shadow(${sx}px ${sy}px ${color})`;
-	const blurFilter = b > 0 ? `blur(${b}px)` : '';
-	return [dropShadow, blurFilter].filter(Boolean).join(' ');
+	const hasShadow = ( shadowX > 0 || shadowY > 0 );
+	const hasBlur = ( blur > 0 );
+	if (!hasShadow && !hasBlur) return 'none';
+	return [
+		hasShadow
+			? `drop-shadow(${shadowX}px ${shadowY}px ${color})`
+			: '',
+		hasBlur
+			? `blur(${blur}px)`
+			: '',
+	].filter(Boolean).join(' ');
+	// Chỉ dùng filter: drop-shadow(...) blur(...) để render shadow/blur,
+	// không dùng text-shadow vì text-shadow không render đúng với viền (borderStyle 1) của ASS.
 }
-/** [arena.ai] Chuẩn hóa ASS alignment và trả về vị trí tương đối của anchor.
+/** [Manual edit] Chuẩn hóa ASS alignment và trả về vị trí tương đối của anchor.
+ * - horizontal: 0 = left, 0.5 = center, 1 = right
+ * - vertical: 0 = top, 0.5 = middle, 1 = bottom
  *
- * x/y là tỉ lệ anchor trong vùng:
- * - x: 0 = left, 0.5 = center, 1 = right
- * - y: 0 = top, 0.5 = middle, 1 = bottom
- *
- * @param {number|string} value
+ * @param {number|string} value Dữ liệu từ alignment của style hoặc \an
  * @return {{
  *   an: number,
  *   horizontal: number,
- *   vertical: number,
- *   translate: string
+ *   vertical: number
  * }}
  */
 export function resolveAlignment(value) {
@@ -253,29 +228,32 @@ export function resolveAlignment(value) {
 	if (!Number.isInteger(an) || an < 1 || an > 9) an = 5;
 	const column = (an - 1) % 3;        // 0 left, 1 center, 2 right
 	const row = Math.floor((an - 1) / 3); // 0 bottom, 1 middle, 2 top
+	const horizontal = column / 2;
+	const vertical = 1 - row / 2;
 	return {
-		an, // Để debug, chắc thế?
+		// Để debug, chắc thế?
+		an, 
 		// Tỉ lệ tính từ left / top.
-		horizontal: column / 2,       // 0, 0.5, 1
-		vertical: 1 - row / 2,      // 1, 0.5, 0
-		translate: (
-			`${['0', '-50%', '-100%'][column]} `
-			+ `${['-100%', '-50%', '0'][row]}`
-		),
+		horizontal, // 0, 0.5, 1
+		vertical, // 1, 0.5, 0
 	};
 }
-/** [arena.ai] Chuyển đổi default alignment/style margin sang CSS.
- * Không áp dụng cho \pos hoặc \move: renderer sẽ override left/right/top/bottom.
- *
+/** [Manual edit] Chuyển đổi default alignment/style margin sang CSS.
+ * 
+ * Trình tự áp dụng tag override 2.2: \an (override/style-based) -> \pos hoặc \move (lấy đầu) -> \org
+ * 
+ * Chú ý: origin là của lineSub, của segmentSub cần xử lí riêng.
  * @param {parsedDataFormat.style} style
  * @param {number} playResX
  * @param {number} playResY
  * @return {{
  *   left: string,
- *   right: string,
  *   top: string,
- *   bottom: string,
- *   width: string,
+ *   '--align-x': number,
+ *   '--align-y': number,
+ *   '--origin-delta-x': number,
+ *   '--origin-delta-y': number,
+ *   '--origin': string,
  *   'max-width': string,
  *   translate: string
  * }}
@@ -303,10 +281,105 @@ export function alignmentToCss(style, playResX, playResY) {
 	// y=0: MarginV
 	const topPct = (marginVPct + (100 - marginVPct * 2) * alignment.vertical);
 	return {
-		left: `${leftPct}cqw`,	// \pos, \move sẽ override chỗ này
-		top: `${topPct}cqh`,	// \pos, \move sẽ override chỗ này
-		width: 'fit-content',
+		left: `${leftPct}cqw`,	// \pos, \move sẽ override chỗ này, \org phải đọc chỗ này
+		top: `${topPct}cqh`,	// \pos, \move sẽ override chỗ này, \org phải đọc chỗ này
+		'--align-x': alignment.horizontal,
+		'--align-y': alignment.vertical,
+		// Hướng dẫn: trong segment, \org sẽ override 2 biến như thế này.
+		// origin-delta phải tính chênh lệch giữa dữ liệu thô (\org) và vị trí của segment.
+		'--origin-delta-x': 0,
+		'--origin-delta-y': 0,
+		// Lưu lại cách xử lí origin cho segment. 
+		// Chú ý: parent của lineSub (khung sub) phải có thuộc tính "container-type: size;" 
+		// để segment dùng cqw/cqh chuẩn
+		'--origin': [
+			`calc(var(--align-x) * 100% + var(--origin-delta-x) * 100cqw)`,
+			`calc(var(--align-y) * 100% + var(--origin-delta-y) * 100cqh)`,
+		].join(' '),
+		// width: 'fit-content', // đưa vào globalCss.
 		'max-width': `calc(100cqw - ${marginLPct}cqw - ${marginRPct}cqw)`,
 		translate: alignment.translate,	// \an sẽ override chỗ này
+		// Các tag \an, \pos, \move, \org đều là tag của toàn line (2.2, 2.1).
+		// clip sẽ thêm độc lập vào lineSub riêng.
 	};
+}
+/** [Manual edit] Các thuộc tính cố định cho node CSS.
+ * 
+ * Chú ý: đã khóa wrapStyle = 2 (ko có tính năng tự động xuống dòng)
+ */
+export const globalCss = {
+	/** Giữ các node ko gây ảnh hưởng đến flow của trang */
+	'position': 'absolute',
+	/** Ghi thay cho xử lí alignment */
+	'width': 'fit-content',
+	/** Không có tính năng tự động xuống dòng (để đổi lấy tính năng xoay \fr*) */
+	'white-space': 'pre',
+		// 'white-space': (wrapStyle === 2 ? 'pre' : 'pre-wrap'), // WrapStyle 2: không word wrap
+		// 'word-break': 'keep-all',
+		// 'overflow-wrap': 'break-word',
+		// 'text-wrap': (wrapStyle === 3 ? 'balance' : wrapStyle === 1 ? 'wrap' : 'pretty'),
+	/** Khóa paint-order cho mọi borderStyle. */
+	'paint-order': 'stroke fill markers', 
+};
+/** [Manual edit] Xử lí chung \fr*, \fsc* trong thuộc tính transform của CSS.
+ * 
+ * Thứ tự trong thuộc tính: perspective -> rotateY -> rotateX -> rotateZ -> scaleX -> scaleY 
+ * 
+ * (CSS đọc từ phải sang trái, nên scaleY xử lí trước)
+ * @param {number} scaleX đơn vị %
+ * @param {number} scaleY đơn vị %
+ * @param {number} angleX đơn vị deg
+ * @param {number} angleY đơn vị deg
+ * @param {number} angleZ đơn vị deg
+ * @param {number} layoutResY đơn vị px, dùng để tính perspective (layoutRes)
+ * @returns {{transform?: string}} Object CSS rỗng khi mọi transform là identity.
+ */
+export function scaleAngleToCss(scaleX, scaleY, angleX, angleY, angleZ, layoutResY) {
+	const parts = [];
+	const fscx = Number(scaleX);
+	const fscy = Number(scaleY);
+	const frx = Number(angleX);
+	const fry = Number(angleY);
+	const frz = Number(angleZ);
+	if ((Number.isFinite(frx) && frx !== 0) || (Number.isFinite(fry) && fry !== 0)) {
+		const perspective = 312.5 / Number(layoutResY);
+		if (Number.isFinite(perspective) && perspective > 0) {
+			parts.push(`perspective(${perspective}cqh)`);
+		}
+	}
+	if (Number.isFinite(fry) && fry !== 0) {
+		parts.push(`rotateY(${-fry}deg)`);
+	}
+	if (Number.isFinite(frx) && frx !== 0) {
+		parts.push(`rotateX(${-frx}deg)`);
+	}
+	if (Number.isFinite(frz) && frz !== 0) {
+		parts.push(`rotateZ(${-frz}deg)`);
+	}
+	if (Number.isFinite(fscx) && fscx !== 100) {
+		parts.push(`scaleX(${fscx/100})`);
+	}
+	if (Number.isFinite(fscy) && fscy !== 100) {
+		parts.push(`scaleY(${fscy/100})`);
+	}
+	return parts.length > 0
+		? { transform: parts.join(' ') }
+		: {};
+
+}
+/** [Manual edit] Xử lí chung \bord (ko hỗ trợ \*bord), \*shad cho CSS.
+ * @param {number} outlineWidth px (\bord)
+ * @param {number} playResY px
+ * @param {number} layoutResY px
+ * @param {boolean} [ScaledBorderAndShadow=false] Nếu true, dùng playResY; nếu không, dùng layoutResY.
+ * @returns {{'--outline': number, '-webkit-text-stroke-width': string, padding: string, margin: string}}
+ */
+export function outlineWidthToCss(outlineWidth, playResY, layoutResY, ScaledBorderAndShadow) {
+	const scaledWidth = outlineWidth / (ScaledBorderAndShadow ? playResY : layoutResY);
+	return {
+		'--outline': outlineWidth,
+		'-webkit-text-stroke-width': `calc(${scaledWidth} * 2 * 100cqh)`,
+		'padding': `calc(${scaledWidth} * 100cqh)`,
+		'margin': `calc(${scaledWidth} * 100cqh)`,
+	}
 }

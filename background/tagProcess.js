@@ -305,7 +305,7 @@ function classifyBase(base, styleRef) {
 
 
 		const data = {}; // Phần ghi vào item.delta.data.
-		const context = { scaleX: undefined, scaleY: undefined, styleRef };
+		const context = { textCss: {}, scaleX: undefined, scaleY: undefined, styleRef };
 
 
 
@@ -350,6 +350,8 @@ function newDecorationState() {
 	return {
 		colors: { 1: null, 2: null, 3: null, 4: null },
 		alpha: { all: null, 1: null, 2: null, 3: null, 4: null },
+		underline: null,
+		strikeOut: null,
 		bord: { w: null, x: null, y: null },
 		shad: { d: null, x: null, y: null },
 		blur: null,
@@ -364,8 +366,18 @@ function newDecorationState() {
  * @returns {boolean} true = đã tiêu thụ tag; false = không thuộc nhóm 2.3.
  */
 function applyDecorationTag(tag, state) {
+	let m = /^\\u(-?\d+(?:\.\d+)?)$/.exec(tag);
+	if (m) {
+		state.underline = Number.parseFloat(m[1]) !== 0 ? 'underline' : ' ';
+		return true;
+	}
+	m = /^\\s(-?\d+(?:\.\d+)?)$/.exec(tag);
+	if (m) {
+		state.strikeOut = Number.parseFloat(m[1]) !== 0 ? 'line-through' : ' ';
+		return true;
+	}
 	// \\1c..\\4c + alias \\c (= \\1c) — màu kênh 1..4 (Aegisub: last-wins mỗi kênh).
-	let m = /^\\([1-4])c&(.*)$/.exec(tag);
+	m = /^\\([1-4])c&(.*)$/.exec(tag);
 	if (!m && tag.startsWith('\\c&')) m = [tag, '1', tag.slice(3)];
 	if (m) {
 		const c = utils.parseAegisubHex(m[2]);
@@ -453,6 +465,8 @@ function applyDecorationTag(tag, state) {
  * Alpha hiệu dụng mỗi kênh: byte alpha của tag màu > \\Na > \\alpha > alpha màu style. */
 function emitDecoration(state, styleRef, textCss, containerCss) {
 	const isBox = styleRef?.borderStyle === 3;
+	if (state.underline !== null) textCss['--underline'] = state.underline;
+	if (state.strikeOut !== null) textCss['--strike-out'] = state.strikeOut;
 	const styleCols = {};
 	for (const n of [1, 2, 3, 4]) styleCols[n] = utils.parseCssRgba(styleRef?.[STYLE_COLOR_FIELD[n]]);
 	for (const n of [1, 2, 3, 4]) {
@@ -605,6 +619,7 @@ function classifyClip(base, styleRef) {
  */
 export function classify(base, styleRef) {
 	base = classifyBase(base, styleRef);
+	base = classifyDecoration(base, styleRef);
 	const collision = classifyCollision(base, styleRef);
 	const clip = classifyClip(base, styleRef);
 	return { base, collision, clip };

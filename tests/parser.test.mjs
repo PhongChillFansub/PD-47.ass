@@ -8,6 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parser } from '../background/parser.js';
+import { decorationToCss, isCustomCssProperty, resolveCssLength, shadBlurToCss } from '../background/utils.js';
 
 // ======================================================================
 // Fixture + helper
@@ -168,6 +169,37 @@ test('parser: named export, parse info/styles/events như cũ', () => {
 	assert.equal(parsed.events[0].endTime, 2000);   // '0:00:02.00'
 });
 
+test('shadBlurToCss: giữ CSS var động và vẫn xử lí giá trị số', () => {
+	assert.equal(
+		shadBlurToCss('var(--shadow-x)', 'var(--shadow-y)', 'var(--blur)', 'var(--color4)'),
+		'drop-shadow(var(--shadow-x) var(--shadow-y) var(--color4)) blur(var(--blur))'
+	);
+	assert.equal(shadBlurToCss(2, -1, 3, 'black'), 'drop-shadow(2px -1px black) blur(3px)');
+	assert.equal(shadBlurToCss(0, 0, 0, 'black'), 'none');
+});
+
+test('decorationToCss: hỗ trợ boolean tĩnh và custom property động', () => {
+	assert.equal(isCustomCssProperty('var(--underline)'), true);
+	assert.equal(isCustomCssProperty('var(--shadow-x)'), true);
+	assert.equal(isCustomCssProperty('var(--bad name)'), false);
+	assert.deepEqual(resolveCssLength('var(--shadow-x)'), { css: 'var(--shadow-x)', staticPx: null });
+	assert.deepEqual(resolveCssLength(3), { css: '3px', staticPx: 3 });
+	assert.equal(decorationToCss(false, false), 'none');
+	assert.equal(decorationToCss(true, false), 'underline');
+	assert.equal(decorationToCss(false, true), 'line-through');
+	assert.equal(decorationToCss(true, true), 'underline line-through');
+	assert.equal(
+		decorationToCss('var(--underline)', 'var(--strike-out)'),
+		'var(--underline) var(--strike-out)'
+	);
+
+	const stylesOnly = MINI_ASS.slice(0, MINI_ASS.indexOf('[Events]'));
+	const text = parser(false, stylesOnly).styleCss[0].segmentSub;
+	assert.equal(text['--underline'], ' ');
+	assert.equal(text['--strike-out'], ' ');
+	assert.equal(text['text-decoration'], 'var(--underline) var(--strike-out)');
+});
+
 test('parser: KHÔNG gắn base/classify vào orgline (tách tag là bước rời, gọi khi cần)', () => {
 	const parsed = parser(false, MINI_ASS);
 	const line = parsed.events[0];
@@ -270,18 +302,27 @@ test('Chú ý 1: file thiếu info key → seed mặc định, styleCss.push v�
 	assert.equal(parsed.styleCss[0].data.scaledBorderAndShadow, undefined);
 });
 
-test('Chú ý 1: giá trị rác/ngoài phạm vi bị chuẩn hóa NGAY KHI LƯU vào info', () => {
+test('Chú ý 1: giá trị rác/ngoài phạm vi dùng giá trị mặc định NGAY KHI LƯU vào info', () => {
 	const ass = MINI_ASS
-		.replace('WrapStyle: 0', 'WrapStyle: 9')          // ngoài 0..3 → clamp 3
-		.replace('PlayResX: 640', 'PlayResX: 12')         // dưới min → 640
+		.replace('WrapStyle: 0', 'WrapStyle: 9')          // ngoài 0..3 → mặc định 0
+		.replace('PlayResX: 640', 'PlayResX: 12')         // dưới min → mặc định 640
 		.replace('ScaledBorderAndShadow: yes', 'ScaledBorderAndShadow: no');
 	const parsed = parser(false, ass);
-	assert.equal(parsed.info.WrapStyle, 3);
+	assert.equal(parsed.info.WrapStyle, 0);
 	assert.equal(parsed.info.PlayResX, 640);
 	assert.equal(parsed.info.ScaledBorderAndShadow, false);
 	// info là nguồn sự thật duy nhất (02sep26 bản 3) — data không còn bản sao để lệch
 	assert.equal(parsed.styleCss[0].data.playResX, undefined);
-	assert.equal(parsed.globalCss['white-space'], 'pre-wrap'); // WrapStyle 3 ≠ 2
+	assert.equal(parsed.globalCss['white-space'], 'pre-wrap'); // WrapStyle mặc định 0 ≠ 2
+});
+
+test('parse info chấp nhận đúng các giá trị nằm trong giới hạn', () => {
+	const ass = MINI_ASS
+		.replace('WrapStyle: 0', 'WrapStyle: 3')
+		.replace('PlayResX: 640', 'PlayResX: 641');
+	const parsed = parser(false, ass);
+	assert.equal(parsed.info.WrapStyle, 3);
+	assert.equal(parsed.info.PlayResX, 641);
 });
 
 // ======================================================================
@@ -455,6 +496,23 @@ test('02sep26 tối ưu KHÔNG đổi hành vi: container vẫn nhúng đủ glo
 	// globalCss cache (frozen) chỉ để spread — object trả về của parser vẫn mutate được bình thường
 	assert.doesNotThrow(() => { parsed.globalCss['max-width'] = '99%'; });
 	assert.doesNotThrow(() => { container['max-width'] = '99%'; });
+});
+
+test('styleToCss: borderStyle được lưu trong data và quyết định màu nền/stroke', () => {
+	const stylesOnly = MINI_ASS.slice(0, MINI_ASS.indexOf('[Events]'));
+	const normal = parser(false, stylesOnly).styleCss[0];
+	assert.equal(normal.data.borderStyle, 1);
+	assert.equal(normal.segmentSub['background-color'], 'transparent');
+	assert.equal(normal.segmentSub['-webkit-text-stroke-color'], 'var(--color3)');
+
+	const boxAss = stylesOnly.replace(
+		'0,0,100,100,0,0,1,2,2,2,10,10,10,1',
+		'0,0,100,100,0,0,3,2,2,2,10,10,10,1'
+	);
+	const box = parser(false, boxAss).styleCss[0];
+	assert.equal(box.data.borderStyle, 3);
+	assert.equal(box.segmentSub['background-color'], 'var(--color3)');
+	assert.equal(box.segmentSub['-webkit-text-stroke-color'], 'transparent');
 });
 
 test('02sep26 Chromium 131+: stroke ×2 chỉ áp cho -webkit-text-stroke-width, outline=0 và box không stroke', () => {
