@@ -53,7 +53,6 @@
  * @property {{rawList: string[], effectiveType: ('clip'|'iclip'|null), effectiveRaw: (string|null)}} clip
  *   Nhóm 2.1 — mức DÒNG, last-wins (bản này STUB default — session 2.1 làm đầy).
  */
-
 import * as utils from './utils.js';
 /** Regex nhận diện tag karaoke: \k / \kf / \ko + duration (số, centisecond trong file).
  * KHÔNG match \K (không xử lí) và \kt (wontfix v1+). Nhóm 1 = type, nhóm 2 = duration raw (cs).

@@ -1,5 +1,4 @@
-// v0.1.0 21oct26
-// to-do: sửa jsdoc còn lại trong này, bắt đầu sửa lại tagProcess
+// v0.1.0 22oct26
 // alpha mode
 // Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
@@ -45,19 +44,6 @@ import { classify } from './tagProcess.js';
  *   03sep26: lineCss[i] = classify(processLineText(...)) — { base, collision, clip }; 2.4 layout +
  *   \t metadata làm thật; 09sep26: karaoke KHÔNG ở 2.4 (về 2.3), 2.3/2.2/2.1 để session sau
  *   — xem background/tagProcess.js)
- */
-/** [arena.ai] Định nghĩa/chú thích lineCss[i] sau classify (struct đích — mục 3 prompt 03sep26)
- * @typedef {object} parsedDataFormat.lineCss
- * @property {Array<parsedDataFormat.baseItem>} base Mục base đã classify: mỗi mục giữ nguyên
- *   { tags, text } + thêm { delta?, anim? } (delta/anim chỉ xuất hiện khi có nội dung).
- *   delta.data chứa marker (\h/\N/\n) + karaoke k (2.3, 11sep26: { type, durationMs, startMs })
- *   — số liệu thuần. \r/\q KHÔNG vào data: ghi vào delta.text dưới dạng CSS var — '--base-style-name'
- *   (\r, rỗng = style dòng) / '--wrap-style' (\q, last-wins). Karaoke \k* do 2.3 xử lí.
- * @property {{t: boolean}} collision Nhóm 2.2 — mức DÒNG (bản này CHỈ signal \t, chốt 03sep26:
- *   an/pos/move/org để session 2.2 làm đầy). collision.t = true khi dòng có \t → renderer tự
- *   disable collision (KHÔNG lưu payload \t ở đây — payload chỉ ở base[i].anim).
- * @property {{rawList: string[], effectiveType: ('clip'|'iclip'|null), effectiveRaw: (string|null)}} clip
- *   Nhóm 2.1 — mức DÒNG, last-wins (bản này STUB default — session 2.1 làm đầy).
  */
 /** [Manual edit] Định nghĩa/chú thích object parsedData.info sau xử lí 
  * @typedef {object} parsedDataFormat.info
@@ -144,7 +130,8 @@ import { classify } from './tagProcess.js';
  *   chỉ có khi khác identity. transform-origin được renderer tính sau layout cho từng segment.
  */
 /** [Copilot] Định nghĩa/chú thích segmentSubCss 
- * @typedef {parsedDataFormat.segmentSubCssIndependentProperties
+ * @typedef {{ [K in keyof parsedDataFormat.segmentSubCssIndependentProperties]:
+ *   parsedDataFormat.segmentSubCssIndependentProperties[K] }
  *   & ReturnType<typeof utils.outlineStyleToCss>
  *   & ReturnType<typeof utils.outlineWidthToCss>
  *   & ReturnType<typeof utils.scaleAngleToCss>
@@ -391,7 +378,6 @@ function styleToCss (style, info = {}) {
 		 * Không dùng transform-origin: inherit / var(--origin): chúng không trừ offset từng segment.
 		 * Tính lại sau resize/font load/split segment; \move + \org cần origin thay đổi theo line.
 		 */
-		
 		/** Khi override, gọi -scale-x, -scale-y, '--angle-x', '--angle-y', '--angle-z' */
 		...utils.scaleAngleToCss(style.scaleX,style.scaleY,0,0,style.angle,info.LayoutResY),
 	};
@@ -423,7 +409,6 @@ function styleToCss (style, info = {}) {
 	return { lineSub, segmentSub };
 	
 }
-// to-do: sửa JSDoc của segmentSubCss
 /** [arena.ai] Token là marker đứng riêng {\h} / {\N} / {\n} (renderer quyết định ngữ nghĩa) không? */
 function isStandaloneToken(tok) {
 	return tok === '{\\h}' || tok === '{\\N}' || tok === '{\\n}';
