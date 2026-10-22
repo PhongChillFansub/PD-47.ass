@@ -1,4 +1,5 @@
 // v0.1.0 21oct26
+// to-do: sửa jsdoc còn lại trong này, bắt đầu sửa lại tagProcess
 // alpha mode
 // Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
@@ -585,7 +586,7 @@ function tokenizeLineText(text) {
 	}
 	return result;
 }
-/** Định nghĩa/chú thích object mục base sau khi tách
+/** [arena.ai] Định nghĩa/chú thích object mục base sau khi tách
  * @typedef {object} parsedDataFormat.baseItem Đơn vị nhỏ nhất trong base: 1 cụm tag + 1 đoạn text.
  * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
  * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm tầng cuối).
@@ -596,7 +597,7 @@ function tokenizeLineText(text) {
  * @property {parsedDataFormat.baseItemAnim} [anim] classify sinh metadata nội suy \t:
  *   MẢNG trực tiếp, mỗi \t → { t1, t2, easing, target } (không bọc { t: [...] }). Karaoke không anim.k.
  */
-/** Định nghĩa/chú thích delta theo mức node của mục base
+/** [arena.ai] Định nghĩa/chú thích delta theo mức node của mục base
  * ĐỊNH HƯỚNG cho classify (bước 4-7): parser xử lí đến base thì mỗi mục base mang
  * delta tách theo 3 mức giống styleParsedToCss (container / text / data).
  * Renderer chuyển mục base thành node container-text TÙY MỨC ĐỘ DELTA:
