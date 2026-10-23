@@ -349,7 +349,7 @@ function styleToCss (style, info = {}) {
 		'--spacing': style.spacing,
 		'letter-spacing': `calc(var(--spacing) / ${info.PlayResX} * 100cqw)`,
 		/** Biến ghi độ dày viền (\bord. CSS ko hỗ trợ \xbord, \ybord), nhận số thuần, ko có đơn vị */
-		...utils.outlineWidthToCss(style.outline, info.PlayResY, info.LayoutResY),
+		...utils.outlineWidthToCss(style.outline, info.PlayResY, info.LayoutResY, info.ScaledBorderAndShadow),
 		/** Biến ghi vị trí bóng */
 		'--shadow-x': style.shadow,
 		'--shadow-y': style.shadow,
@@ -691,9 +691,11 @@ export function parser(doStripTags = false, rawText) {
 	 */
 	const subtitles = rawText.split(/\r?\n/);
 	// fallback nếu file sub ko có info
-	parsedData.info.WrapStyle = 0;                 // mặc định: smart wrapping, top line is wider
-	parsedData.info.PlayResX = 640;                // fallback PlayResX
-	parsedData.info.PlayResY = 480;                // fallback PlayResY
+	parsedData.info.WrapStyle = 0;					// mặc định: smart wrapping, top line is wider
+	parsedData.info.PlayResX = 640;					// fallback PlayResX
+	parsedData.info.PlayResY = 480;					// fallback PlayResY
+	parsedData.info.LayoutResX = 640;				// fallback LayoutResX (=PlayResX)
+	parsedData.info.LayoutResY = 480;				// fallback LayoutResY (=PlayResY)
 	parsedData.info.ScaledBorderAndShadow = false; // mặc định: outline/shadow không scale theo video
 	/** Phần hiện tại đang được xử lý trong file ASS, ví dụ [Script Info], [V4+ Styles] hoặc [Events].
 	 * @type {string}
@@ -780,7 +782,7 @@ export function parser(doStripTags = false, rawText) {
 			} else if (line.startsWith('Style:')) {
 				// Dòng style lưu các dữ liệu
 				/** Tương tự dòng Format, ở đây (dòng các styles) lưu thành mảng các giá trị. */
-				const styleValues = line.replace('Style: ', '').split(',').map(s => s.trim());
+				const styleValues = line.replace('Style:', '').split(',').map(s => s.trim());
 				// Thực tế thì Aegisub lưu liền nhau chứ ko có dấu cách sau phẩy như Format.
 				// Nên là dùng map(s => s.trim()) không cần thiết (lắm?).
                 const style = {};
@@ -832,7 +834,7 @@ export function parser(doStripTags = false, rawText) {
 				/** Chuỗi nội dung của dialogue sau khi bỏ qua tiền tố "Dialogue: ".
 				 * @type {string}
 				 */
-				const lineData = line.substring('Dialogue: '.length);
+				const lineData = line.substring('Dialogue:'.length);
 				// Bỏ qua chỗ 'Dialogue: ' đầu line.
 				/** Array lưu các giá trị của line (tương tự styleValues ở phần Values). 
 				 * 

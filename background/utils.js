@@ -326,7 +326,10 @@ export function alignmentToCss(style, playResX, playResY) {
 		].join(' '),
 		// width: 'fit-content', // đưa vào globalCss.
 		'max-width': `calc(100cqw - ${marginLPct}cqw - ${marginRPct}cqw)`,
-		translate: alignment.translate,	// \an sẽ override chỗ này
+		translate: [
+			`calc(var(--align-x) * -100%)`,
+			`calc(var(--align-y) * -100%)`,
+		].join(' '),	// \an sẽ override chỗ này
 		// Các tag \an, \pos, \move, \org đều là tag của toàn line (2.2, 2.1).
 		// clip sẽ thêm độc lập vào lineSub riêng.
 	};
@@ -370,7 +373,7 @@ export function scaleAngleToCss(scaleX, scaleY, angleX, angleY, angleZ, layoutRe
 	const fry = Number(angleY);
 	const frz = Number(angleZ);
 	if ((Number.isFinite(frx) && frx !== 0) || (Number.isFinite(fry) && fry !== 0)) {
-		const perspective = 312.5 / Number(layoutResY);
+		const perspective = 312.5 / Number(layoutResY) * 100;
 		if (Number.isFinite(perspective) && perspective > 0) {
 			parts.push(`perspective(${perspective}cqh)`);
 		}
