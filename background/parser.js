@@ -701,13 +701,15 @@ export function parser(doStripTags = false, rawText) {
 	 * @type {string}
 	 */
 	let currentSection = '';
-	/** LayoutRes chỉ fallback sang PlayRes khi file không khai báo trục tương ứng. */
+	/** Chỉ dùng LayoutRes của file khi CẢ HAI trục được khai báo hợp lệ. */
 	let hasExplicitLayoutResX = false;
 	let hasExplicitLayoutResY = false;
 	/** Chốt LayoutRes sau khi đã đọc hết [Script Info], trước khi styleToCss() dùng nó. */
 	const finalizeLayoutRes = () => {
-		if (!hasExplicitLayoutResX) parsedData.info.LayoutResX = parsedData.info.PlayResX;
-		if (!hasExplicitLayoutResY) parsedData.info.LayoutResY = parsedData.info.PlayResY;
+		if (!hasExplicitLayoutResX || !hasExplicitLayoutResY) {
+			parsedData.info.LayoutResX = parsedData.info.PlayResX;
+			parsedData.info.LayoutResY = parsedData.info.PlayResY;
+		}
 	};
 	/** Danh sách tên trường của section styles theo đúng thứ tự trong dòng Format.
 	 * @type {string[]}

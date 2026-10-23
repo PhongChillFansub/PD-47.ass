@@ -159,7 +159,7 @@ test('parser uses current defaults for missing or invalid Script Info values', (
 	assert.equal(info.PlayResY, 480);
 });
 
-test('LayoutRes falls back to the final PlayRes per axis before style CSS is compiled', () => {
+test('LayoutRes uses the final PlayRes unless both explicit axes are present before style CSS is compiled', () => {
 	const noLayout = MINI_ASS
 		.replace('PlayResX: 640\n', 'PlayResX: 1280\n')
 		.replace('PlayResY: 480\n', 'PlayResY: 720\n')
@@ -174,12 +174,19 @@ test('LayoutRes falls back to the final PlayRes per axis before style CSS is com
 		'calc(0.002777777777777778 * 2 * 100cqh)',
 	);
 
-	const explicitX = parser(false, noLayout.replace(
+	const onlyExplicitX = parser(false, noLayout.replace(
 		'ScaledBorderAndShadow: no\n',
 		'LayoutResX: 1024\nScaledBorderAndShadow: no\n',
 	));
-	assert.equal(explicitX.info.LayoutResX, 1024);
-	assert.equal(explicitX.info.LayoutResY, 720);
+	assert.equal(onlyExplicitX.info.LayoutResX, 1280);
+	assert.equal(onlyExplicitX.info.LayoutResY, 720);
+
+	const bothExplicit = parser(false, noLayout.replace(
+		'ScaledBorderAndShadow: no\n',
+		'LayoutResX: 1024\nLayoutResY: 576\nScaledBorderAndShadow: no\n',
+	));
+	assert.equal(bothExplicit.info.LayoutResX, 1024);
+	assert.equal(bothExplicit.info.LayoutResY, 576);
 });
 
 // doStripTags is a public parser mode.
