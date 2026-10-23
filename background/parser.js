@@ -694,8 +694,6 @@ export function parser(doStripTags = false, rawText) {
 	parsedData.info.WrapStyle = 0;					// mặc định: smart wrapping, top line is wider
 	parsedData.info.PlayResX = 640;					// fallback PlayResX
 	parsedData.info.PlayResY = 480;					// fallback PlayResY
-	parsedData.info.LayoutResX = 640;				// fallback LayoutResX (=PlayResX)
-	parsedData.info.LayoutResY = 480;				// fallback LayoutResY (=PlayResY)
 	parsedData.info.ScaledBorderAndShadow = false; // mặc định: outline/shadow không scale theo video
 	/** Phần hiện tại đang được xử lý trong file ASS, ví dụ [Script Info], [V4+ Styles] hoặc [Events].
 	 * @type {string}
