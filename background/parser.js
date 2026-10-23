@@ -702,13 +702,6 @@ export function parser(doStripTags = false, rawText) {
 	/** Chỉ dùng LayoutRes của file khi CẢ HAI trục được khai báo hợp lệ. */
 	let hasExplicitLayoutResX = false;
 	let hasExplicitLayoutResY = false;
-	/** Chốt LayoutRes sau khi đã đọc hết [Script Info], trước khi styleToCss() dùng nó. */
-	const finalizeLayoutRes = () => {
-		if (!hasExplicitLayoutResX || !hasExplicitLayoutResY) {
-			parsedData.info.LayoutResX = parsedData.info.PlayResX;
-			parsedData.info.LayoutResY = parsedData.info.PlayResY;
-		}
-	};
 	/** Danh sách tên trường của section styles theo đúng thứ tự trong dòng Format.
 	 * @type {string[]}
 	 */
@@ -722,6 +715,13 @@ export function parser(doStripTags = false, rawText) {
 	 * @type {string}
 	 */
 	let line;
+	/** Chốt LayoutRes sau khi đã đọc hết [Script Info], trước khi styleToCss() dùng nó. */
+	const finalizeLayoutRes = () => {
+		if (!hasExplicitLayoutResX || !hasExplicitLayoutResY) {
+			parsedData.info.LayoutResX = parsedData.info.PlayResX;
+			parsedData.info.LayoutResY = parsedData.info.PlayResY;
+		}
+	};
 	for (line of subtitles) { // Xét các dòng dữ liệu trong file. line = subtitles[i] (hoặc subs[i]. Subscribe?)
 		line = line.trimStart(); // Xóa khoảng trắng ở đầu dòng dữ liệu (ko cần thiết?)
 		if (!line || line.startsWith(';')) { continue }; 
