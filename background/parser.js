@@ -586,7 +586,15 @@ function styleToCss (style, info = {}) {
 		 * 
 		 * Nếu transform thì đưa nguyên cụm var() vào string (chấp nhận loại bỏ khả năng filter: none)
 		 */
-		filter: utils.shadBlurToCss(style.shadow, style.shadow, 0, style.backColour),
+			filter: utils.shadBlurToCss(
+				style.shadow,
+				style.shadow,
+				0,
+				style.backColour,
+				info.PlayResX,
+				info.PlayResY,
+				info.ScaledBorderAndShadow,
+			),
 		'--inline-fx': '',
 		'--scale-x': style.scaleX,
 		'--scale-y': style.scaleY,

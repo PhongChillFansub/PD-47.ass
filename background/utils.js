@@ -225,16 +225,23 @@ export function decorationToCss(underline, strikeOut) {
  * @param {string} color Màu 4
  * @returns {string} filter CSS: 'drop-shadow(...) blur(...)' hoặc 'none' nếu shadowX/Y = 0 và blur = 0
  */
-export function shadBlurToCss(shadowX, shadowY, blur, color) {
-	const hasShadow = ( shadowX > 0 || shadowY > 0 );
-	const hasBlur = ( blur > 0 );
+export function shadBlurToCss(shadowX, shadowY, blur, color, playResX, playResY, ScaledBorderAndShadow) {
+	const xValue = Number.isFinite(Number(shadowX)) ? Number(shadowX) : 0;
+	const yValue = Number.isFinite(Number(shadowY)) ? Number(shadowY) : 0;
+	const blurValue = Number.isFinite(Number(blur)) ? Number(blur) : 0;
+	const hasShadow = xValue !== 0 || yValue !== 0;
+	const hasBlur = blurValue > 0;
 	if (!hasShadow && !hasBlur) return 'none';
+	const scaled = ScaledBorderAndShadow && Number(playResX) > 0 && Number(playResY) > 0;
+	const x = scaled ? `calc(${xValue / playResX} * 100cqw)` : `${xValue}px`;
+	const y = scaled ? `calc(${yValue / playResY} * 100cqh)` : `${yValue}px`;
+	const blurRadius = scaled ? `calc(${blurValue / playResY} * 100cqh)` : `${blurValue}px`;
 	return [
 		hasShadow
-			? `drop-shadow(${shadowX}px ${shadowY}px ${color})`
+			? `drop-shadow(${x} ${y} ${color})`
 			: '',
 		hasBlur
-			? `blur(${blur}px)`
+			? `blur(${blurRadius})`
 			: '',
 	].filter(Boolean).join(' ');
 	// Chỉ dùng filter: drop-shadow(...) blur(...) để render shadow/blur,
@@ -406,11 +413,16 @@ export function scaleAngleToCss(scaleX, scaleY, angleX, angleY, angleZ, layoutRe
  * @returns {{'--outline': number, '-webkit-text-stroke-width': string, padding: string, margin: string}}
  */
 export function outlineWidthToCss(outlineWidth, playResY, layoutResY, ScaledBorderAndShadow) {
-	const scaledWidth = outlineWidth / (ScaledBorderAndShadow ? playResY : layoutResY);
+	const scaledWidth = outlineWidth / playResY;
+	const width = ScaledBorderAndShadow
+		? `calc(${scaledWidth} * 100cqh)`
+		: `${outlineWidth}px`;
 	return {
 		'--outline': outlineWidth,
-		'-webkit-text-stroke-width': `calc(${scaledWidth} * 2 * 100cqh)`,
-		'padding': `calc(${scaledWidth} * 100cqh)`,
-		'margin': `calc(${scaledWidth} * 100cqh)`,
+		'-webkit-text-stroke-width': ScaledBorderAndShadow
+			? `calc(${scaledWidth} * 2 * 100cqh)`
+			: `${outlineWidth * 2}px`,
+		'padding': width,
+		'margin': width,
 	}
 }
