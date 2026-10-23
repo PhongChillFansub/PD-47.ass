@@ -1,8 +1,31 @@
-/** v0.1.0 20sep26
- * alpha mode
- * Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] ĐẦY ĐỦ
- * { base, collision, clip } theo struct đích (mục 3 prompt 03sep26).
- *
+// v0.1.0 23sep26
+// alpha mode
+// Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] ĐẦY ĐỦ
+// { base, collision, clip }.
+import * as utils from './utils.js';
+/** [Manual edit] Một số lưu ý liên quan đến parser-tagProcess 
+ * - Chỉ import từ utils, ko import từ parser. (chỉ parser có import tagProcess)
+ * - Chỉ export hàm classify.
+ */
+/** [Manual edit] Phân loại tag trong tagProcess 
+ * 2.4. Layout Local
+ * 	2.4.1. Transformable (vd: \fs, \fsc*, \fa, ...)
+ * 	2.4.2. Non-transformable (vd: \fn, \r, ...)
+ * 2.3. Decoration Local 
+ * 	2.3.1. Transformable (vd: \*c, \*a, \bord, \shad, ...)
+ * 	2.3.2. Non-transformable (\s, \u, \k, ...)
+ * 2.2. Collision (\an -> \pos, \move (lấy đầu) -> \org)
+ * 2.1. \[i]clip
+ */
+/** [Manual edit] Cấu trúc của lineCss[i] trước và sau classify
+ * - Trước classify:
+ * 
+ * to-do: sửa jsdoc chỗ này, sửa utils liên quan info.ScaledBorderAndShadow
+ */
+
+
+
+/*
  * Thứ tự nhóm KHÔNG ĐƯỢC đổi (đã chốt):
  *   2.4 Layout Local (2.4.1 transformable + 2.4.2 non-transformable TĨNH ngoài \t, rồi \t → metadata
  *   anim — bản này) → 2.3 Decoration (ĐÃ LÀM THẬT 11sep26: màu/alpha/bord/shad/be/blur/fa/fr
@@ -23,10 +46,6 @@
  *   KHÔNG lọc identity 100: \fscx100/\fscy100 vẫn emit scaleX(1)/scaleY(1) (chốt 09sep26).
  * - Mỗi base item GIỮ NGUYÊN mảng tags raw (đã hỏi/chốt 03sep26): nhóm sau (2.3/2.2/2.1) và
  *   renderer/debug đọc lại được tag gốc — vì vậy các hàm nhóm KHÔNG xóa tag khi tiêu thụ.
- *
- * KHÔNG import gì từ './parser.js' (parser.js import classify từ file này → tránh vòng tròn).
- * Dữ liệu cần của style dòng (styleRef) do parser() truyền vào qua classify().
- * File này CHỈ export classify — mọi hàm nhóm private (chốt 09sep26; tests đi qua classify).
  */
 
 /** Định nghĩa/chú thích anim của 1 mục base: metadata nội suy \t, lưu MẢNG TRỰC TIẾP
@@ -53,7 +72,6 @@
  * @property {{rawList: string[], effectiveType: ('clip'|'iclip'|null), effectiveRaw: (string|null)}} clip
  *   Nhóm 2.1 — mức DÒNG, last-wins (bản này STUB default — session 2.1 làm đầy).
  */
-import * as utils from './utils.js';
 /** Regex nhận diện tag karaoke: \k / \kf / \ko + duration (số, centisecond trong file).
  * KHÔNG match \K (không xử lí) và \kt (wontfix v1+). Nhóm 1 = type, nhóm 2 = duration raw (cs).
  * Dùng trong classifyDecoration (2.3 — ĐÃ LÀM 11sep26); 2.4 KHÔNG đụng karaoke. */
@@ -266,6 +284,17 @@ function parseTransformTag(tag, styleRef, nonTransformableContext) {
  *   data (marker \h\N\n; karaoke CHƯA — về 2.3, tags giữ raw). text không tag thì KHÔNG có delta/anim.
  * @property {parsedDataFormat.baseItemAnim} [anim] classify sinh metadata nội suy \t:
  *   MẢNG trực tiếp, mỗi \t → { t1, t2, easing, target } (không bọc { t: [...] }). Karaoke không anim.k.
+ */
+/** mới: Định nghĩa/chú thích baseItem trong lineCss[i].base = Array<baseItem> 
+ * @typedef {object} parsedDataFormat.baseItem Đơn vị trong Array base: 1 cụm tag + 1 đoạn text.
+ * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, 
+ * raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
+ * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm sau).
+ * (classify KHÔNG xóa tags khi xử lí, renderer/debug vẫn đọc lại được.)
+ * @property {parsedDataFormat.baseItemDelta} [delta] các tag thay đổi nội dung (layout, decoration)
+ * nếu ko có tag liên quan thì ko có delta/anim.
+ * @property {parsedDataFormat.baseItemAnim} [anim] classify sinh metadata nội suy \t:
+ *   MẢNG trực tiếp, mỗi \t → { t1, t2, easing, target } (không bọc { t: [...] }). Karaoke xử lí trong delta.data.
  */
 /** Định nghĩa/chú thích delta theo mức node của mục base
  * ĐỊNH HƯỚNG cho classify (bước 4-7): parser xử lí đến base thì mỗi mục base mang
