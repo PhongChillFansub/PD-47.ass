@@ -778,9 +778,9 @@ export function parser(doStripTags = false, rawText) {
 					k === 'LayoutResY' ? parseClampedNum(true, v, parsedData.info.PlayResY, 1) :
 					k === 'ScaledBorderAndShadow' ? v === 'yes' :
 					v; // key khác: giữ nguyên bản như cũ
-					if (k === 'LayoutResX' && Number.isFinite(parseClampedNum(true, v, NaN, 1))) hasExplicitLayoutResX = true;
-					if (k === 'LayoutResY' && Number.isFinite(parseClampedNum(true, v, NaN, 1))) hasExplicitLayoutResY = true;
-					if (k === 'ScriptType' && v !== 'v4.00+') { // Ko đảm bảo nếu ScriptType trong file ko phải v4.00+
+				if (k === 'LayoutResX' && Number.isFinite(parseClampedNum(true, v, NaN, 1))) hasExplicitLayoutResX = true;
+				if (k === 'LayoutResY' && Number.isFinite(parseClampedNum(true, v, NaN, 1))) hasExplicitLayoutResY = true;
+				if (k === 'ScriptType' && v !== 'v4.00+') { // Ko đảm bảo nếu ScriptType trong file ko phải v4.00+
 					utils.warn(`${parserLogPrefix} Tin... File chuẩn chưa em? (Extension ko hỗ trợ tốt với ScriptType=${v})`);
 				}
 			}
