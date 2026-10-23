@@ -277,7 +277,7 @@ function processLineText(doStripTags, text) {
 		if (tok.startsWith('{') && tok.endsWith('}')) continue; // tag token → xóa
 		stripped += tok; // text token (kể cả '{' không đóng, \{ \})
 	}
-	return [{ tags: [], text: stripped }];
+	return stripped === '' ? [] : [{ tags: [], text: stripped }];
 }
 /** [Manual edit] Hàm chuyển đổi style đã chuẩn hóa thành object CSS (lineSub, segmentSub, data)
  * 
@@ -694,13 +694,14 @@ export function parser(doStripTags = false, rawText) {
 	parsedData.info.WrapStyle = 0;					// mặc định: smart wrapping, top line is wider
 	parsedData.info.PlayResX = 640;					// fallback PlayResX
 	parsedData.info.PlayResY = 480;					// fallback PlayResY
-	parsedData.info.LayoutResX = 640;				// fallback LayoutResX (=PlayResX)
-	parsedData.info.LayoutResY = 480;				// fallback LayoutResY (=PlayResY)
 	parsedData.info.ScaledBorderAndShadow = false; // mặc định: outline/shadow không scale theo video
 	/** Phần hiện tại đang được xử lý trong file ASS, ví dụ [Script Info], [V4+ Styles] hoặc [Events].
 	 * @type {string}
 	 */
 	let currentSection = '';
+	/** Chỉ dùng LayoutRes của file khi CẢ HAI trục được khai báo hợp lệ. */
+	let hasExplicitLayoutResX = false;
+	let hasExplicitLayoutResY = false;
 	/** Danh sách tên trường của section styles theo đúng thứ tự trong dòng Format.
 	 * @type {string[]}
 	 */
@@ -714,11 +715,24 @@ export function parser(doStripTags = false, rawText) {
 	 * @type {string}
 	 */
 	let line;
+	/** Chốt LayoutRes sau khi đã đọc hết [Script Info], trước khi styleToCss() dùng nó. */
+	const finalizeLayoutRes = () => {
+		if (!hasExplicitLayoutResX || !hasExplicitLayoutResY) {
+			parsedData.info.LayoutResX = parsedData.info.PlayResX;
+			parsedData.info.LayoutResY = parsedData.info.PlayResY;
+		}
+	};
 	for (line of subtitles) { // Xét các dòng dữ liệu trong file. line = subtitles[i] (hoặc subs[i]. Subscribe?)
 		line = line.trimStart(); // Xóa khoảng trắng ở đầu dòng dữ liệu (ko cần thiết?)
 		if (!line || line.startsWith(';')) { continue }; 
 		// Nếu line trống (""), hoặc bắt đầu bằng ";" thì bỏ qua. ";" là phần credit của app (trong phần Script Info).
-		if (line.startsWith('[') && line.endsWith(']')) { currentSection = line.trim(); continue; } // Lưu phân đoạn
+		if (line.startsWith('[') && line.endsWith(']')) {
+			const nextSection = line.trim();
+			// Style được biên dịch ngay trong loop, nên phải resolve fallback trước Style đầu tiên.
+			if (nextSection === '[V4+ Styles]') finalizeLayoutRes();
+			currentSection = nextSection;
+			continue;
+		} // Lưu phân đoạn
 		/** Cho biết dòng hiện tại là phần nối tiếp của dialogue bị ngắt dòng hay ko (chỉ hỗ trợ phần Event. #a2).
 		 * @type {boolean}
 		 */
@@ -764,7 +778,9 @@ export function parser(doStripTags = false, rawText) {
 					k === 'LayoutResY' ? parseClampedNum(true, v, parsedData.info.PlayResY, 1) :
 					k === 'ScaledBorderAndShadow' ? v === 'yes' :
 					v; // key khác: giữ nguyên bản như cũ
-				if (k === 'ScriptType' && v !== 'v4.00+') { // Ko đảm bảo nếu ScriptType trong file ko phải v4.00+
+					if (k === 'LayoutResX' && Number.isFinite(parseClampedNum(true, v, NaN, 1))) hasExplicitLayoutResX = true;
+					if (k === 'LayoutResY' && Number.isFinite(parseClampedNum(true, v, NaN, 1))) hasExplicitLayoutResY = true;
+					if (k === 'ScriptType' && v !== 'v4.00+') { // Ko đảm bảo nếu ScriptType trong file ko phải v4.00+
 					utils.warn(`${parserLogPrefix} Tin... File chuẩn chưa em? (Extension ko hỗ trợ tốt với ScriptType=${v})`);
 				}
 			}
@@ -885,6 +901,8 @@ export function parser(doStripTags = false, rawText) {
     		}
 		}
 	}
+	// Giữ info nhất quán cả khi file không có [V4+ Styles].
+	finalizeLayoutRes();
 	utils.log(`${parserLogPrefix} Đã xử lí xong.`, parsedData);	
 	return parsedData;
 }

@@ -159,6 +159,36 @@ test('parser uses current defaults for missing or invalid Script Info values', (
 	assert.equal(info.PlayResY, 480);
 });
 
+test('LayoutRes uses the final PlayRes unless both explicit axes are present before style CSS is compiled', () => {
+	const noLayout = MINI_ASS
+		.replace('PlayResX: 640\n', 'PlayResX: 1280\n')
+		.replace('PlayResY: 480\n', 'PlayResY: 720\n')
+		.replace('LayoutResX: 640\n', '')
+		.replace('LayoutResY: 480\n', '')
+		.replace('ScaledBorderAndShadow: yes\n', 'ScaledBorderAndShadow: no\n');
+	const parsed = parser(false, noLayout);
+	assert.equal(parsed.info.LayoutResX, 1280);
+	assert.equal(parsed.info.LayoutResY, 720);
+	assert.equal(
+		parsed.styleCss[0].segmentSub['-webkit-text-stroke-width'],
+		'calc(0.002777777777777778 * 2 * 100cqh)',
+	);
+
+	const onlyExplicitX = parser(false, noLayout.replace(
+		'ScaledBorderAndShadow: no\n',
+		'LayoutResX: 1024\nScaledBorderAndShadow: no\n',
+	));
+	assert.equal(onlyExplicitX.info.LayoutResX, 1280);
+	assert.equal(onlyExplicitX.info.LayoutResY, 720);
+
+	const bothExplicit = parser(false, noLayout.replace(
+		'ScaledBorderAndShadow: no\n',
+		'LayoutResX: 1024\nLayoutResY: 576\nScaledBorderAndShadow: no\n',
+	));
+	assert.equal(bothExplicit.info.LayoutResX, 1024);
+	assert.equal(bothExplicit.info.LayoutResY, 576);
+});
+
 // doStripTags is a public parser mode.
 
 test('doStripTags truthy removes override blocks while retaining text markers verbatim', () => {
@@ -166,6 +196,7 @@ test('doStripTags truthy removes override blocks while retaining text markers ve
 	assert.deepEqual(parsed.lineCss[0].base, [
 		{ tags: [], text: 'lorem\\Nipsum\\hdolor\\nsitamet' },
 	]);
+	assert.deepEqual(parser(true, assWithText('{\\fs30}')).lineCss[0].base, []);
 });
 
 test('doStripTags false keeps override blocks for classification', () => {
@@ -272,7 +303,7 @@ test('outline helpers preserve common stroke geometry and BorderStyle paint rout
 test('scaleAngleToCss emits perspective and the current rotate/scale order', () => {
 	assert.deepEqual(scaleAngleToCss(100, 100, 0, 0, 0, 480), {});
 	assert.deepEqual(scaleAngleToCss(120, 80, 15, -30, 45, 480), {
-		transform: 'perspective(0.6510416666666666cqh) rotateY(30deg) rotateX(-15deg) rotateZ(-45deg) scaleX(1.2) scaleY(0.8)',
+		transform: 'perspective(65.10416666666666cqh) rotateY(30deg) rotateX(-15deg) rotateZ(-45deg) scaleX(1.2) scaleY(0.8)',
 	});
 });
 
