@@ -173,6 +173,10 @@ test('LayoutRes uses the final PlayRes unless both explicit axes are present bef
 		parsed.styleCss[0].segmentSub['-webkit-text-stroke-width'],
 		'calc(0.002777777777777778 * 2 * 100cqh)',
 	);
+	assert.equal(
+		parsed.styleCss[0].segmentSub.filter,
+		'drop-shadow(calc(0.0015625 * 100cqw) calc(0.002777777777777778 * 100cqh) rgba(0, 0, 0, 1.00))',
+	);
 
 	const onlyExplicitX = parser(false, noLayout.replace(
 		'ScaledBorderAndShadow: no\n',
@@ -242,7 +246,10 @@ test('styleCss contains lineSub and segmentSub, not the removed container/text/d
 	assert.equal(segmentSub['font-size'], 'calc(var(--font-size) / 480 * 100cqh * var(--css-resize))');
 	assert.equal(segmentSub['--color1'], 'rgba(255, 255, 255, 1.00)');
 	assert.equal(segmentSub.color, 'var(--color1)');
-	assert.equal(segmentSub.filter, 'drop-shadow(2px 2px rgba(0, 0, 0, 1.00))');
+	assert.equal(
+		segmentSub.filter,
+		'drop-shadow(calc(0.003125 * 100cqw) calc(0.004166666666666667 * 100cqh) rgba(0, 0, 0, 1.00))',
+	);
 });
 
 test('styleCss routes BorderStyle 1 and 3 paint colors through segmentSub', () => {
@@ -279,8 +286,16 @@ test('decorationToCss uses the supplied truthiness and produces standard decorat
 	assert.equal(decorationToCss('var(--underline)', 'var(--strike-out)'), 'underline line-through');
 });
 
-test('shadBlurToCss currently accepts numeric positive shadow/blur components', () => {
+test('shadBlurToCss maps shadow by its selected resolution and blur by LayoutRes', () => {
 	assert.equal(shadBlurToCss(2, -1, 3, 'black'), 'drop-shadow(2px -1px black) blur(3px)');
+	assert.equal(
+		shadBlurToCss(2, -1, 3, 'black', 1280, 720, 1024, 576, true),
+		'drop-shadow(calc(0.0015625 * 100cqw) calc(-0.001388888888888889 * 100cqh) black) blur(calc(0.005208333333333333 * 100cqh))',
+	);
+	assert.equal(
+		shadBlurToCss(2, -1, 3, 'black', 1280, 720, 1024, 576, false),
+		'drop-shadow(calc(0.001953125 * 100cqw) calc(-0.001736111111111111 * 100cqh) black) blur(calc(0.005208333333333333 * 100cqh))',
+	);
 	assert.equal(shadBlurToCss(0, 0, 0, 'black'), 'none');
 	assert.equal(shadBlurToCss('var(--shadow-x)', 'var(--shadow-y)', 'var(--blur)', 'black'), 'none');
 });
@@ -297,6 +312,12 @@ test('outline helpers preserve common stroke geometry and BorderStyle paint rout
 		'-webkit-text-stroke-width': 'calc(0.004166666666666667 * 2 * 100cqh)',
 		padding: 'calc(0.004166666666666667 * 100cqh)',
 		margin: 'calc(0.004166666666666667 * 100cqh)',
+	});
+	assert.deepEqual(outlineWidthToCss(2, 480, 720, false), {
+		'--outline': 2,
+		'-webkit-text-stroke-width': 'calc(0.002777777777777778 * 2 * 100cqh)',
+		padding: 'calc(0.002777777777777778 * 100cqh)',
+		margin: 'calc(0.002777777777777778 * 100cqh)',
 	});
 });
 

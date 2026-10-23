@@ -225,16 +225,27 @@ export function decorationToCss(underline, strikeOut) {
  * @param {string} color Màu 4
  * @returns {string} filter CSS: 'drop-shadow(...) blur(...)' hoặc 'none' nếu shadowX/Y = 0 và blur = 0
  */
-export function shadBlurToCss(shadowX, shadowY, blur, color) {
-	const hasShadow = ( shadowX > 0 || shadowY > 0 );
-	const hasBlur = ( blur > 0 );
+export function shadBlurToCss(shadowX, shadowY, blur, color, playResX, playResY, layoutResX, layoutResY, ScaledBorderAndShadow) {
+	const xValue = Number.isFinite(Number(shadowX)) ? Number(shadowX) : 0;
+	const yValue = Number.isFinite(Number(shadowY)) ? Number(shadowY) : 0;
+	const blurValue = Number.isFinite(Number(blur)) ? Number(blur) : 0;
+	const hasShadow = xValue !== 0 || yValue !== 0;
+	const hasBlur = blurValue > 0;
 	if (!hasShadow && !hasBlur) return 'none';
+	const shadowResX = ScaledBorderAndShadow ? playResX : layoutResX;
+	const shadowResY = ScaledBorderAndShadow ? playResY : layoutResY;
+	const toCqw = (value, resolution) => Number(resolution) > 0
+		? `calc(${value / resolution} * 100cqw)`
+		: `${value}px`;
+	const toCqh = (value, resolution) => Number(resolution) > 0
+		? `calc(${value / resolution} * 100cqh)`
+		: `${value}px`;
 	return [
 		hasShadow
-			? `drop-shadow(${shadowX}px ${shadowY}px ${color})`
+			? `drop-shadow(${toCqw(xValue, shadowResX)} ${toCqh(yValue, shadowResY)} ${color})`
 			: '',
 		hasBlur
-			? `blur(${blur}px)`
+			? `blur(${toCqh(blurValue, layoutResY)})`
 			: '',
 	].filter(Boolean).join(' ');
 	// Chỉ dùng filter: drop-shadow(...) blur(...) để render shadow/blur,
