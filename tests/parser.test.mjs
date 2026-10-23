@@ -272,7 +272,7 @@ test('outline helpers preserve common stroke geometry and BorderStyle paint rout
 test('scaleAngleToCss emits perspective and the current rotate/scale order', () => {
 	assert.deepEqual(scaleAngleToCss(100, 100, 0, 0, 0, 480), {});
 	assert.deepEqual(scaleAngleToCss(120, 80, 15, -30, 45, 480), {
-		transform: 'perspective(0.6510416666666666cqh) rotateY(30deg) rotateX(-15deg) rotateZ(-45deg) scaleX(1.2) scaleY(0.8)',
+		transform: 'perspective(65.10416666666666cqh) rotateY(30deg) rotateX(-15deg) rotateZ(-45deg) scaleX(1.2) scaleY(0.8)',
 	});
 });
 
