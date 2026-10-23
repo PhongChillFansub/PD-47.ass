@@ -701,6 +701,14 @@ export function parser(doStripTags = false, rawText) {
 	 * @type {string}
 	 */
 	let currentSection = '';
+	/** LayoutRes chỉ fallback sang PlayRes khi file không khai báo trục tương ứng. */
+	let hasExplicitLayoutResX = false;
+	let hasExplicitLayoutResY = false;
+	/** Chốt LayoutRes sau khi đã đọc hết [Script Info], trước khi styleToCss() dùng nó. */
+	const finalizeLayoutRes = () => {
+		if (!hasExplicitLayoutResX) parsedData.info.LayoutResX = parsedData.info.PlayResX;
+		if (!hasExplicitLayoutResY) parsedData.info.LayoutResY = parsedData.info.PlayResY;
+	};
 	/** Danh sách tên trường của section styles theo đúng thứ tự trong dòng Format.
 	 * @type {string[]}
 	 */
@@ -718,7 +726,13 @@ export function parser(doStripTags = false, rawText) {
 		line = line.trimStart(); // Xóa khoảng trắng ở đầu dòng dữ liệu (ko cần thiết?)
 		if (!line || line.startsWith(';')) { continue }; 
 		// Nếu line trống (""), hoặc bắt đầu bằng ";" thì bỏ qua. ";" là phần credit của app (trong phần Script Info).
-		if (line.startsWith('[') && line.endsWith(']')) { currentSection = line.trim(); continue; } // Lưu phân đoạn
+		if (line.startsWith('[') && line.endsWith(']')) {
+			const nextSection = line.trim();
+			// Style được biên dịch ngay trong loop, nên phải resolve fallback trước Style đầu tiên.
+			if (nextSection === '[V4+ Styles]') finalizeLayoutRes();
+			currentSection = nextSection;
+			continue;
+		} // Lưu phân đoạn
 		/** Cho biết dòng hiện tại là phần nối tiếp của dialogue bị ngắt dòng hay ko (chỉ hỗ trợ phần Event. #a2).
 		 * @type {boolean}
 		 */
@@ -764,7 +778,9 @@ export function parser(doStripTags = false, rawText) {
 					k === 'LayoutResY' ? parseClampedNum(true, v, parsedData.info.PlayResY, 1) :
 					k === 'ScaledBorderAndShadow' ? v === 'yes' :
 					v; // key khác: giữ nguyên bản như cũ
-				if (k === 'ScriptType' && v !== 'v4.00+') { // Ko đảm bảo nếu ScriptType trong file ko phải v4.00+
+					if (k === 'LayoutResX' && Number.isFinite(parseClampedNum(true, v, NaN, 1))) hasExplicitLayoutResX = true;
+					if (k === 'LayoutResY' && Number.isFinite(parseClampedNum(true, v, NaN, 1))) hasExplicitLayoutResY = true;
+					if (k === 'ScriptType' && v !== 'v4.00+') { // Ko đảm bảo nếu ScriptType trong file ko phải v4.00+
 					utils.warn(`${parserLogPrefix} Tin... File chuẩn chưa em? (Extension ko hỗ trợ tốt với ScriptType=${v})`);
 				}
 			}
@@ -885,6 +901,8 @@ export function parser(doStripTags = false, rawText) {
     		}
 		}
 	}
+	// Giữ info nhất quán cả khi file không có [V4+ Styles].
+	finalizeLayoutRes();
 	utils.log(`${parserLogPrefix} Đã xử lí xong.`, parsedData);	
 	return parsedData;
 }

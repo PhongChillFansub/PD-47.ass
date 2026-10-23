@@ -159,6 +159,29 @@ test('parser uses current defaults for missing or invalid Script Info values', (
 	assert.equal(info.PlayResY, 480);
 });
 
+test('LayoutRes falls back to the final PlayRes per axis before style CSS is compiled', () => {
+	const noLayout = MINI_ASS
+		.replace('PlayResX: 640\n', 'PlayResX: 1280\n')
+		.replace('PlayResY: 480\n', 'PlayResY: 720\n')
+		.replace('LayoutResX: 640\n', '')
+		.replace('LayoutResY: 480\n', '')
+		.replace('ScaledBorderAndShadow: yes\n', 'ScaledBorderAndShadow: no\n');
+	const parsed = parser(false, noLayout);
+	assert.equal(parsed.info.LayoutResX, 1280);
+	assert.equal(parsed.info.LayoutResY, 720);
+	assert.equal(
+		parsed.styleCss[0].segmentSub['-webkit-text-stroke-width'],
+		'calc(0.002777777777777778 * 2 * 100cqh)',
+	);
+
+	const explicitX = parser(false, noLayout.replace(
+		'ScaledBorderAndShadow: no\n',
+		'LayoutResX: 1024\nScaledBorderAndShadow: no\n',
+	));
+	assert.equal(explicitX.info.LayoutResX, 1024);
+	assert.equal(explicitX.info.LayoutResY, 720);
+});
+
 // doStripTags is a public parser mode.
 
 test('doStripTags truthy removes override blocks while retaining text markers verbatim', () => {
