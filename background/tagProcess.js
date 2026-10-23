@@ -1,4 +1,4 @@
-// v0.1.0 23sep26
+// v0.1.0 23oct26
 // alpha mode
 // Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] ĐẦY ĐỦ
 // { base, collision, clip }.
@@ -8,21 +8,74 @@ import * as utils from './utils.js';
  * - Chỉ export hàm classify.
  */
 /** [Manual edit] Phân loại tag trong tagProcess 
- * 2.4. Layout Local
+ * 2.4. Layout Local/Segment-level
  * 	2.4.1. Transformable (vd: \fs, \fsc*, \fa, ...)
  * 	2.4.2. Non-transformable (vd: \fn, \r, ...)
  * 2.3. Decoration Local 
  * 	2.3.1. Transformable (vd: \*c, \*a, \bord, \shad, ...)
  * 	2.3.2. Non-transformable (\s, \u, \k, ...)
- * 2.2. Collision (\an -> \pos, \move (lấy đầu) -> \org)
- * 2.1. \[i]clip
+ * 2.2. Line-level: Collision (\an -> \pos, \move (lấy đầu) -> \org)
+ * 2.1. Line-level: \[i]clip
  */
-/** [Manual edit] Cấu trúc của lineCss[i] trước và sau classify
- * - Trước classify:
- * 
- * to-do: sửa jsdoc chỗ này, sửa utils liên quan info.ScaledBorderAndShadow
+/** [Manual edit] Định nghĩa/chú thích cấu trúc baseRaw 
+ * (đầu ra hàm processLineText/đầu vào "base" của classify)
+ * @typedef {object} parsedDataFormat.baseRaw
+ * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
+ * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm tầng cuối).
+ */
+/** [Manual edit] Định nghĩa/chú thích cấu trúc lineCss[i]
+ * @typedef {object} parsedDataFormat.lineCss đầu ra của classify
+ * @property {Array<parsedDataFormat.baseItem>} base bê nguyên { tags, text } từ đầu vào baseRaw;
+ * chỉ thêm { delta?, anim? } khi có tag ghi đè thay đổi nội dung. 
+ * @property {parsedDataFormat.lineSubCss} lineSub Ghi các dữ liệu của container.
+ * @property {Array<parsedDataFormat.clipItem>} clip Dữ liệu của clip
  */
 
+/** [Manual edit] Định nghĩa/chú thích baseItem trong lineCss[i].base = Array baseItem 
+ * @typedef {object} parsedDataFormat.baseItem Đơn vị trong Array base: 1 cụm tag + 1 đoạn text.
+ * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, 
+ * raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
+ * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm sau).
+ * (classify KHÔNG xóa tags khi xử lí, renderer/debug vẫn đọc lại được.)
+ * @property {parsedDataFormat.baseItemDelta} [delta] các tag thay đổi nội dung (layout, decoration)
+ * nếu ko có tag liên quan thì ko có delta/anim.
+ * @property {parsedDataFormat.baseItemAnim} [anim] classify sinh metadata nội suy \t:
+ *   MẢNG trực tiếp, mỗi \t → { t1, t2, easing, target } (không bọc { t: [...] }). Karaoke xử lí trong delta.data.
+ */
+/** [Manual edit] Định nghĩa/chú thích baseItem.delta 
+ * 
+ * Chỉ chứa delta text và data. Các tag liên quan đến container sẽ chèn thẳng vào lineCss[i].container.
+ * - delta.text → chỉ sinh node text bên trong container hiện có (đổi ruột chữ).
+ * - delta.data → không sinh node, chỉ là số liệu cho đo chữ / collision.
+ * @typedef {object} parsedDataFormat.baseItemDelta
+ * @property {Object} styleRef 
+ * @property {Object} [text] Tag đổi ruột chữ (\fs, \c, \b, \fr...) → renderer chỉ thêm node text.
+ * @property {Object} [data] Chỉ số liệu đo/collision (không có CSS tương ứng) → không sinh node.
+ */
+/** [Manual edit] Định nghĩa/chú thích baseItem.anim 
+ * @typedef {Array<{t1: number, t2: (number|null), easing: number, target: parsedDataFormat.baseItemDelta}>} parsedDataFormat.baseItemAnim
+ * Mỗi phần tử tương ứng 1 \t(...) trong item, theo thứ tự:
+ * - t1/t2: ms, tương đối đầu dòng (Aegisub: \t dùng ms). t2 = null khi file không ghi t2
+ *   (transform chạy tới HẾT dòng — renderer lấy duration dòng từ events để resolve).
+ * - easing: số accel THÔ (default 1 = linear; >1 nhanh dần, <1 chậm dần) — renderer tự map
+ *   sang hàm easing (linear/parabola/cubic...); parser/tagProcess giữ số thô để không mất độ chính xác.
+ * - target: tag 2.4.1 và 2.3, KHÔNG chứa tag 2.4.2, 2.3.2, 2.2, 2.1. 
+ *   \k* nằm trong 2.4.2. (to-do: vì sao?)
+ */
+
+
+
+/** [Manual edit] Định nghĩa/chú thích lineSubCss trong lineCss[i] 
+ * @typedef {typeof utils.globalCss & ReturnType<typeof utils.alignmentToCss>} parsedDataFormat.lineSubCss
+ * Ghép thuộc tính từ utils.globalCss và utils.alignmentToCss (2.2). to-do: clip (2.1)?
+ * 
+ * Đo bằng cqw/cqh để giảm khối lượng tính.
+ */
+
+// to-do: sửa jsdoc chỗ này
+// delta.data chứa marker (\h/\N/\n) + karaoke k (2.3, 11sep26: { type, durationMs, startMs })
+//  *   — số liệu thuần. \r/\q KHÔNG vào data: ghi vào delta.text dưới dạng CSS var — '--base-style-name'
+//  *   (\r, rỗng = style dòng) / '--wrap-style' (\q, last-wins). Karaoke \k* do 2.3 xử lí.
 
 
 /*
@@ -59,19 +112,7 @@ import * as utils from './utils.js';
  *   sang hàm easing (linear/parabola/cubic...); parser/tagProcess giữ số thô để không mất độ chính xác.
  * - target: tag 2.4.1 và 2.3 (trừ \k*), KHÔNG chứa tag 2.4.2, 2.2, 2.1.
  */
-/** Định nghĩa/chú thích lineCss[i] sau classify (struct đích — mục 3 prompt 03sep26)
- * @typedef {object} parsedDataFormat.lineCssEntry
- * @property {Array<parsedDataFormat.baseItem>} base Mục base đã classify: mỗi mục giữ nguyên
- *   { tags, text } + thêm { delta?, anim? } (delta/anim chỉ xuất hiện khi có nội dung).
- *   delta.data chứa marker (\h/\N/\n) + karaoke k (2.3, 11sep26: { type, durationMs, startMs })
- *   — số liệu thuần. \r/\q KHÔNG vào data: ghi vào delta.text dưới dạng CSS var — '--base-style-name'
- *   (\r, rỗng = style dòng) / '--wrap-style' (\q, last-wins). Karaoke \k* do 2.3 xử lí.
- * @property {{t: boolean}} collision Nhóm 2.2 — mức DÒNG (bản này CHỈ signal \t, chốt 03sep26:
- *   an/pos/move/org để session 2.2 làm đầy). collision.t = true khi dòng có \t → renderer tự
- *   disable collision (KHÔNG lưu payload \t ở đây — payload chỉ ở base[i].anim).
- * @property {{rawList: string[], effectiveType: ('clip'|'iclip'|null), effectiveRaw: (string|null)}} clip
- *   Nhóm 2.1 — mức DÒNG, last-wins (bản này STUB default — session 2.1 làm đầy).
- */
+
 /** Regex nhận diện tag karaoke: \k / \kf / \ko + duration (số, centisecond trong file).
  * KHÔNG match \K (không xử lí) và \kt (wontfix v1+). Nhóm 1 = type, nhóm 2 = duration raw (cs).
  * Dùng trong classifyDecoration (2.3 — ĐÃ LÀM 11sep26); 2.4 KHÔNG đụng karaoke. */
@@ -641,7 +682,7 @@ function classifyClip(base, styleRef) {
 }
 
 /** [arena.ai] Classify — 2.4 → 2.3 → 2.2 → 2.1.
- * @param {Array<parsedDataFormat.baseItem>} baseRaw Mảng base item (đầu ra của processLineText).
+ * @param {Array<parsedDataFormat.baseRaw>} base Mảng base ban đầu (đầu ra của processLineText).
  * @param {parsedDataFormat.style} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
  * @returns {{base: Array<{tags: string[], text: string, delta?: Object, anim?: Array<Object>}>, collision: {t: boolean}, clip: {rawList: string[], effectiveType: ('clip'|'iclip'|null), effectiveRaw: (string|null)}}}
  */

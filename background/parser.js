@@ -407,6 +407,7 @@ function baseFromTokens(tokens) {
 	// Marker không rơi vào đây vì đã flush thành mục base riêng ngay khi gặp (chỗ "if (isStandaloneToken(tok))")
 	return base;
 }
+
 /** [arena.ai] Xử lí text của 1 dòng Dialogue theo doStripTags → entry cho lineCss[i]
  * 
  * - Chú ý: Strip (truthy — như Aegisub strip tags): đi qua CHUNG tokenizeLineText (không regex raw)
@@ -418,8 +419,10 @@ function baseFromTokens(tokens) {
  *
  * @param {boolean} doStripTags truthy = như Aegisub strip tags, falsy = ko strip, xử lí tất cả.
  * @param {string} text line.text dạng raw.
- * @returns {{base: Array<parsedDataFormat.baseItem>}} Entry lineCss: { base } (02sep26 — đổi tên
- *   segments → base; classify 03sep26 ghi trực tiếp vào base + thêm collision, clip).
+ * @returns {Array<{
+ *   tags: string[],
+ *   text: string,
+ * }>} Đầu vào cho classify
  */
 function processLineText(doStripTags, text) {
 	const tokens = tokenizeLineText(text ?? '');

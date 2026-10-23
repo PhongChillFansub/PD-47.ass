@@ -216,7 +216,7 @@ export function decorationToCss(underline, strikeOut) {
 	return [underline ? 'underline' : '', strikeOut ? 'line-through' : '']
 		.filter(Boolean).join(' ') || 'none';
 }
-/** [Manual edit] Chuyển đổi shadow và blur sang filter CSS.
+/** [arena.ai] Xử lí shadow và blur trong filter CSS.
  * Chú ý: khi dùng cho các tag \*shad, \blur, \4c, \4a trong tagProcess, phải đọc lại --shadow-x/y/blur/4c/4a từ style nếu ko phải tag xử lí.
  * (vd: gọi hàm này để xử lí \blur thì phải đọc --shadow-x/y, --4c, --4a từ style, vì \blur ko thay đổi shadow hay các màu)
  * @param {number} shadowX Giá trị shadow X số thuần

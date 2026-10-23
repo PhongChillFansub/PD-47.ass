@@ -30,6 +30,19 @@ import * as utils from './utils.js';
  * @property {parsedDataFormat.baseItemAnim} [anim] classify sinh metadata nội suy \t:
  *   MẢNG trực tiếp, mỗi \t → { t1, t2, easing, target } (không bọc { t: [...] }). Karaoke xử lí trong delta.data.
  */
+/** Định nghĩa/chú thích lineCss[i] sau classify (struct đích — mục 3 prompt 03sep26)
+ * @typedef {object} parsedDataFormat.lineCssEntry
+ * @property {Array<parsedDataFormat.baseItem>} base Mục base đã classify: mỗi mục giữ nguyên
+ *   { tags, text } + thêm { delta?, anim? } (delta/anim chỉ xuất hiện khi có nội dung).
+ *   delta.data chứa marker (\h/\N/\n) + karaoke k (2.3, 11sep26: { type, durationMs, startMs })
+ *   — số liệu thuần. \r/\q KHÔNG vào data: ghi vào delta.text dưới dạng CSS var — '--base-style-name'
+ *   (\r, rỗng = style dòng) / '--wrap-style' (\q, last-wins). Karaoke \k* do 2.3 xử lí.
+ * @property {{t: boolean}} collision Nhóm 2.2 — mức DÒNG (bản này CHỈ signal \t, chốt 03sep26:
+ *   an/pos/move/org để session 2.2 làm đầy). collision.t = true khi dòng có \t → renderer tự
+ *   disable collision (KHÔNG lưu payload \t ở đây — payload chỉ ở base[i].anim).
+ * @property {{rawList: string[], effectiveType: ('clip'|'iclip'|null), effectiveRaw: (string|null)}} clip
+ *   Nhóm 2.1 — mức DÒNG, last-wins (bản này STUB default — session 2.1 làm đầy).
+ */
 /** Định nghĩa/chú thích baseItem.delta 
  * Chỉ chứa delta text và data. Các tag liên quan đến container sẽ chèn thẳng vào lineCss[i].container.
  * - delta.text → chỉ sinh node text bên trong container hiện có (đổi ruột chữ).
