@@ -277,7 +277,7 @@ function processLineText(doStripTags, text) {
 		if (tok.startsWith('{') && tok.endsWith('}')) continue; // tag token → xóa
 		stripped += tok; // text token (kể cả '{' không đóng, \{ \})
 	}
-	return [{ tags: [], text: stripped }];
+	return stripped === '' ? [] : [{ tags: [], text: stripped }];
 }
 /** [Manual edit] Hàm chuyển đổi style đã chuẩn hóa thành object CSS (lineSub, segmentSub, data)
  * 

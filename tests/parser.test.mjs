@@ -166,6 +166,7 @@ test('doStripTags truthy removes override blocks while retaining text markers ve
 	assert.deepEqual(parsed.lineCss[0].base, [
 		{ tags: [], text: 'lorem\\Nipsum\\hdolor\\nsitamet' },
 	]);
+	assert.deepEqual(parser(true, assWithText('{\\fs30}')).lineCss[0].base, []);
 });
 
 test('doStripTags false keeps override blocks for classification', () => {
