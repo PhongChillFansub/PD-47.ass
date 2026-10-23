@@ -225,23 +225,27 @@ export function decorationToCss(underline, strikeOut) {
  * @param {string} color Màu 4
  * @returns {string} filter CSS: 'drop-shadow(...) blur(...)' hoặc 'none' nếu shadowX/Y = 0 và blur = 0
  */
-export function shadBlurToCss(shadowX, shadowY, blur, color, playResX, playResY, ScaledBorderAndShadow) {
+export function shadBlurToCss(shadowX, shadowY, blur, color, playResX, playResY, layoutResX, layoutResY, ScaledBorderAndShadow) {
 	const xValue = Number.isFinite(Number(shadowX)) ? Number(shadowX) : 0;
 	const yValue = Number.isFinite(Number(shadowY)) ? Number(shadowY) : 0;
 	const blurValue = Number.isFinite(Number(blur)) ? Number(blur) : 0;
 	const hasShadow = xValue !== 0 || yValue !== 0;
 	const hasBlur = blurValue > 0;
 	if (!hasShadow && !hasBlur) return 'none';
-	const scaled = ScaledBorderAndShadow && Number(playResX) > 0 && Number(playResY) > 0;
-	const x = scaled ? `calc(${xValue / playResX} * 100cqw)` : `${xValue}px`;
-	const y = scaled ? `calc(${yValue / playResY} * 100cqh)` : `${yValue}px`;
-	const blurRadius = scaled ? `calc(${blurValue / playResY} * 100cqh)` : `${blurValue}px`;
+	const shadowResX = ScaledBorderAndShadow ? playResX : layoutResX;
+	const shadowResY = ScaledBorderAndShadow ? playResY : layoutResY;
+	const toCqw = (value, resolution) => Number(resolution) > 0
+		? `calc(${value / resolution} * 100cqw)`
+		: `${value}px`;
+	const toCqh = (value, resolution) => Number(resolution) > 0
+		? `calc(${value / resolution} * 100cqh)`
+		: `${value}px`;
 	return [
 		hasShadow
-			? `drop-shadow(${x} ${y} ${color})`
+			? `drop-shadow(${toCqw(xValue, shadowResX)} ${toCqh(yValue, shadowResY)} ${color})`
 			: '',
 		hasBlur
-			? `blur(${blurRadius})`
+			? `blur(${toCqh(blurValue, layoutResY)})`
 			: '',
 	].filter(Boolean).join(' ');
 	// Chỉ dùng filter: drop-shadow(...) blur(...) để render shadow/blur,
@@ -413,16 +417,11 @@ export function scaleAngleToCss(scaleX, scaleY, angleX, angleY, angleZ, layoutRe
  * @returns {{'--outline': number, '-webkit-text-stroke-width': string, padding: string, margin: string}}
  */
 export function outlineWidthToCss(outlineWidth, playResY, layoutResY, ScaledBorderAndShadow) {
-	const scaledWidth = outlineWidth / playResY;
-	const width = ScaledBorderAndShadow
-		? `calc(${scaledWidth} * 100cqh)`
-		: `${outlineWidth}px`;
+	const scaledWidth = outlineWidth / (ScaledBorderAndShadow ? playResY : layoutResY);
 	return {
 		'--outline': outlineWidth,
-		'-webkit-text-stroke-width': ScaledBorderAndShadow
-			? `calc(${scaledWidth} * 2 * 100cqh)`
-			: `${outlineWidth * 2}px`,
-		'padding': width,
-		'margin': width,
+		'-webkit-text-stroke-width': `calc(${scaledWidth} * 2 * 100cqh)`,
+		'padding': `calc(${scaledWidth} * 100cqh)`,
+		'margin': `calc(${scaledWidth} * 100cqh)`,
 	}
 }
