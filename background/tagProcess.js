@@ -1,4 +1,4 @@
-// v0.1.0 23oct26
+// v0.1.0 27oct26
 // alpha mode
 // Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] ĐẦY ĐỦ
 // { base, collision, clip }.
@@ -6,6 +6,9 @@ import * as utils from './utils.js';
 /** [Manual edit] Một số lưu ý liên quan đến parser-tagProcess 
  * - Chỉ import từ utils, ko import từ parser. (chỉ parser có import tagProcess)
  * - Chỉ export hàm classify.
+ * - tag, text trong base giữ nguyên sau xử lí trong tagProcess
+ * - \t theo hướng metadata, ko xử lí tạo snapshot
+ * - \fsc100 vẫn trả về scale(100%)
  */
 /** [Manual edit] Phân loại tag trong tagProcess 
  * 2.4. Layout Local/Segment-level
@@ -62,9 +65,6 @@ import * as utils from './utils.js';
  * (các tag khác xử lí trước khi đưa vào)
  * \k* nằm trong 2.4.2. (to-do: vì sao?)
  */
-
-
-
 /** [Manual edit] Định nghĩa/chú thích lineSubCss trong lineCss[i] 
  * @typedef {typeof utils.globalCss & ReturnType<typeof utils.alignmentToCss>} parsedDataFormat.lineSubCss
  * Ghép thuộc tính từ utils.globalCss và utils.alignmentToCss (2.2). to-do: clip (2.1)?
@@ -72,52 +72,11 @@ import * as utils from './utils.js';
  * Đo bằng cqw/cqh để giảm khối lượng tính.
  */
 
-// to-do: sửa jsdoc chỗ này
-// delta.data chứa marker (\h/\N/\n) + karaoke k (2.3, 11sep26: { type, durationMs, startMs })
-//  *   — số liệu thuần. \r/\q KHÔNG vào data: ghi vào delta.text dưới dạng CSS var — '--base-style-name'
-//  *   (\r, rỗng = style dòng) / '--wrap-style' (\q, last-wins). Karaoke \k* do 2.3 xử lí.
-
-
-/*
- * Thứ tự nhóm KHÔNG ĐƯỢC đổi (đã chốt):
- *   2.4 Layout Local (2.4.1 transformable + 2.4.2 non-transformable TĨNH ngoài \t, rồi \t → metadata
- *   anim — bản này) → 2.3 Decoration (ĐÃ LÀM THẬT 11sep26: màu/alpha/bord/shad/be/blur/fa/fr
- *   + karaoke \k/\kf/\ko → delta.data.k) →
- *   2.2 Collision (bản này chỉ signal t) → 2.1 Clip (bản này stub default).
- *   KHÔNG có 2 pass 2.4a/2.4b — 11sep26 (chủ repo, commit 1ee633d): tag 2.4.2 nằm TRONG \t(...)
- *   được apply-now vào context của segment NGOÀI \t, coi như tag ngoài \t thông thường
- *   (09sep26 từng BỎ apply-now — hướng đó đã được thay thế bằng bản này).
- *
- * QUY ƯỚC CHUNG (KHÔNG bao giờ đổi):
- * - Parser giữ nguyên PlayRes px, KHÔNG đo chữ/scale/collision — việc đó của renderer.
- * - Parser KHÔNG bake snapshot: \t chỉ lưu metadata nội suy (Cách 1);
- *   renderer resolve theo metadata.mediaTime mỗi tick rVFC.
- * - Tag chạm VỎ dòng → delta.container; đổi RUỘT chữ → delta.text; số liệu thuần → delta.data.
- * - delta.text dùng KEY CSS + value CSS-cooked (khớp styleCss.text của styleParsedToCss) để renderer
- *   áp bằng Object.assign; \fscx/fscy ghi 'transform' chứa scale của CHÍNH item/entry đó
- *   (gộp transform với style gốc/rotate là việc renderer — đã hỏi/chốt 03sep26).
- *   KHÔNG lọc identity 100: \fscx100/\fscy100 vẫn emit scaleX(1)/scaleY(1) (chốt 09sep26).
- * - Mỗi base item GIỮ NGUYÊN mảng tags raw (đã hỏi/chốt 03sep26): nhóm sau (2.3/2.2/2.1) và
- *   renderer/debug đọc lại được tag gốc — vì vậy các hàm nhóm KHÔNG xóa tag khi tiêu thụ.
- */
-
-/** Định nghĩa/chú thích anim của 1 mục base: metadata nội suy \t, lưu MẢNG TRỰC TIẾP
- * (không bọc { t: [...] } — chốt 09sep26; renderer đọc item.anim[i].t1...).
- * Karaoke KHÔNG còn nằm ở đây — 2.4 không xử lí karaoke (về 2.3, xem typedef lineCssEntry).
- * @typedef {Array<{t1: number, t2: (number|null), easing: number, target: Object}>} parsedDataFormat.baseItemAnim
- * Mỗi phần tử tương ứng 1 \t(...) trong item, theo thứ tự:
- * - t1/t2: ms, tương đối đầu dòng (Aegisub: \t dùng ms). t2 = null khi file không ghi t2
- *   (transform chạy tới HẾT dòng — renderer lấy duration dòng từ events để resolve).
- * - easing: số accel THÔ (default 1 = linear; >1 nhanh dần, <1 chậm dần) — renderer tự map
- *   sang hàm easing (linear/parabola/cubic...); parser/tagProcess giữ số thô để không mất độ chính xác.
- * - target: tag 2.4.1 và 2.3 (trừ \k*), KHÔNG chứa tag 2.4.2, 2.2, 2.1.
- */
-
 /** Regex nhận diện tag karaoke: \k / \kf / \ko + duration (số, centisecond trong file).
  * KHÔNG match \K (không xử lí) và \kt (wontfix v1+). Nhóm 1 = type, nhóm 2 = duration raw (cs).
- * Dùng trong classifyDecoration (2.3 — ĐÃ LÀM 11sep26); 2.4 KHÔNG đụng karaoke. */
+ */
 const KARAOKE_RE = /^\\(k[fo]?)(\d+(?:\.\d+)?)/;
-/** Regex số thuần (cho phần tham số đứng đầu của \t: t1/t2/accel) */
+/** Regex số thuần (cho phần tham số đứng trước trong \t: t1/t2/accel) */
 const NUMERIC_TOKEN_RE = /^[+-]?(\d+\.?\d*|\.\d+)$/;
 /** Tên style fallback khi styleRef thiếu (dùng cho \r rỗng) — khớp FALLBACK_DEFAULT_STYLE.name */
 const FALLBACK_STYLE_NAME = 'Default';
