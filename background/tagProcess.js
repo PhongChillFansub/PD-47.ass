@@ -53,14 +53,18 @@ import * as utils from './utils.js';
  * @property {Object} [data] Chỉ số liệu đo/collision (không có CSS tương ứng) → không sinh node.
  */
 /** [Manual edit] Định nghĩa/chú thích baseItem.anim 
- * @typedef {Array<{t1: number, t2: (number|null), easing: number, target: parsedDataFormat.baseItemDelta}>} parsedDataFormat.baseItemAnim
- * Mỗi phần tử tương ứng 1 \t(...) trong item, theo thứ tự:
- * - t1/t2: ms, tương đối đầu dòng (Aegisub: \t dùng ms). t2 = null khi file không ghi t2
- *   (transform chạy tới HẾT dòng — renderer lấy duration dòng từ events để resolve).
- * - easing: số accel THÔ (default 1 = linear; >1 nhanh dần, <1 chậm dần) — renderer tự map
- *   sang hàm easing (linear/parabola/cubic...); parser/tagProcess giữ số thô để không mất độ chính xác.
- * - target: tag 2.4.1 và 2.3, KHÔNG chứa tag 2.4.2, 2.3.2, 2.2, 2.1. 
- *   \k* nằm trong 2.4.2. (to-do: vì sao?)
+ * @typedef {object} parsedDataFormat.baseItemAnim
+ * @property {(number|null)} t1 Thời điểm bắt đầu, ms tính từ đầu dòng (Aegisub dùng ms).
+ * @property {(number|null)} t2 Thời điểm kết thúc, ms tính từ đầu dòng;
+ * @property {(number|null)} easing Số accel thô 
+ * (default 1 = linear; >1 nhanh dần, <1 chậm dần).
+ * @property {parsedDataFormat.baseItemDelta} target Tag 2.4.1 và 2.3.1. 
+ * (các tag khác xử lí trước khi đưa vào)
+ * to-do: sửa đoạn này
+ * Mảng các transform theo thứ tự:
+ * t2 = null khi file không ghi t2 (transform chạy tới hết dòng; renderer resolve duration từ events).
+ * easing giữ số thô để parser/tagProcess không làm mất độ chính xác; renderer tự map sang hàm easing.
+ * \k* nằm trong 2.4.2. (to-do: vì sao?)
  */
 
 
