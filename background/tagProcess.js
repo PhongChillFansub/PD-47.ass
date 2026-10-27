@@ -60,10 +60,6 @@ import * as utils from './utils.js';
  * (default 1 = linear; >1 nhanh dần, <1 chậm dần).
  * @property {parsedDataFormat.baseItemDelta} target Tag 2.4.1 và 2.3.1. 
  * (các tag khác xử lí trước khi đưa vào)
- * to-do: sửa đoạn này
- * Mảng các transform theo thứ tự:
- * t2 = null khi file không ghi t2 (transform chạy tới hết dòng; renderer resolve duration từ events).
- * easing giữ số thô để parser/tagProcess không làm mất độ chính xác; renderer tự map sang hàm easing.
  * \k* nằm trong 2.4.2. (to-do: vì sao?)
  */
 
