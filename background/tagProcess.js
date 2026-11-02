@@ -1,4 +1,4 @@
-// v0.1.0 27oct26
+// v0.1.0 03nov26
 // alpha mode
 // Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] ĐẦY ĐỦ
 // { base, collision, clip }.
@@ -8,7 +8,7 @@ import * as utils from './utils.js';
  * - Chỉ export hàm classify.
  * - tag, text trong base giữ nguyên sau xử lí trong tagProcess
  * - \t theo hướng metadata, ko xử lí tạo snapshot
- * - \fsc100 vẫn trả về scale(100%)
+ * - \fsc100 trả về xóa scale trong transform (theo utils.scaleAngleToCss)
  */
 /** [Manual edit] Phân loại tag trong tagProcess 
  * 2.4. Layout Local/Segment-level
