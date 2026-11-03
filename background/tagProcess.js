@@ -72,6 +72,18 @@ import * as utils from './utils.js';
  * Đo bằng cqw/cqh để giảm khối lượng tính.
  */
 
+/** [Manual edit] Định nghĩa/chú thích parsedDataFormat.tagOverrideControls
+ * Là danh sách các biến CSS trong segmentSubCss và lineSubCss.
+ * @typedef {object} parsedDataFormat.tagOverrideControls
+ * @property {number} [left] \pos, \move ghi đè
+ * @property {number} [top] \pos, \move ghi đè
+ * @property {number} [--align-x] \an ghi đè (dùng utils.resolveAlignment)
+ * @property {number} [--align-y] \an ghi đè (dùng utils.resolveAlignment)
+ * @property {number} --origin-delta-x renderer tính origin của từng segment
+ * @property {number} --origin-delta-y renderer tính origin của từng segment
+ * to-do: sửa đoạn này
+ */
+
 /** Regex nhận diện tag karaoke: \k / \kf / \ko + duration (số, centisecond trong file).
  * KHÔNG match \K (không xử lí) và \kt (wontfix v1+). Nhóm 1 = type, nhóm 2 = duration raw (cs).
  */
@@ -116,7 +128,7 @@ function splitOverrideTagsTransform(text) {
  *
  * \fsc[x/y] (*:\fsc chỉ có trong VSFilterMod), \fsp, \fs.
  * @param {string} tag Tag đơn raw, bắt đầu bằng '\\'.
- * @param {{textCss: Object, scaleX: (number|undefined), scaleY: (number|undefined), styleRef: (Object|null|undefined)}} context
+ * @param {parsedDataFormat.tagOverrideControls} context
  * Object ghi dữ liệu tạm thời (textCss / scaleX / scaleY). Caller (classifyLayoutLocal hoặc
  * parseTransformTag) mới ghi context sang item.delta khi có thay đổi.
  * @returns {boolean} true = đã xử lí; false = không thuộc nhóm này.
@@ -162,7 +174,7 @@ function applyLayoutLocalTransformable(tag, context) {
  * CHÚ Ý (11sep26): hàm này được gọi CHO CẢ tag TRONG \t(...) — parseTransformTag áp 2.4.2
  * apply-now vào context của segment ngoài \t (commit 1ee633d; hướng "BỎ apply-now" 09sep26 đã thay thế).
  * @param {string} tag Tag đơn raw, bắt đầu bằng '\\'.
- * @param {{textCss: Object, scaleX: (number|undefined), scaleY: (number|undefined), styleRef: (Object|null|undefined)}} context
+ * @param {parsedDataFormat.tagOverrideControls} context
  * Object ghi dữ liệu tạm thời (textCss). Caller mới ghi context sang item.delta khi có thay đổi.
  * @returns {boolean} true = đã xử lí; false = không thuộc nhóm này.
  */
@@ -248,7 +260,7 @@ function splitTransformParts(tag) {
 /** [Manual edit] Hàm áp dụng các tag bên trong tag \t — metadata nội suy (CHỈ tag 2.4.1).
  * @param {string} tag Tag raw, bắt đầu bằng '\t' (vd "\t(0,500,\fs30)").
  * @param {Object} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
- * @param {{textCss: Object, scaleX: (number|undefined), scaleY: (number|undefined), styleRef: (Object|null|undefined)}} nonTransformableContext
+ * @param {parsedDataFormat.tagOverrideControls} nonTransformableContext
  * Object ghi dữ liệu context của segment ngoài \t. (cho các tag 2.4.2, tag trong \t coi như tag ngoài \t thông thường)
  * @returns {{t1: number, t2: (number|null), easing: number, target: Object}|null}
  *  - null khi tag không phải \t hợp lệ, hoặc modsText không có tag 2.4.1 nào (không tạo entry anim).
@@ -260,7 +272,7 @@ function parseTransformTag(tag, styleRef, nonTransformableContext) {
 	const parts = splitTransformParts(tag);
 	if (!parts) return null;
 	/** Lưu dữ liệu tạm thời khi apply các tag trong \t. Chỉ khi có thay đổi thì mới ghi từ context sang lineCss[i].delta
-	 * @type {{textCss: Object, scaleX: (number|undefined), scaleY: (number|undefined), styleRef: (Object|null|undefined)}}
+	 * @type {parsedDataFormat.tagOverrideControls}
 	 */
 	const context = { textCss: {}, scaleX: undefined, scaleY: undefined, styleRef };
 	for (const sub of splitOverrideTagsTransform(parts.modsText)) {
