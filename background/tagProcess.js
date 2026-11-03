@@ -112,8 +112,7 @@ function splitOverrideTagsTransform(text) {
 	if (start !== -1) pushTag(text.slice(start));
 	return tags;
 }
-/** [Manual edit] Hàm áp dụng tag nhóm 2.4.1 — TRANSFORMABLE: được nội suy (tween) trong \t;
- * cục bộ (mức mục base); có thể làm ảnh hưởng layout:
+/** [Manual edit] Hàm áp dụng tag nhóm 2.4.1: Layout Local Transformable.
  *
  * \fsc[x/y] (*:\fsc chỉ có trong VSFilterMod), \fsp, \fs.
  * @param {string} tag Tag đơn raw, bắt đầu bằng '\\'.
