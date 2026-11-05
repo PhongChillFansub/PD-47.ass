@@ -1,4 +1,4 @@
-// v0.1.0 23oct26
+// v0.1.0 05nov26
 // beta mode
 // Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
@@ -578,7 +578,9 @@ function styleToCss (style, info = {}) {
 		/** Biến ghi giãn cách chữ (\fsp), phải nhận số thuần, ko có đơn vị */
 		'--spacing': style.spacing,
 		'letter-spacing': `calc(var(--spacing) / ${info.PlayResX} * 100cqw)`,
-		/** Biến ghi độ dày viền (\bord. CSS ko hỗ trợ \xbord, \ybord), nhận số thuần, ko có đơn vị */
+		/** Biến ghi độ dày viền, \bord */
+		'--outline': style.outline,
+		/** Hàm ghi độ dày viền (\bord. CSS ko hỗ trợ \xbord, \ybord), nhận số thuần, ko có đơn vị */
 		...utils.outlineWidthToCss(style.outline, info.PlayResY, info.LayoutResY, info.ScaledBorderAndShadow),
 		/** Biến ghi vị trí bóng */
 		'--shadow-x': style.shadow,

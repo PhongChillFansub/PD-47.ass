@@ -1,4 +1,4 @@
-// v0.1.0 03nov26
+// v0.1.0 05nov26
 // alpha mode
 // Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] ĐẦY ĐỦ
 // { base, collision, clip }.
@@ -72,17 +72,42 @@ import * as utils from './utils.js';
  * Đo bằng cqw/cqh để giảm khối lượng tính.
  */
 
-/** [Manual edit] Định nghĩa/chú thích parsedDataFormat.tagOverrideControls
- * Là danh sách các biến CSS trong segmentSubCss và lineSubCss.
+/** [Manual edit] Định nghĩa/chú thích parsedDataFormat.tagOverrideControls 
+ * Là danh sách các biến CSS trong segmentSubCss và lineSubCss mà tagProcess có thể ghi đè.
  * @typedef {object} parsedDataFormat.tagOverrideControls
- * @property {number} [left] \pos, \move ghi đè
- * @property {number} [top] \pos, \move ghi đè
- * @property {number} [--align-x] \an ghi đè (dùng utils.resolveAlignment)
- * @property {number} [--align-y] \an ghi đè (dùng utils.resolveAlignment)
+ * @property {number} [left] \pos, \move điều khiển vị trí (ghi trực tiếp, đv cqw)
+ * @property {number} [top] \pos, \move điều khiển vị trí (ghi trực tiếp, đv cqh)
+ * @property {number} [--align-x] \an ghi đè (gọi utils.resolveAlignment)
+ * @property {number} [--align-y] \an ghi đè (gọi utils.resolveAlignment)
  * @property {number} --origin-delta-x renderer tính origin của từng segment
  * @property {number} --origin-delta-y renderer tính origin của từng segment
- * to-do: sửa đoạn này
+ * (\org chỉ ghi origin của line, renderer phải tính delta origin của từng segment, 
+ * từ origin của line này và left/top; và ko sửa vào --origin)
+ * @property {string} [--style-name] \r điều khiển style
+ * @property {string} [--font-name] \fn điều khiển fontName
+ * @property {number} [--font-size] \fs điều khiển fontSize
+ * @property {number} [--color1] \1c, \1a điều khiển primaryColour
+ * @property {number} [--color2] \2c, \2a điều khiển secondaryColour
+ * @property {number} [--color3] \3c, \3a điều khiển outlineColour (gọi utils.outlineStyleToCss)
+ * @property {number} [--color4] \4c, \4a điều khiển backColour (gọi utils.outlineStyleToCss, utils.shadBlurToCss)
+ * @property {number} [--bold] \b điều khiển bold (chạy 'font-weight': utils.boldToWeight(style.bold),)
+ * @property {number} [--italic] \i điều khiển italic (chạy 'font-style': style.italic ? 'italic' : 'normal')
+ * @property {boolean} [--underline] \u điều khiển underline (gọi utils.decorationToCss)
+ * @property {boolean} [--strikeout] \s điều khiển strikeOut (gọi utils.decorationToCss)
+ * @property {number} [--spacing] \fsp điều khiển letter-spacing
+ * @property {number} [--outline] \bord điều khiển độ dày viền (gọi utils.outlineWidthToCss)
+ * @property {number} [--shadow-x] \shad điều khiển shadow-x (gọi utils.shadBlurToCss)
+ * @property {number} [--shadow-y] \shad điều khiển shadow-y (gọi utils.shadBlurToCss)
+ * @property {number} [--blur] \blur điều khiển blur (gọi utils.shadBlurToCss)
+ * @property {number} [--inline-fx] \- điều khiển inline-fx
+ * @property {number} [--scale-x] \fscx điều khiển scaleX (gọi utils.scaleAngleToCss)
+ * @property {number} [--scale-y] \fscy điều khiển scaleY (gọi utils.scaleAngleToCss)
+ * @property {number} [--angle-x] \frx điều khiển angleX (gọi utils.scaleAngleToCss)
+ * @property {number} [--angle-y] \fry điều khiển angleY (gọi utils.scaleAngleToCss)
+ * @property {number} [--angle-z] \frz điều khiển angleZ (gọi utils.scaleAngleToCss)
  */
+// to-do: sửa đoạn này; 
+// skew factor \fax, \fay (gọi utils.skewFactorToDeg rồi xử lí trong scaleAngleToCss ntn)???
 
 /** Regex nhận diện tag karaoke: \k / \kf / \ko + duration (số, centisecond trong file).
  * KHÔNG match \K (không xử lí) và \kt (wontfix v1+). Nhóm 1 = type, nhóm 2 = duration raw (cs).

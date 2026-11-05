@@ -1,4 +1,4 @@
-// v0.1.0 23oct26
+// v0.1.0 05nov26
 "use strict";
 const extensionName = "PD-47.ass";
 const HTML_ENTITIES = {
@@ -165,7 +165,6 @@ export function hexToAlpha(raw) {
  * @param {string|null} outlineColor Màu viền (\3c)
  * @param {string|null} backColour Màu nền (\4c)
  * @returns {{
- *   '--color3': string,
  *   '--border-style': number,
  *   'background-color': string,
  *   '-webkit-text-stroke-color': string
@@ -174,7 +173,6 @@ export function hexToAlpha(raw) {
 export function outlineStyleToCss(borderStyle, outlineColor, backColour) {
 	const isBoxStyle = borderStyle === 3 || borderStyle === 4;
 	return {
-		'--color3': outlineColor ?? 'transparent',
 		'--border-style': borderStyle,
 		'background-color': (
 			borderStyle === 3 ? outlineColor
@@ -414,12 +412,11 @@ export function scaleAngleToCss(scaleX, scaleY, angleX, angleY, angleZ, layoutRe
  * @param {number} playResY px
  * @param {number} layoutResY px
  * @param {boolean} [ScaledBorderAndShadow=false] Nếu true, dùng playResY; nếu không, dùng layoutResY.
- * @returns {{'--outline': number, '-webkit-text-stroke-width': string, padding: string, margin: string}}
+ * @returns {{'-webkit-text-stroke-width': string, padding: string, margin: string}}
  */
 export function outlineWidthToCss(outlineWidth, playResY, layoutResY, ScaledBorderAndShadow) {
 	const scaledWidth = outlineWidth / (ScaledBorderAndShadow ? playResY : layoutResY);
 	return {
-		'--outline': outlineWidth,
 		'-webkit-text-stroke-width': `calc(${scaledWidth} * 2 * 100cqh)`,
 		'padding': `calc(${scaledWidth} * 100cqh)`,
 		'margin': `calc(${scaledWidth} * 100cqh)`,
