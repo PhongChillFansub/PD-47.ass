@@ -11,6 +11,13 @@ import * as utils from './utils.js';
  * - \fsc*100 trả về xóa scale trong transform (theo utils.scaleAngleToCss)
  * - Các tag cùng được xử lí trong 1 hàm utils -> chỉ chạy 1 lần hàm đó, 
  *   ko chạy nhiều lần các hàm utils trong 1 vòng lặp tag.
+ * - Các tag ko hỗ trợ:
+ * \a (dùng \an),
+ * \xbord, \ybord, (giới hạn của CSS, ko dùng svg)
+ * \be (giới hạn của CSS, ko dùng svg)
+ * \q (khóa \q2)
+ * \fe (khóa charset UTF-8)
+ * 
  */
 /** [Manual edit] Phân loại tag trong tagProcess 
  * 2.4. Layout Local/Segment-level
