@@ -117,7 +117,6 @@ import * as utils from './utils.js';
  * @property {number} [--skew-x] \fax điều khiển skewX (gọi utils.scaleAngleToCss)
  * @property {number} [--skew-y] \fay điều khiển skewY (gọi utils.scaleAngleToCss)
  */
-// to-do: sửa đoạn này; 
 
 /** Regex nhận diện tag karaoke: \k / \kf / \ko + duration (số, centisecond trong file).
  * KHÔNG match \K (không xử lí) và \kt (wontfix v1+). Nhóm 1 = type, nhóm 2 = duration raw (cs).
@@ -159,6 +158,8 @@ function splitOverrideTagsTransform(text) {
 	if (start !== -1) pushTag(text.slice(start));
 	return tags;
 }
+
+// to-do: sửa hàm applyLayoutLocalTransformable.
 /** [Manual edit] Hàm áp dụng tag nhóm 2.4.1: Layout Local Transformable.
  *
  * \fsc[x/y] (*:\fsc chỉ có trong VSFilterMod), \fsp, \fs.
