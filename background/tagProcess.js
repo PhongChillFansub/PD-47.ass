@@ -1,4 +1,4 @@
-// v0.1.0 05nov26
+// v0.1.0 07nov26
 // alpha mode
 // Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] ĐẦY ĐỦ
 // { base, collision, clip }.
@@ -8,7 +8,9 @@ import * as utils from './utils.js';
  * - Chỉ export hàm classify.
  * - tag, text trong base giữ nguyên sau xử lí trong tagProcess
  * - \t theo hướng metadata, ko xử lí tạo snapshot
- * - \fsc100 trả về xóa scale trong transform (theo utils.scaleAngleToCss)
+ * - \fsc*100 trả về xóa scale trong transform (theo utils.scaleAngleToCss)
+ * - Các tag cùng được xử lí trong 1 hàm utils -> chỉ chạy 1 lần hàm đó, 
+ *   ko chạy nhiều lần các hàm utils trong 1 vòng lặp tag.
  */
 /** [Manual edit] Phân loại tag trong tagProcess 
  * 2.4. Layout Local/Segment-level
@@ -105,9 +107,10 @@ import * as utils from './utils.js';
  * @property {number} [--angle-x] \frx điều khiển angleX (gọi utils.scaleAngleToCss)
  * @property {number} [--angle-y] \fry điều khiển angleY (gọi utils.scaleAngleToCss)
  * @property {number} [--angle-z] \frz điều khiển angleZ (gọi utils.scaleAngleToCss)
+ * @property {number} [--skew-x] \fax điều khiển skewX (gọi utils.scaleAngleToCss)
+ * @property {number} [--skew-y] \fay điều khiển skewY (gọi utils.scaleAngleToCss)
  */
 // to-do: sửa đoạn này; 
-// skew factor \fax, \fay (gọi utils.skewFactorToDeg rồi xử lí trong scaleAngleToCss ntn)???
 
 /** Regex nhận diện tag karaoke: \k / \kf / \ko + duration (số, centisecond trong file).
  * KHÔNG match \K (không xử lí) và \kt (wontfix v1+). Nhóm 1 = type, nhóm 2 = duration raw (cs).

@@ -1,4 +1,4 @@
-// v0.1.0 05nov26
+// v0.1.0 07nov26
 "use strict";
 const extensionName = "PD-47.ass";
 const HTML_ENTITIES = {
@@ -363,7 +363,8 @@ export const globalCss = {
 };
 /** [Manual edit] Xử lí chung \fr*, \fsc* trong thuộc tính transform của CSS.
  * 
- * Thứ tự trong thuộc tính: perspective -> rotateY -> rotateX -> rotateZ -> scaleX -> scaleY 
+ * Thứ tự trong thuộc tính: 
+ * perspective -> rotateY -> rotateX -> rotateZ -> scaleX -> scaleY -> matrix (skewX/Y) 
  * 
  * (CSS đọc từ phải sang trái, nên scaleY xử lí trước)
  * @param {number} scaleX đơn vị %
@@ -371,16 +372,20 @@ export const globalCss = {
  * @param {number} angleX đơn vị deg
  * @param {number} angleY đơn vị deg
  * @param {number} angleZ đơn vị deg
+ * @param {number} skewX đơn vị số (trực tiếp từ tag \fax)
+ * @param {number} skewY đơn vị số (trực tiếp từ tag \fay)
  * @param {number} layoutResY đơn vị px, dùng để tính perspective (layoutRes)
  * @returns {{transform?: string}} Object CSS rỗng khi mọi transform là identity.
  */
-export function scaleAngleToCss(scaleX, scaleY, angleX, angleY, angleZ, layoutResY) {
+export function scaleAngleToCss(scaleX, scaleY, angleX, angleY, angleZ, skewX, skewY, layoutResY) {
 	const parts = [];
 	const fscx = Number(scaleX);
 	const fscy = Number(scaleY);
 	const frx = Number(angleX);
 	const fry = Number(angleY);
 	const frz = Number(angleZ);
+	const fax = Number(skewX);
+	const fay = Number(skewY);
 	if ((Number.isFinite(frx) && frx !== 0) || (Number.isFinite(fry) && fry !== 0)) {
 		const perspective = 312.5 / Number(layoutResY) * 100;
 		if (Number.isFinite(perspective) && perspective > 0) {
@@ -401,6 +406,11 @@ export function scaleAngleToCss(scaleX, scaleY, angleX, angleY, angleZ, layoutRe
 	}
 	if (Number.isFinite(fscy) && fscy !== 100) {
 		parts.push(`scaleY(${fscy/100})`);
+	}
+	if ((Number.isFinite(fax) && fax) || (Number.isFinite(fay) && fay)) {
+		parts.push(
+			`matrix(1, ${Number.isFinite(fay) ? fay : 0}, ${Number.isFinite(fax) ? fax : 0}, 1, 0, 0)`,
+		);
 	}
 	return parts.length > 0
 		? { transform: parts.join(' ') }

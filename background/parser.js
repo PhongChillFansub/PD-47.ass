@@ -1,4 +1,4 @@
-// v0.1.0 05nov26
+// v0.1.0 07nov26
 // beta mode
 // Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
@@ -608,6 +608,8 @@ function styleToCss (style, info = {}) {
 		'--angle-x': 0,
 		'--angle-y': 0,
 		'--angle-z': style.angle,
+		'--skew-x': 0,
+		'--skew-y': 0,
 		/**
 		 * transform-origin KHÔNG thể chốt tại parser: nhiều segmentSub cùng line phải quay/scale
 		 * quanh một pivot ASS chung, trong khi parser chưa biết offset layout thật của từng segment.
