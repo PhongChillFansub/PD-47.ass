@@ -19,12 +19,20 @@ import * as utils from './utils.js';
  * \fe (khóa charset UTF-8)
  * 
  */
-/** [Manual edit] Phân loại tag trong tagProcess 
+/** [Manual edit] Phân loại tag trong tagProcess (mới)
+ * Chú ý: do khóa \q2 nên layout local (2.4 cũ) giờ tương đương decoration (2.3 cũ) 
+ * => phân loại lại
+ * 1. Segment-level Transformable (2.4.1 cũ + 2.3.1 cũ)
+ * 2. Segment-level Non-transformable (2.4.2 cũ + 2.3.2 cũ)
+ * 3. Line-level Collision (2.2 cũ)
+ * 4. Line-level Clip (2.1 cũ)
+ */
+/** [Manual edit] Phân loại tag trong tagProcess (cũ) 
  * 2.4. Layout Local/Segment-level
- * 	2.4.1. Transformable (vd: \fs, \fsc*, \fa, ...)
+ * 	2.4.1. Transformable (vd: \fs, \fsc*, ...)
  * 	2.4.2. Non-transformable (vd: \fn, \r, ...)
  * 2.3. Decoration Local 
- * 	2.3.1. Transformable (vd: \*c, \*a, \bord, \shad, ...)
+ * 	2.3.1. Transformable (vd: \*c, \*a, \bord, \shad, \fa*, \fr*, ...)
  * 	2.3.2. Non-transformable (\s, \u, \k, ...)
  * 2.2. Line-level: Collision (\an -> \pos, \move (lấy đầu) -> \org)
  * 2.1. Line-level: \[i]clip
