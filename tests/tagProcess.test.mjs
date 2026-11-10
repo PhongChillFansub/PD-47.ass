@@ -108,6 +108,51 @@ test('a transform containing only unsupported scale data has no animation target
 	assert.deepEqual(entry.collision, { t: true });
 });
 
+test('segment-level transformable tags cook static and \\t scope state once with the same result', () => {
+	const style = {
+		...DEFAULT_STYLE_REF,
+		primaryColour: 'rgba(255, 255, 255, 1.00)',
+		secondaryColour: 'rgba(0, 0, 0, 1.00)',
+		outlineColour: 'rgba(0, 0, 0, 1.00)',
+		backColour: 'rgba(0, 0, 0, 1.00)',
+		borderStyle: 1,
+		outline: 2,
+		shadow: 2,
+	};
+	const transformable = ['\\c&HFF&', '\\1a&H80&', '\\bord3', '\\xshad4', '\\yshad-2', '\\blur2', '\\frz45', '\\fax0.5'];
+	const staticEntry = classify(mkBase([transformable, 'x']), style);
+	const animEntry = classify(mkBase([[`\\t(0,100,${transformable.join('')})`], 'x']), style);
+
+	assert.deepEqual(animEntry.base[0].anim, [{
+		t1: 0,
+		t2: 100,
+		easing: 1,
+		target: staticEntry.base[0].delta.text,
+	}]);
+});
+
+test('segment-level transformable leaves the explicitly unsupported \\be and axis-border tags raw', () => {
+	const entry = classify(mkBase([['\\be4', '\\xbord5', '\\ybord2'], 'x']), DEFAULT_STYLE_REF);
+	assert.deepEqual(entry.base, [{ tags: ['\\be4', '\\xbord5', '\\ybord2'], text: 'x' }]);
+});
+
+test('non-transformable decoration and karaoke remain available after the transformable split', () => {
+	const entry = classify(mkBase([['\\u1', '\\s1', '\\k20'], 'x']), DEFAULT_STYLE_REF);
+	assert.deepEqual(entry.base[0].delta, {
+		text: { '--underline': 'underline', '--strike-out': 'line-through' },
+		data: { k: { type: 'k', durationMs: 200, startMs: 0 } },
+	});
+});
+
+test('non-transformable decoration inside \\t applies to the enclosing static segment', () => {
+	const entry = classify(mkBase([['\\t(0,100,\\u1\\s1)'], 'x']), DEFAULT_STYLE_REF);
+	assert.deepEqual(entry.base[0].delta, {
+		text: { '--underline': 'underline', '--strike-out': 'line-through' },
+	});
+	assert.equal(entry.base[0].anim, undefined);
+	assert.deepEqual(entry.collision, { t: true });
+});
+
 test('layout-global tags in a transform do not become animation targets', () => {
 	const entry = classify(mkBase([['\\t(\\pos(10,20)\\an5\\fs30)'], 'x']), DEFAULT_STYLE_REF);
 	assert.deepEqual(entry.base[0].anim, [

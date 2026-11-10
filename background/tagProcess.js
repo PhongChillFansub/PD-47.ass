@@ -167,17 +167,28 @@ function splitOverrideTagsTransform(text) {
 	return tags;
 }
 
-// to-do: sửa hàm applyLayoutLocalTransformable.
-/** [Manual edit] Hàm áp dụng tag nhóm 2.4.1: Layout Local Transformable.
+/** [arena.ai] Áp một tag **Segment-level Transformable** vào state tạm của
+ * static item hoặc của một scope `\t(...)`.
  *
- * \fsc[x/y] (*:\fsc chỉ có trong VSFilterMod), \fsp, \fs.
- * @param {string} tag Tag đơn raw, bắt đầu bằng '\\'.
- * @param {parsedDataFormat.tagOverrideControls} context
- * Object ghi dữ liệu tạm thời (textCss / scaleX / scaleY). Caller (classifyLayoutLocal hoặc
- * parseTransformTag) mới ghi context sang item.delta khi có thay đổi.
- * @returns {boolean} true = đã xử lí; false = không thuộc nhóm này.
+ * Đây là hợp của nhóm cũ 2.4.1 (font size/spacing/scale) và 2.3.1
+ * (màu/alpha/border/shadow/blur/rotate/shear). Hàm chỉ ghi state; caller phải
+ * gọi `emitDecoration()` đúng một lần sau khi đã quét hết tags của item/scope.
+ * Nhờ vậy các cặp phụ thuộc nhau như màu + alpha hoặc x/y shadow được resolve
+ * từ cùng một snapshot, thay vì cook CSS cho từng tag.
+ *
+ * Không xử lí các tag đã khóa theo phân loại mới: `\be`, `\xbord`, `\ybord`.
+ * `\u`, `\s` và karaoke là Segment-level Non-transformable.
+ *
+ * @param {string} tag Tag raw đơn, bắt đầu bằng '\\'.
+ * @param {{
+ *   textCss: Object,
+ *   scaleX: (number|undefined),
+ *   scaleY: (number|undefined),
+ *   decoration: ReturnType<typeof newDecorationState>,
+ * }} context State tạm của static item hoặc scope `\t(...)`.
+ * @returns {boolean} `true` khi tag thuộc nhóm này, kể cả lúc giá trị raw lỗi.
  */
-function applyLayoutLocalTransformable(tag, context) {
+function applySegmentLevelTransformable(tag, context) {
 	if (tag.startsWith('\\fscy')) {
 		const v = Number.parseFloat(tag.slice(5));
 		if (!Number.isNaN(v)) context.scaleY = v;
@@ -204,6 +215,68 @@ function applyLayoutLocalTransformable(tag, context) {
 	if (tag.startsWith('\\fs')) {
 		const v = Number.parseFloat(tag.slice(3));
 		if (!Number.isNaN(v)) context.textCss['font-size'] = `${v}px`;
+		return true;
+	}
+
+	const state = context.decoration;
+	let m = /^\\([1-4])c&(.*)$/.exec(tag);
+	if (!m && tag.startsWith('\\c&')) m = [tag, '1', tag.slice(3)];
+	if (m) {
+		const color = utils.parseAegisubHex(m[2]);
+		if (color) state.colors[Number(m[1])] = color;
+		return true;
+	}
+	if (tag.startsWith('\\blur')) {
+		const v = Number.parseFloat(tag.slice(5));
+		if (!Number.isNaN(v)) state.blur = v;
+		return true;
+	}
+	if (tag.startsWith('\\fax')) {
+		const v = Number.parseFloat(tag.slice(4));
+		if (!Number.isNaN(v)) state.skew.x = v;
+		return true;
+	}
+	if (tag.startsWith('\\fay')) {
+		const v = Number.parseFloat(tag.slice(4));
+		if (!Number.isNaN(v)) state.skew.y = v;
+		return true;
+	}
+	const frM = /^\\fr([xyz])/.exec(tag);
+	if (frM || tag.startsWith('\\fr')) {
+		const axis = frM ? frM[1] : 'z';
+		const v = Number.parseFloat(tag.slice(frM ? 4 : 3));
+		if (!Number.isNaN(v)) state.angle[axis] = v;
+		return true;
+	}
+	if (tag.startsWith('\\bord')) {
+		const v = Number.parseFloat(tag.slice(5));
+		if (!Number.isNaN(v)) state.bord.w = v;
+		return true;
+	}
+	if (tag.startsWith('\\shad')) {
+		const v = Number.parseFloat(tag.slice(5));
+		if (!Number.isNaN(v)) state.shad.d = v;
+		return true;
+	}
+	if (tag.startsWith('\\xshad')) {
+		const v = Number.parseFloat(tag.slice(6));
+		if (!Number.isNaN(v)) state.shad.x = v;
+		return true;
+	}
+	if (tag.startsWith('\\yshad')) {
+		const v = Number.parseFloat(tag.slice(6));
+		if (!Number.isNaN(v)) state.shad.y = v;
+		return true;
+	}
+	if (tag.startsWith('\\alpha&')) {
+		const byte = utils.hexToAlpha(tag.slice(7));
+		if (byte !== null) state.alpha.all = (255 - byte) / 255;
+		return true;
+	}
+	m = /^\\([1-4])a&(.*)$/.exec(tag);
+	if (m) {
+		const byte = utils.hexToAlpha(m[2]);
+		if (byte !== null) state.alpha[Number(m[1])] = (255 - byte) / 255;
 		return true;
 	}
 	return false;
@@ -301,13 +374,13 @@ function splitTransformParts(tag) {
 	}
 	return { t1, t2, easing, modsText };
 }
-/** [Manual edit] Hàm áp dụng các tag bên trong tag \t — metadata nội suy (CHỈ tag 2.4.1).
+/** [arena.ai] Parse một \t(...) thành metadata nội suy cho Segment-level Transformable tags.
  * @param {string} tag Tag raw, bắt đầu bằng '\t' (vd "\t(0,500,\fs30)").
  * @param {Object} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
- * @param {parsedDataFormat.tagOverrideControls} nonTransformableContext
- * Object ghi dữ liệu context của segment ngoài \t. (cho các tag 2.4.2, tag trong \t coi như tag ngoài \t thông thường)
+ * @param {Object} nonTransformableContext
+ * State của static segment: non-transformable tag trong \t hiện vẫn apply-now vào đây.
  * @returns {{t1: number, t2: (number|null), easing: number, target: Object}|null}
- *  - null khi tag không phải \t hợp lệ, hoặc modsText không có tag 2.4.1 nào (không tạo entry anim).
+ *  - null khi tag không phải \t hợp lệ, hoặc scope không tạo target transformable nào.
  *  - t1: ms, tương đối đầu dòng (Aegisub: \t dùng ms).
  *  - t2: ms, tương đối đầu dòng; null khi file không ghi t2 (transform chạy tới HẾT dòng —
  *    renderer lấy duration dòng từ events để resolve).
@@ -318,13 +391,21 @@ function parseTransformTag(tag, styleRef, nonTransformableContext) {
 	/** Lưu dữ liệu tạm thời khi apply các tag trong \t. Chỉ khi có thay đổi thì mới ghi từ context sang lineCss[i].delta
 	 * @type {parsedDataFormat.tagOverrideControls}
 	 */
-	const context = { textCss: {}, scaleX: undefined, scaleY: undefined, styleRef };
+	const context = {
+		textCss: {},
+		scaleX: undefined,
+		scaleY: undefined,
+		decoration: newDecorationState(),
+		styleRef,
+	};
 	for (const sub of splitOverrideTagsTransform(parts.modsText)) {
-		// Chỉ các hàm áp dụng tag có thể transform của các nhóm, thì mới đặt ở đây.
-		applyLayoutLocalTransformable(sub, context); // 2.4.1
-		applyLayoutLocalNonTransformable(sub, nonTransformableContext); // 2.4.2 (apply-now 11sep26)
-		applyDecorationToTarget(sub, context); // 2.3 → target (11sep26; karaoke bỏ im lặng — #17)
+		applySegmentLevelTransformable(sub, context);
+		applyLayoutLocalNonTransformable(sub, nonTransformableContext); // apply-now cho nhóm non-transformable
+		applySegmentLevelNonTransformableDecoration(sub, nonTransformableContext.decoration);
 	}
+	// Cook phần decoration của TOÀN BỘ scope \t đúng một lần.
+	// Container target vẫn chưa tween được, nên cố ý bỏ output container ở đây.
+	emitDecoration(context.decoration, styleRef, context.textCss, {});
 	// finalizeSmartScale(context.textCss, context.scaleX, context.scaleY);
 	if (Object.keys(context.textCss).length === 0) return null;
 	return { t1: parts.t1, t2: parts.t2, easing: parts.easing, target: context.textCss };
@@ -388,9 +469,14 @@ function classifyBase(base, styleRef) {
 
 
 		const data = {}; // Phần ghi vào item.delta.data.
-		const context = { textCss: {}, scaleX: undefined, scaleY: undefined, styleRef };
-
-
+		const context = {
+			textCss: {},
+			scaleX: undefined,
+			scaleY: undefined,
+			decoration: newDecorationState(),
+			styleRef,
+		};
+		const containerCss = {};
 
 		for (const tag of tags) {
 			if (tag.startsWith('\\t')) {
@@ -398,18 +484,19 @@ function classifyBase(base, styleRef) {
 				if (entry) tempAnim.push(entry);
 				continue;
 			}
-			// Nếu là tag \t.
 			if (tag === '\\h' || tag === '\\N' || tag === '\\n') {
 				data.marker = tag;
 				continue;
 			}
-			// Nếu là tag marker \h, \N, \n.
-			applyLayoutLocalTransformable(tag, context); // 2.4.1
-			applyLayoutLocalNonTransformable(tag, context); // 2.4.2
+			applySegmentLevelTransformable(tag, context);
+			applyLayoutLocalNonTransformable(tag, context);
 		}
-		if (Object.keys(context.textCss).length > 0 || Object.keys(data).length > 0) {
+		// Cook toàn bộ Segment-level Transformable state đúng một lần cho static item.
+		emitDecoration(context.decoration, styleRef, context.textCss, containerCss);
+		if (Object.keys(context.textCss).length > 0 || Object.keys(containerCss).length > 0 || Object.keys(data).length > 0) {
 			const delta = {}; // Phần ghi vào item.delta.
 			if (Object.keys(context.textCss).length > 0) delta.text = context.textCss;
+			if (Object.keys(containerCss).length > 0) delta.container = containerCss;
 			if (Object.keys(data).length > 0) delta.data = data;
 			item.delta = delta;
 		}
@@ -442,13 +529,14 @@ function newDecorationState() {
 		skew: { x: null, y: null },
 	};
 }
-/** [arena.ai] Áp MỘT tag nhóm 2.3 vào trạng thái tạm `st` của item (last-wins trong item).
- * Chỉ yêu cầu giá trị khi tag kèm '&' (để KHÔNG đụng \\clip — việc của 2.1).
- * @param {string} tag Tag đơn raw, bắt đầu bằng '\\'.
- * @param {Object} st Trạng thái decoration tạm của item (caller tạo mới mỗi item).
- * @returns {boolean} true = đã tiêu thụ tag; false = không thuộc nhóm 2.3.
+/** [arena.ai] Áp các Segment-level Non-transformable decoration tags.
+ * `\u` và `\s` không trở thành target của `\t`; karaoke được giữ ở
+ * classifyDecoration vì cần karaoke clock xuyên cả dòng.
+ * @param {string} tag Tag raw đơn, bắt đầu bằng '\\'.
+ * @param {ReturnType<typeof newDecorationState>} state State decoration tạm của item.
+ * @returns {boolean} `true` khi tag thuộc nhóm này.
  */
-function applyDecorationTag(tag, state) {
+function applySegmentLevelNonTransformableDecoration(tag, state) {
 	let m = /^\\u(-?\d+(?:\.\d+)?)$/.exec(tag);
 	if (m) {
 		state.underline = Number.parseFloat(m[1]) !== 0 ? 'underline' : ' ';
@@ -457,88 +545,6 @@ function applyDecorationTag(tag, state) {
 	m = /^\\s(-?\d+(?:\.\d+)?)$/.exec(tag);
 	if (m) {
 		state.strikeOut = Number.parseFloat(m[1]) !== 0 ? 'line-through' : ' ';
-		return true;
-	}
-	// \\1c..\\4c + alias \\c (= \\1c) — màu kênh 1..4 (Aegisub: last-wins mỗi kênh).
-	m = /^\\([1-4])c&(.*)$/.exec(tag);
-	if (!m && tag.startsWith('\\c&')) m = [tag, '1', tag.slice(3)];
-	if (m) {
-		const c = utils.parseAegisubHex(m[2]);
-		if (c) state.colors[Number(m[1])] = c;
-		return true;
-	}
-	// \\blur<r> / \\be<n> — CÙNG họ blur, last-wins CHÉO giữa hai tag (\\be coi như passes ≈ px, xấp xỉ ADR 0004).
-	if (tag.startsWith('\\blur')) {
-		const v = Number.parseFloat(tag.slice(5));
-		if (!Number.isNaN(v)) state.blur = v;
-		return true;
-	}
-	if (tag.startsWith('\\be')) {
-		const v = Number.parseFloat(tag.slice(3));
-		if (!Number.isNaN(v)) state.blur = v;
-		return true;
-	}
-	// \\fax/\\fay — hệ số skew (\\faxy không tồn tại trong ASS).
-	if (tag.startsWith('\\fax')) {
-		const v = Number.parseFloat(tag.slice(4));
-		if (!Number.isNaN(v)) state.skew.x = v;
-		return true;
-	}
-	if (tag.startsWith('\\fay')) {
-		const v = Number.parseFloat(tag.slice(4));
-		if (!Number.isNaN(v)) state.skew.y = v;
-		return true;
-	}
-	// \\frx/\\fry/\\frz + alias \\fr (= \\frz) — góc xoay, giữ RAW deg (renderer đổi dấu khi gộp).
-	const frM = /^\\fr([xyz])/.exec(tag);
-	if (frM || tag.startsWith('\\fr')) {
-		const axis = frM ? frM[1] : 'z';
-		const v = Number.parseFloat(tag.slice(frM ? 4 : 3));
-		if (!Number.isNaN(v)) state.angle[axis] = v;
-		return true;
-	}
-	// \\bord<w> cả hai chiều; \\xbord/\\ybord từng chiều (Aegisub: last-wins mỗi chiều).
-	if (tag.startsWith('\\bord')) {
-		const v = Number.parseFloat(tag.slice(5));
-		if (!Number.isNaN(v)) state.bord.w = v;
-		return true;
-	}
-	if (tag.startsWith('\\xbord')) {
-		const v = Number.parseFloat(tag.slice(6));
-		if (!Number.isNaN(v)) state.bord.x = v;
-		return true;
-	}
-	if (tag.startsWith('\\ybord')) {
-		const v = Number.parseFloat(tag.slice(6));
-		if (!Number.isNaN(v)) state.bord.y = v;
-		return true;
-	}
-	// \\shad<d> cả hai chiều; \\xshad/\\yshad từng chiều (nhận giá trị âm — bóng hất ngược).
-	if (tag.startsWith('\\shad')) {
-		const v = Number.parseFloat(tag.slice(5));
-		if (!Number.isNaN(v)) state.shad.d = v;
-		return true;
-	}
-	if (tag.startsWith('\\xshad')) {
-		const v = Number.parseFloat(tag.slice(6));
-		if (!Number.isNaN(v)) state.shad.x = v;
-		return true;
-	}
-	if (tag.startsWith('\\yshad')) {
-		const v = Number.parseFloat(tag.slice(6));
-		if (!Number.isNaN(v)) state.shad.y = v;
-		return true;
-	}
-	// \\alpha&HAA& — alpha MỌI kênh; \\1a..\\4a&HAA& — alpha từng kênh (last-wins theo thứ tự tag).
-	if (tag.startsWith('\\alpha&')) {
-		const a = (255 - utils.hexToAlpha(tag.slice(7)))/255;
-		if (a !== null) state.alpha.all = a;
-		return true;
-	}
-	m = /^\\([1-4])a&(.*)$/.exec(tag);
-	if (m) {
-		const a = (255 - utils.hexToAlpha(m[2]))/255;
-		if (a !== null) state.alpha[Number(m[1])] = a;
 		return true;
 	}
 	return false;
@@ -609,18 +615,6 @@ function emitDecoration(state, styleRef, textCss, containerCss) {
 		}
 	}
 }
-/** [arena.ai] Áp MỘT tag 2.3 đứng TRONG \t(...) → target của anim (nấu độc lập theo styleRef,
- * không cộng dồn trạng thái với tag khác trong cùng \t). Karaoke trả false (bỏ im lặng — SAI SỐ #17). */
-function applyDecorationToTarget(tag, context) {
-	const state = newDecorationState();
-	if (!applyDecorationTag(tag, state)) return false;
-	const textCss = {};
-	const containerCss = {};
-	emitDecoration(state, context.styleRef, textCss, containerCss);
-	// target CHỈ nhận khóa mức text (container-level trong \t rất hiếm — v1 không tween).
-	Object.assign(context.textCss, textCss);
-	return true;
-}
 /** [arena.ai] Gộp kết quả decoration vào item.delta đã có từ 2.4 (KHÔNG ghi đè: merge từng mức).
  * @param {Object|null} dataKaraoke Karaoke của item { type, durationMs, startMs } — ghi vào delta.data.k. */
 function mergeDecorationIntoItem(item, textCss, containerCss, dataKaraoke) {
@@ -631,11 +625,12 @@ function mergeDecorationIntoItem(item, textCss, containerCss, dataKaraoke) {
 	if (dataKaraoke) delta.data = Object.assign({}, delta.data, { k: dataKaraoke });
 	item.delta = delta;
 }
-/** [arena.ai] Nhóm 2.3 — Decoration Local Tags (màu/bord/shad/be/blur/fa/fr + karaoke \\k/\\kf/\\ko).
- * Cục bộ mức item, last-wins trong item, KHÔNG đổi kích thước khung chữ; merge vào delta 2.4.
+/** [arena.ai] Phần còn lại của Segment-level Non-transformable:
+ * \\u, \\s và karaoke \\k/\\kf/\\ko. Các Segment-level Transformable tag đã được
+ * classifyBase xử lí và cook trước đó.
  * @param {Array<{tags: string[], text: string}>} base Mảng base item (đầu ra của processLineText).
  * @param {Object} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
- * @returns {Array<{tags: string[], text: string, delta?: Object, anim?: Array<Object>}>} base đã classify 2.3.
+ * @returns {Array<{tags: string[], text: string, delta?: Object, anim?: Array<Object>}>} base đã classify.
  */
 function classifyDecoration(base, styleRef) {
 	if (!Array.isArray(base)) return base;
@@ -664,7 +659,7 @@ function classifyDecoration(base, styleRef) {
 				consumed = true;
 				continue;
 			}
-			if (applyDecorationTag(tag, state)) consumed = true;
+			if (applySegmentLevelNonTransformableDecoration(tag, state)) consumed = true;
 		}
 		if (!consumed) continue;
 		const textCss = {};
@@ -695,7 +690,8 @@ function classifyClip(base, styleRef) {
 	return { rawList: [], effectiveType: null, effectiveRaw: null };
 }
 
-/** [arena.ai] Classify — 2.4 → 2.3 → 2.2 → 2.1.
+/** [arena.ai] Classify — Segment-level Transformable → Segment-level Non-transformable
+ * → Line-level Collision → Line-level Clip.
  * @param {Array<parsedDataFormat.baseRaw>} base Mảng base ban đầu (đầu ra của processLineText).
  * @param {parsedDataFormat.style} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
  * @returns {{base: Array<{tags: string[], text: string, delta?: Object, anim?: Array<Object>}>, collision: {t: boolean}, clip: {rawList: string[], effectiveType: ('clip'|'iclip'|null), effectiveRaw: (string|null)}}}
