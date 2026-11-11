@@ -114,8 +114,8 @@ test('parser keeps raw dialogue data separate from classified lineCss', () => {
 	assert.deepEqual(Object.keys(parsed.lineCss[0]).sort(), ['base', 'clip', 'collision']);
 	assert.deepEqual(parsed.lineCss[0].base, [
 		{ tags: ['\\pos(320,240)', '\\an5'], text: 'Xin ' },
-		{ tags: ['\\fs30'], text: 'chào', delta: { text: { 'font-size': '30px' } } },
-		{ tags: ['\\N'], text: '', delta: { data: { marker: '\\N' } } },
+		{ tags: ['\\fs30'], text: 'chào', delta: { '--font-size': 30 } },
+		{ tags: ['\\N'], text: '', data: { marker: '\\N' } },
 		{ tags: [], text: 'các bạn' },
 	]);
 	assert.deepEqual(parsed.lineCss[0].collision, { t: false });
@@ -206,7 +206,7 @@ test('doStripTags truthy removes override blocks while retaining text markers ve
 test('doStripTags false keeps override blocks for classification', () => {
 	const parsed = parser(false, assWithText('{\\fs30}amet'));
 	assert.deepEqual(parsed.lineCss[0].base, [
-		{ tags: ['\\fs30'], text: 'amet', delta: { text: { 'font-size': '30px' } } },
+		{ tags: ['\\fs30'], text: 'amet', delta: { '--font-size': 30 } },
 	]);
 });
 
@@ -216,7 +216,7 @@ test('doStripTags treats all truthy values as strip mode and falsy values as nor
 	}
 	for (const value of [false, 0, '', null, undefined, NaN]) {
 		assert.deepEqual(parser(value, assWithText('{\\fs30}x')).lineCss[0].base, [
-			{ tags: ['\\fs30'], text: 'x', delta: { text: { 'font-size': '30px' } } },
+			{ tags: ['\\fs30'], text: 'x', delta: { '--font-size': 30 } },
 		]);
 	}
 });
@@ -341,12 +341,7 @@ test('parser classifies color and karaoke decoration tags with parsed style colo
 	assert.deepEqual(parsed.lineCss[0].base, [{
 		tags: ['\\c&HFF&', '\\k20'],
 		text: 'x',
-		delta: {
-			text: {
-				color: 'rgba(255, 0, 0, 1.00)',
-				'--primary-color': 'rgba(255, 0, 0, 1.00)',
-			},
-			data: { k: { type: 'k', durationMs: 200, startMs: 0 } },
-		},
+		delta: { '--color1': 'rgba(255, 0, 0, 1.00)' },
+		data: { k: { type: 'k', durationMs: 200, startMs: 0 } },
 	}]);
 });

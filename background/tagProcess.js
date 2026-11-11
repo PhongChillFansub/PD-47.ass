@@ -84,27 +84,27 @@ import * as utils from './utils.js';
  * @property {number} [top] \pos, \move điều khiển vị trí (ghi trực tiếp, đv cqh)
  * @property {number} [--align-x] \an ghi đè (gọi utils.resolveAlignment)
  * @property {number} [--align-y] \an ghi đè (gọi utils.resolveAlignment)
- * @property {number} --origin-delta-x renderer tính origin của từng segment
- * @property {number} --origin-delta-y renderer tính origin của từng segment
+ * @property {number} [--origin-delta-x] renderer tính origin của từng segment
+ * @property {number} [--origin-delta-y] renderer tính origin của từng segment
  * (\org chỉ ghi origin của line, renderer phải tính delta origin của từng segment, 
  * từ origin của line này và left/top; và ko sửa vào --origin)
  * @property {string} [--style-name] \r điều khiển style
  * @property {string} [--font-name] \fn điều khiển fontName
  * @property {number} [--font-size] \fs điều khiển fontSize
- * @property {number} [--color1] \1c, \1a điều khiển primaryColour
- * @property {number} [--color2] \2c, \2a điều khiển secondaryColour
- * @property {number} [--color3] \3c, \3a điều khiển outlineColour (gọi utils.outlineStyleToCss)
- * @property {number} [--color4] \4c, \4a điều khiển backColour (gọi utils.outlineStyleToCss, utils.shadBlurToCss)
+ * @property {string} [--color1] \1c, \1a điều khiển primaryColour
+ * @property {string} [--color2] \2c, \2a điều khiển secondaryColour
+ * @property {string} [--color3] \3c, \3a điều khiển outlineColour (gọi utils.outlineStyleToCss)
+ * @property {string} [--color4] \4c, \4a điều khiển backColour (gọi utils.outlineStyleToCss, utils.shadBlurToCss)
  * @property {number} [--bold] \b điều khiển bold (chạy 'font-weight': utils.boldToWeight(style.bold),)
  * @property {number} [--italic] \i điều khiển italic (chạy 'font-style': style.italic ? 'italic' : 'normal')
  * @property {boolean} [--underline] \u điều khiển underline (gọi utils.decorationToCss)
- * @property {boolean} [--strikeout] \s điều khiển strikeOut (gọi utils.decorationToCss)
+ * @property {boolean} [--strike-out] \s điều khiển strikeOut (gọi utils.decorationToCss)
  * @property {number} [--spacing] \fsp điều khiển letter-spacing
  * @property {number} [--outline] \bord điều khiển độ dày viền (gọi utils.outlineWidthToCss)
  * @property {number} [--shadow-x] \shad điều khiển shadow-x (gọi utils.shadBlurToCss)
  * @property {number} [--shadow-y] \shad điều khiển shadow-y (gọi utils.shadBlurToCss)
  * @property {number} [--blur] \blur điều khiển blur (gọi utils.shadBlurToCss)
- * @property {number} [--inline-fx] \- điều khiển inline-fx
+ * @property {string} [--inline-fx] \- điều khiển inline-fx
  * @property {number} [--scale-x] \fscx điều khiển scaleX (gọi utils.scaleAngleToCss)
  * @property {number} [--scale-y] \fscy điều khiển scaleY (gọi utils.scaleAngleToCss)
  * @property {number} [--angle-x] \frx điều khiển angleX (gọi utils.scaleAngleToCss)
@@ -154,155 +154,88 @@ function splitOverrideTagsTransform(text) {
 	return tags;
 }
 
-/** [Manual edit] Áp chỉ tag Segment-level Transformable vào delta hoặc target của \t
- * @param {string} tag Tag raw đơn, bắt đầu bằng '\\'.
- * @param {parsedDataFormat.tagOverrideControls} context delta hoặc target của \t
- * @returns {boolean} `true` khi tag thuộc nhóm này, kể cả lúc giá trị raw lỗi.
+/** Field màu style theo kênh ASS. */
+const STYLE_COLOR_FIELD = Object.freeze({ 1: 'primaryColour', 2: 'secondaryColour', 3: 'outlineColour', 4: 'backColour' });
+
+/** Tag số có tiền tố dài hơn phải đứng trước tag tiền tố ngắn hơn (fsc* / fsp trước fs, fr* trước fr). */
+const TRANSFORMABLE_NUMERIC_TAGS = [
+	['fscx', ['--scale-x']], ['fscy', ['--scale-y']],
+	['fsc', ['--scale-x', '--scale-y']], ['fsp', ['--spacing']], ['fs', ['--font-size']],
+	['blur', ['--blur']], ['fax', ['--skew-x']], ['fay', ['--skew-y']],
+	['frx', ['--angle-x']], ['fry', ['--angle-y']], ['frz', ['--angle-z']], ['fr', ['--angle-z']],
+	['bord', ['--outline']], ['xshad', ['--shadow-x']], ['yshad', ['--shadow-y']],
+	['shad', ['--shadow-x', '--shadow-y']],
+];
+
+/** Áp một tag transformable vào các biến override thô, không nấu CSS tại đây.
+ * @param {string} tag Tag raw đơn.
+ * @param {parsedDataFormat.tagOverrideControls} context Delta hoặc target của \t.
+ * @param {Object} styleRef Style dòng, dùng làm fallback cho màu/alpha.
+ * @param {{alpha: Object, fallback?: parsedDataFormat.tagOverrideControls}} colorState Trạng thái alpha tạm ngoài context.
+ * @returns {boolean} Tag thuộc nhóm này (kể cả khi giá trị không hợp lệ).
  */
-function applySegmentLevelTransformable(tag, context) {
-	if (tag.startsWith('\\fscy')) {
-		const v = Number.parseFloat(tag.slice(5));
-		if (!Number.isNaN(v)) context.scaleY = v;
-		return true;
-	}
-	if (tag.startsWith('\\fscx')) {
-		const v = Number.parseFloat(tag.slice(5));
-		if (!Number.isNaN(v)) context.scaleX = v;
-		return true;
-	}
-	if (tag.startsWith('\\fsc')) {
-		const v = Number.parseFloat(tag.slice(4));
-		if (!Number.isNaN(v)) {
-			context.scaleX = v;
-			context.scaleY = v;
+function applySegmentLevelTransformableTags(tag, context, styleRef, colorState) {
+	for (const [name, keys] of TRANSFORMABLE_NUMERIC_TAGS) {
+		if (!tag.startsWith(`\\${name}`)) continue;
+		const raw = tag.slice(name.length + 1);
+		if (NUMERIC_TOKEN_RE.test(raw)) {
+			for (const key of keys) context[key] = Number(raw);
 		}
 		return true;
 	}
-	if (tag.startsWith('\\fsp')) {
-		const v = Number.parseFloat(tag.slice(4));
-		if (!Number.isNaN(v)) context.textCss['letter-spacing'] = `${v}px`;
-		return true;
-	}
-	if (tag.startsWith('\\fs')) {
-		const v = Number.parseFloat(tag.slice(3));
-		if (!Number.isNaN(v)) context.textCss['font-size'] = `${v}px`;
-		return true;
-	}
 
-	const state = context.decoration;
-	let m = /^\\([1-4])c&(.*)$/.exec(tag);
-	if (!m && tag.startsWith('\\c&')) m = [tag, '1', tag.slice(3)];
-	if (m) {
-		const color = utils.parseAegisubHex(m[2]);
-		if (color) state.colors[Number(m[1])] = color;
+	const colorMatch = /^\\([1-4]?)c&(.+)$/.exec(tag);
+	if (colorMatch) {
+		const raw = colorMatch[2];
+		if (!/^H[0-9a-f]{1,8}&?$/i.test(raw)) return true;
+		const channel = Number(colorMatch[1] || 1);
+		const key = `--color${channel}`;
+		const color = utils.parseAegisubHex(raw);
+		const previous = utils.parseCssRgba(context[key] ?? colorState.fallback?.[key] ?? styleRef?.[STYLE_COLOR_FIELD[channel]]);
+		// Màu 8 chữ số chứa alpha; màu ngắn hơn chỉ đổi RGB.
+		if (raw.replace(/^H/i, '').replace(/&$/, '').length <= 6) color.a = colorState.alpha[channel] ?? previous?.a ?? 1;
+		colorState.alpha[channel] = color.a;
+		context[key] = utils.hexToRgba(color);
 		return true;
 	}
-	if (tag.startsWith('\\blur')) {
-		const v = Number.parseFloat(tag.slice(5));
-		if (!Number.isNaN(v)) state.blur = v;
-		return true;
-	}
-	if (tag.startsWith('\\fax')) {
-		const v = Number.parseFloat(tag.slice(4));
-		if (!Number.isNaN(v)) state.skew.x = v;
-		return true;
-	}
-	if (tag.startsWith('\\fay')) {
-		const v = Number.parseFloat(tag.slice(4));
-		if (!Number.isNaN(v)) state.skew.y = v;
-		return true;
-	}
-	const frM = /^\\fr([xyz])/.exec(tag);
-	if (frM || tag.startsWith('\\fr')) {
-		const axis = frM ? frM[1] : 'z';
-		const v = Number.parseFloat(tag.slice(frM ? 4 : 3));
-		if (!Number.isNaN(v)) state.angle[axis] = v;
-		return true;
-	}
-	if (tag.startsWith('\\bord')) {
-		const v = Number.parseFloat(tag.slice(5));
-		if (!Number.isNaN(v)) state.bord.w = v;
-		return true;
-	}
-	if (tag.startsWith('\\shad')) {
-		const v = Number.parseFloat(tag.slice(5));
-		if (!Number.isNaN(v)) state.shad.d = v;
-		return true;
-	}
-	if (tag.startsWith('\\xshad')) {
-		const v = Number.parseFloat(tag.slice(6));
-		if (!Number.isNaN(v)) state.shad.x = v;
-		return true;
-	}
-	if (tag.startsWith('\\yshad')) {
-		const v = Number.parseFloat(tag.slice(6));
-		if (!Number.isNaN(v)) state.shad.y = v;
-		return true;
-	}
-	if (tag.startsWith('\\alpha&')) {
-		const byte = utils.hexToAlpha(tag.slice(7));
-		if (byte !== null) state.alpha.all = (255 - byte) / 255;
-		return true;
-	}
-	m = /^\\([1-4])a&(.*)$/.exec(tag);
-	if (m) {
-		const byte = utils.hexToAlpha(m[2]);
-		if (byte !== null) state.alpha[Number(m[1])] = (255 - byte) / 255;
+	const alphaMatch = /^\\(alpha|[1-4]a)&(.*)$/.exec(tag);
+	if (alphaMatch) {
+		const raw = alphaMatch[2];
+		if (!/^H[0-9a-f]{1,2}&?$/i.test(raw)) return true;
+		const alpha = (255 - utils.hexToAlpha(raw)) / 255;
+		const channels = alphaMatch[1] === 'alpha' ? [1, 2, 3, 4] : [Number(alphaMatch[1][0])];
+		for (const channel of channels) {
+			const key = `--color${channel}`;
+			colorState.alpha[channel] = alpha;
+			const color = utils.parseCssRgba(context[key] ?? colorState.fallback?.[key] ?? styleRef?.[STYLE_COLOR_FIELD[channel]]);
+			if (color) context[key] = utils.hexToRgba({ ...color, a: alpha });
+		}
 		return true;
 	}
 	return false;
 }
-/** [Manual edit] Hàm áp dụng tag nhóm 2.4.2 — NON-transformable: KHÔNG được nội suy (tween)
- * trong \t (chỉ tag 2.4.1 vào target của parseTransformTag); cục bộ; có thể làm ảnh hưởng layout:
- *
- * \- (inline-fx), \b, \i, \fn, \r, \q
- *
- * Karaoke: \k/\kf/\ko KHÔNG xử lí ở 2.4 — đưa sang 2.3 (session sau). Không xử lí \K, \kt.
- *
- * CHÚ Ý (11sep26): hàm này được gọi CHO CẢ tag TRONG \t(...) — parseTransformTag áp 2.4.2
- * apply-now vào context của segment ngoài \t (commit 1ee633d; hướng "BỎ apply-now" 09sep26 đã thay thế).
- * @param {string} tag Tag đơn raw, bắt đầu bằng '\\'.
- * @param {parsedDataFormat.tagOverrideControls} context
- * Object ghi dữ liệu tạm thời (textCss). Caller mới ghi context sang item.delta khi có thay đổi.
- * @returns {boolean} true = đã xử lí; false = không thuộc nhóm này.
- */
-function applyLayoutLocalNonTransformable(tag, context) {
-	if (/^\\-/.test(tag)) {
-		// Xử lý tag inline-fx: lưu dữ liệu text của inline-fx
-		const inlineFx = tag.slice(2).trim();
-		if (inlineFx !== '') context.textCss['--inline-fx'] = inlineFx;
+
+/** Áp các tag không nội suy vào delta của segment, kể cả khi nằm trong \t. */
+function applyLayoutLocalNonTransformable(tag, context, styleRef) {
+	if (tag.startsWith('\\-')) {
+		const value = tag.slice(2).trim();
+		if (value) context['--inline-fx'] = value;
 		return true;
 	}
-	if (/^\\b-?\d+(?:\.\d+)?$/.test(tag)) {
-		// Xử lý tag bold: lưu dữ liệu text của bold và cập nhật font-weight
-		const on = Number.parseFloat(tag.slice(2)) !== 0;
-		context.textCss['font-weight'] = on ? '700' : '400';
-		return true;
-	}
-	if (/^\\i-?\d+(?:\.\d+)?$/.test(tag)) {
-		// Xử lý tag italic: lưu dữ liệu text của italic và cập nhật font-style
-		const on = Number.parseFloat(tag.slice(2)) !== 0;
-		context.textCss['font-style'] = on ? 'italic' : 'normal';
+	const m = /^\\([bius])(-?\d+(?:\.\d+)?)$/.exec(tag);
+	if (m) {
+		const value = Number(m[2]);
+		const key = { b: '--bold', i: '--italic', u: '--underline', s: '--strike-out' }[m[1]];
+		context[key] = m[1] === 'u' || m[1] === 's' ? value !== 0 : value;
 		return true;
 	}
 	if (tag.startsWith('\\fn')) {
-		// Xử lý tag font name: lưu dữ liệu text của font name và cập nhật font-family
-		let name = tag.slice(3).trim();
-		if (name === '') name = context.styleRef?.fontName ?? '';
-		if (name !== '') context.textCss['font-family'] = `"${name}", sans-serif`;
+		const name = tag.slice(3).trim() || styleRef?.fontName;
+		if (name) context['--font-name'] = name;
 		return true;
 	}
 	if (tag.startsWith('\\r')) {
-		// Xử lý tag reset style: lưu dữ liệu text của reset style và cập nhật style name
-		const styleName = tag.slice(2);
-		const baseStyleName = styleName !== '' ? styleName : (context.styleRef?.name ?? FALLBACK_STYLE_NAME);
-		context.textCss['--base-style-name'] = baseStyleName;
-		return true;
-	}
-	if (/^\\q\d+$/.test(tag)) {
-		/// Xử lý tag wrap style: lưu dữ liệu text của wrap style và cập nhật --wrap-style
-		const v = Number.parseInt(tag.slice(2), 10);
-		if (!Number.isNaN(v)) context.textCss['--wrap-style'] = v;
+		context['--style-name'] = tag.slice(2) || styleRef?.name || FALLBACK_STYLE_NAME;
 		return true;
 	}
 	return false;
@@ -345,298 +278,55 @@ function splitTransformParts(tag) {
 	}
 	return { t1, t2, easing, modsText };
 }
-/** [arena.ai] Parse một \t(...) thành metadata nội suy cho Segment-level Transformable tags.
- * @param {string} tag Tag raw, bắt đầu bằng '\t' (vd "\t(0,500,\fs30)").
- * @param {Object} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
- * @param {Object} nonTransformableContext
- * State của static segment: non-transformable tag trong \t hiện vẫn apply-now vào đây.
- * @returns {{t1: number, t2: (number|null), easing: number, target: Object}|null}
- *  - null khi tag không phải \t hợp lệ, hoặc scope không tạo target transformable nào.
- *  - t1: ms, tương đối đầu dòng (Aegisub: \t dùng ms).
- *  - t2: ms, tương đối đầu dòng; null khi file không ghi t2 (transform chạy tới HẾT dòng —
- *    renderer lấy duration dòng từ events để resolve).
- */
+/** Parse \t thành metadata target; tag không transformable áp ngay vào delta ngoài. */
 function parseTransformTag(tag, styleRef, nonTransformableContext) {
 	const parts = splitTransformParts(tag);
 	if (!parts) return null;
-	/** Lưu dữ liệu tạm thời khi apply các tag trong \t. Chỉ khi có thay đổi thì mới ghi từ context sang lineCss[i].delta
-	 * @type {parsedDataFormat.tagOverrideControls}
-	 */
-	const context = {
-		textCss: {},
-		scaleX: undefined,
-		scaleY: undefined,
-		decoration: newDecorationState(),
-		styleRef,
-	};
+	/** @type {parsedDataFormat.tagOverrideControls} */
+	const context = {};
+	const colorState = { alpha: {}, fallback: nonTransformableContext };
 	for (const sub of splitOverrideTagsTransform(parts.modsText)) {
-		applySegmentLevelTransformable(sub, context);
-		applyLayoutLocalNonTransformable(sub, nonTransformableContext); // apply-now cho nhóm non-transformable
-		applySegmentLevelNonTransformableDecoration(sub, nonTransformableContext.decoration);
+		applySegmentLevelTransformableTags(sub, context, styleRef, colorState);
+		applyLayoutLocalNonTransformable(sub, nonTransformableContext, styleRef);
 	}
-	// Cook phần decoration của TOÀN BỘ scope \t đúng một lần.
-	// Container target vẫn chưa tween được, nên cố ý bỏ output container ở đây.
-	emitDecoration(context.decoration, styleRef, context.textCss, {});
-	// finalizeSmartScale(context.textCss, context.scaleX, context.scaleY);
-	if (Object.keys(context.textCss).length === 0) return null;
-	return { t1: parts.t1, t2: parts.t2, easing: parts.easing, target: context.textCss };
+	if (Object.keys(context).length === 0) return null;
+	return { t1: parts.t1, t2: parts.t2, easing: parts.easing, target: context };
 }
-/** Định nghĩa/chú thích object mục base sau khi tách
- * @typedef {object} parsedDataFormat.baseItem Đơn vị nhỏ nhất trong base: 1 cụm tag + 1 đoạn text.
- * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
- * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm tầng cuối).
- *   (classify KHÔNG xóa tags khi tiêu thụ: nhóm sau 2.3/2.2/2.1 + renderer/debug đọc lại được.)
- * @property {parsedDataFormat.baseItemDelta} [delta] classify (tagProcess.js) sinh: mức text
- *   (layout tĩnh \fs\fsc\fsp + \fn\b\i + \r → '--base-style-name', \q → '--wrap-style') /
- *   data (marker \h\N\n; karaoke CHƯA — về 2.3, tags giữ raw). text không tag thì KHÔNG có delta/anim.
- * @property {parsedDataFormat.baseItemAnim} [anim] classify sinh metadata nội suy \t:
- *   MẢNG trực tiếp, mỗi \t → { t1, t2, easing, target } (không bọc { t: [...] }). Karaoke không anim.k.
- */
-/** mới: Định nghĩa/chú thích baseItem trong lineCss[i].base = Array<baseItem> 
- * @typedef {object} parsedDataFormat.baseItem Đơn vị trong Array base: 1 cụm tag + 1 đoạn text.
- * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, 
- * raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
- * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm sau).
- * (classify KHÔNG xóa tags khi xử lí, renderer/debug vẫn đọc lại được.)
- * @property {parsedDataFormat.baseItemDelta} [delta] các tag thay đổi nội dung (layout, decoration)
- * nếu ko có tag liên quan thì ko có delta/anim.
- * @property {parsedDataFormat.baseItemAnim} [anim] classify sinh metadata nội suy \t:
- *   MẢNG trực tiếp, mỗi \t → { t1, t2, easing, target } (không bọc { t: [...] }). Karaoke xử lí trong delta.data.
- */
-/** Định nghĩa/chú thích delta theo mức node của mục base
- * ĐỊNH HƯỚNG cho classify (bước 4-7): parser xử lí đến base thì mỗi mục base mang
- * delta tách theo 3 mức giống styleParsedToCss (container / text / data).
- * Renderer chuyển mục base thành node container-text TÙY MỨC ĐỘ DELTA:
- * - delta có container → phải sinh CẶP node container+text MỚI (delta chạm vỏ dòng).
- * - delta chỉ có text  → chỉ sinh node text bên trong container hiện có (đổi ruột chữ).
- * - delta chỉ có data  → không sinh node, chỉ là số liệu cho đo chữ / collision.
- * @typedef {object} parsedDataFormat.baseItemDelta
- * @property {Object} [container] Tag chạm vỏ dòng (vd \bord/\4c khi borderStyle==3, \clip) → renderer tách container mới.
- * @property {Object} [text] Tag đổi ruột chữ (\fs, \c, \b, \fr...) → renderer chỉ thêm node text.
- * @property {Object} [data] Chỉ số liệu đo/collision (không có CSS tương ứng) → không sinh node.
- */
-/** Field màu của styleRef theo kênh ASS (1=primary, 2=secondary, 3=outline, 4=back). */
-const STYLE_COLOR_FIELD = Object.freeze({ 1: 'primaryColour', 2: 'secondaryColour', 3: 'outlineColour', 4: 'backColour' });
-/** [arena.ai] Chuyển đổi hệ số skew ASS (\\fax/\\fay: x' = x + f·y) → góc deg cho CSS skewX/Y: θ = atan(f). */
-function skewFactorToDeg(f) { return Number((Math.atan(f) * 180 / Math.PI).toFixed(4)); }
 
-
-// to-do: sửa lại hàm classifyLayoutLocal này -> classifyBase (chạy for item + for tag cho cả 4 phần 2.x trong này)
-/** [Manual edit] Hàm thực hiện vòng lặp for..do quét các tag.
- * @param {Array<{tags: string[], text: string}>} base Mảng base item (đầu ra của processLineText).
- * @param {Object} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
- * @returns {Array<{tags: string[], text: string, delta?: parsedDataFormat.baseItemDelta, anim?: parsedDataFormat.baseItemAnim}>} base đã classify.
- */
+/** Quét tag từng item; CSS override nằm trực tiếp trong delta, metadata trong data. */
 function classifyBase(base, styleRef) {
 	if (!Array.isArray(base)) return base;
+	let karaokeRunMs = 0;
 	for (const item of base) {
-		// item là mục base của line, mỗi item = { tags: string[], text: string } (đầu ra của processLineText).
-		// trong item có thể có delta (container, text, data) và anim (\t).
-		const tags = item.tags;
-		// Tự động bỏ qua nếu line ko có tag nào (tránh tạo delta rỗng).
-		if (!Array.isArray(tags) || tags.length === 0) continue;
-		// Khởi tạo context cục bộ cho item trong base.
-		const tempAnim = []; // Phần ghi vào item.anim dự kiến.
-
-
-		const data = {}; // Phần ghi vào item.delta.data.
-		const context = {
-			textCss: {},
-			scaleX: undefined,
-			scaleY: undefined,
-			decoration: newDecorationState(),
-			styleRef,
-		};
-		const containerCss = {};
-
-		for (const tag of tags) {
+		if (!Array.isArray(item.tags) || item.tags.length === 0) continue;
+		/** @type {parsedDataFormat.tagOverrideControls} */
+		const context = {};
+		const colorState = { alpha: {} };
+		const data = {};
+		const anim = [];
+		for (const tag of item.tags) {
 			if (tag.startsWith('\\t')) {
 				const entry = parseTransformTag(tag, styleRef, context);
-				if (entry) tempAnim.push(entry);
+				if (entry) anim.push(entry);
 				continue;
 			}
 			if (tag === '\\h' || tag === '\\N' || tag === '\\n') {
 				data.marker = tag;
 				continue;
 			}
-			applySegmentLevelTransformable(tag, context);
-			applyLayoutLocalNonTransformable(tag, context);
-		}
-		// Cook toàn bộ Segment-level Transformable state đúng một lần cho static item.
-		emitDecoration(context.decoration, styleRef, context.textCss, containerCss);
-		if (Object.keys(context.textCss).length > 0 || Object.keys(containerCss).length > 0 || Object.keys(data).length > 0) {
-			const delta = {}; // Phần ghi vào item.delta.
-			if (Object.keys(context.textCss).length > 0) delta.text = context.textCss;
-			if (Object.keys(containerCss).length > 0) delta.container = containerCss;
-			if (Object.keys(data).length > 0) delta.data = data;
-			item.delta = delta;
-		}
-
-		if (tempAnim.length > 0) item.anim = tempAnim;
-	}
-	return base;
-}
-
-
-
-// to-do: sửa đoạn này
-
-
-
-
-
-
-/** [arena.ai] Trạng thái decoration tạm của 1 item — caller tạo MỚI mỗi item (last-wins = ghi đè field). */
-function newDecorationState() {
-	return {
-		colors: { 1: null, 2: null, 3: null, 4: null },
-		alpha: { all: null, 1: null, 2: null, 3: null, 4: null },
-		underline: null,
-		strikeOut: null,
-		bord: { w: null, x: null, y: null },
-		shad: { d: null, x: null, y: null },
-		blur: null,
-		angle: { x: null, y: null, z: null },
-		skew: { x: null, y: null },
-	};
-}
-/** [arena.ai] Áp các Segment-level Non-transformable decoration tags.
- * `\u` và `\s` không trở thành target của `\t`; karaoke được giữ ở
- * classifyDecoration vì cần karaoke clock xuyên cả dòng.
- * @param {string} tag Tag raw đơn, bắt đầu bằng '\\'.
- * @param {ReturnType<typeof newDecorationState>} state State decoration tạm của item.
- * @returns {boolean} `true` khi tag thuộc nhóm này.
- */
-function applySegmentLevelNonTransformableDecoration(tag, state) {
-	let m = /^\\u(-?\d+(?:\.\d+)?)$/.exec(tag);
-	if (m) {
-		state.underline = Number.parseFloat(m[1]) !== 0 ? 'underline' : ' ';
-		return true;
-	}
-	m = /^\\s(-?\d+(?:\.\d+)?)$/.exec(tag);
-	if (m) {
-		state.strikeOut = Number.parseFloat(m[1]) !== 0 ? 'line-through' : ' ';
-		return true;
-	}
-	return false;
-}
-/** [arena.ai] Nấu trạng thái decoration `st` của item → textCss/containerCss (CSS-cooked,
- * khóa khớp styleCss.text của styleParsedToCss để renderer Object.assign).
- * Alpha hiệu dụng mỗi kênh: byte alpha của tag màu > \\Na > \\alpha > alpha màu style. */
-function emitDecoration(state, styleRef, textCss, containerCss) {
-	const isBox = styleRef?.borderStyle === 3;
-	if (state.underline !== null) textCss['--underline'] = state.underline;
-	if (state.strikeOut !== null) textCss['--strike-out'] = state.strikeOut;
-	const styleCols = {};
-	for (const n of [1, 2, 3, 4]) styleCols[n] = utils.parseCssRgba(styleRef?.[STYLE_COLOR_FIELD[n]]);
-	for (const n of [1, 2, 3, 4]) {
-		const tagC = state.colors[n];
-		const trackedA = state.alpha[n] ?? state.alpha.all ?? null;
-		if (tagC === null && trackedA === null) continue; // kênh không bị đụng
-		const baseC = styleCols[n];
-		const rgb = tagC ?? (baseC ? { r: baseC.r, g: baseC.g, b: baseC.b } : null);
-		if (rgb === null) continue; // tag chỉ alpha mà style thiếu màu → bỏ qua kênh này
-		const a = (tagC && tagC.a !== null) ? tagC.a : (trackedA ?? baseC?.a ?? 1);
-		const css = utils.hexToRgba({ r: rgb.r, g: rgb.g, b: rgb.b, a });
-		if (n === 1) { textCss['color'] = css; textCss['--primary-color'] = css; }
-		if (n === 2) textCss['--secondary-color'] = css;
-		if (n === 3) {
-			if (isBox) containerCss['background-color'] = css; // borderStyle 3: outlineColour là màu nền box
-			else { textCss['-webkit-text-stroke-color'] = css; textCss['--outline-color'] = css; }
-		}
-		if (n === 4) {
-			textCss['--back-color'] = css;
-			const shadow = Number(styleRef?.shadow) || 0;
-			// shad block bên dưới sẽ GHI ĐÈ bằng offset hiệu dụng nếu item có tag \\shad*.
-			if (shadow !== 0) textCss['text-shadow'] = `${shadow}px ${shadow}px ${css}`;
-		}
-	}
-	// \\bord* — XẤP XỈ max(x,y) vì CSS stroke không tách được chiều (chốt 11sep26); ÂM → 0.
-	if (state.bord.w !== null || state.bord.x !== null || state.bord.y !== null) {
-		const styleBord = Number(styleRef?.outline) || 0;
-		const ex = Math.max(0, state.bord.x ?? state.bord.w ?? styleBord);
-		const ey = Math.max(0, state.bord.y ?? state.bord.w ?? styleBord);
-		const eff = Math.max(ex, ey);
-		if (isBox) containerCss['padding'] = `${eff}px`; // borderStyle 3: \bord là padding của box
-		else textCss['-webkit-text-stroke-width'] = `${eff * 2}px`; // ×2 — ADR 0007 (stroke vẽ cân giữa)
-		textCss['--outline-width'] = `${eff}px`;
-	}
-	// \\be/\\blur → CSS filter (xấp xỉ theo ADR 0004); 0 = tắt.
-	if (state.blur !== null) textCss['filter'] = state.blur > 0 ? `blur(${state.blur}px)` : 'none';
-	// \\fr*/\\fa* → CSS variables RAW deg — renderer gộp với scale/style transform (chốt 03sep26: gộp là việc renderer).
-	for (const axis of ['x', 'y', 'z']) {
-		if (state.angle[axis] !== null) textCss[`--angle-${axis}`] = `${state.angle[axis]}deg`;
-	}
-	if (state.skew.x !== null) textCss['--skew-x'] = `${skewFactorToDeg(state.skew.x)}deg`;
-	if (state.skew.y !== null) textCss['--skew-y'] = `${skewFactorToDeg(state.skew.y)}deg`;
-	// \\shad* — offset x/y CHÍNH XÁC (text-shadow nhận offset thật); màu = --back-color hiệu dụng.
-	if (state.shad.d !== null || state.shad.x !== null || state.shad.y !== null) {
-		const styleShad = Number(styleRef?.shadow) || 0;
-		const ex = state.shad.x ?? state.shad.d ?? styleShad;
-		const ey = state.shad.y ?? state.shad.d ?? styleShad;
-		textCss['--shadow-depth'] = `${Math.max(Math.abs(ex), Math.abs(ey))}px`;
-		if (ex === 0 && ey === 0) {
-			if (isBox) containerCss['box-shadow'] = 'none';
-			else textCss['text-shadow'] = 'none';
-		} else {
-			const backCss = textCss['--back-color'] ?? styleRef?.backColour ?? 'rgba(0, 0, 0, 1.00)';
-			const val = `${ex}px ${ey}px ${backCss}`;
-			if (isBox) containerCss['box-shadow'] = val;
-			else textCss['text-shadow'] = val;
-		}
-	}
-}
-/** [arena.ai] Gộp kết quả decoration vào item.delta đã có từ 2.4 (KHÔNG ghi đè: merge từng mức).
- * @param {Object|null} dataKaraoke Karaoke của item { type, durationMs, startMs } — ghi vào delta.data.k. */
-function mergeDecorationIntoItem(item, textCss, containerCss, dataKaraoke) {
-	if (Object.keys(textCss).length === 0 && Object.keys(containerCss).length === 0 && !dataKaraoke) return;
-	const delta = item.delta ?? {};
-	if (Object.keys(textCss).length > 0) delta.text = Object.assign({}, delta.text, textCss);
-	if (Object.keys(containerCss).length > 0) delta.container = Object.assign({}, delta.container, containerCss);
-	if (dataKaraoke) delta.data = Object.assign({}, delta.data, { k: dataKaraoke });
-	item.delta = delta;
-}
-/** [arena.ai] Phần còn lại của Segment-level Non-transformable:
- * \\u, \\s và karaoke \\k/\\kf/\\ko. Các Segment-level Transformable tag đã được
- * classifyBase xử lí và cook trước đó.
- * @param {Array<{tags: string[], text: string}>} base Mảng base item (đầu ra của processLineText).
- * @param {Object} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
- * @returns {Array<{tags: string[], text: string, delta?: Object, anim?: Array<Object>}>} base đã classify.
- */
-function classifyDecoration(base, styleRef) {
-	if (!Array.isArray(base)) return base;
-	/** Nhịp karaoke cộng dồn mức DÒNG (cs×10 = ms): \k* của item sau nối tiếp item trước. */
-	let karaokeRunMs = 0;
-	for (const item of base) {
-		const tags = item.tags;
-		if (!Array.isArray(tags) || tags.length === 0) continue;
-
-
-
-		const state = newDecorationState();
-		let consumed = false;
-		/** Karaoke của item: tag \k* CUỐI trong item thắng (nhiều \k* liên tiếp không text xen giữa
-		 * = các syllable rỗng đứng trước; syllable hiển thị là cái cuối). */
-		let karaoke = null;
-
-
-
-		for (const tag of tags) {
-			const km = KARAOKE_RE.exec(tag);
-			if (km) {
-				const durationMs = Number.parseFloat(km[2]) * 10; // centisecond trong file × 10 = ms
-				karaoke = { type: km[1], durationMs, startMs: karaokeRunMs };
+			const karaoke = KARAOKE_RE.exec(tag);
+			if (karaoke) {
+				const durationMs = Number.parseFloat(karaoke[2]) * 10;
+				data.k = { type: karaoke[1], durationMs, startMs: karaokeRunMs };
 				karaokeRunMs += durationMs;
-				consumed = true;
 				continue;
 			}
-			if (applySegmentLevelNonTransformableDecoration(tag, state)) consumed = true;
+			applySegmentLevelTransformableTags(tag, context, styleRef, colorState);
+			applyLayoutLocalNonTransformable(tag, context, styleRef);
 		}
-		if (!consumed) continue;
-		const textCss = {};
-		const containerCss = {};
-		emitDecoration(state, styleRef, textCss, containerCss);
-		mergeDecorationIntoItem(item, textCss, containerCss, karaoke);
+		if (Object.keys(context).length) item.delta = context;
+		if (Object.keys(data).length) item.data = data;
+		if (anim.length) item.anim = anim;
 	}
 	return base;
 }
@@ -665,22 +355,11 @@ function classifyClip(base, styleRef) {
  * → Line-level Collision → Line-level Clip.
  * @param {Array<parsedDataFormat.baseRaw>} base Mảng base ban đầu (đầu ra của processLineText).
  * @param {parsedDataFormat.style} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
- * @returns {{base: Array<{tags: string[], text: string, delta?: Object, anim?: Array<Object>}>, collision: {t: boolean}, clip: {rawList: string[], effectiveType: ('clip'|'iclip'|null), effectiveRaw: (string|null)}}}
+ * @returns {{base: Array<parsedDataFormat.baseItem>, collision: {t: boolean}, clip: {rawList: string[], effectiveType: ('clip'|'iclip'|null), effectiveRaw: (string|null)}}}
  */
 export function classify(base, styleRef) {
 	base = classifyBase(base, styleRef);
-	base = classifyDecoration(base, styleRef);
 	const collision = classifyCollision(base, styleRef);
 	const clip = classifyClip(base, styleRef);
 	return { base, collision, clip };
 }
-// Cấu trúc mới: loại bỏ hàm này, và viết 1 hàm mới (có thể sau 2.1) để gộp style thành CSS-cooked.
-// /** [arena.ai] Gộp scaleX/scaleY thành chuỗi 'transform' dạng CSS để tối ưu riêng.
-//  * KHÔNG lọc identity 100: scaleX(1)/scaleY(1) vẫn emit (chốt 09sep26 — renderer áp trực tiếp,
-//  * không tốn logic lọc ở parser). */
-// function finalizeSmartScale(textCss, scaleX, scaleY) {
-// 	const parts = [];
-// 	if (scaleX !== undefined) parts.push(`scaleX(${scaleX / 100})`);
-// 	if (scaleY !== undefined) parts.push(`scaleY(${scaleY / 100})`);
-// 	if (parts.length) textCss['transform'] = parts.join(' ');
-// }
