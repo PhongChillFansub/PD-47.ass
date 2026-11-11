@@ -1,4 +1,4 @@
-// v0.1.0 07nov26
+// v0.1.0 11nov26
 // alpha mode
 // Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] ĐẦY ĐỦ
 // { base, collision, clip }.
@@ -33,7 +33,7 @@ import * as utils from './utils.js';
  * 	2.4.2. Non-transformable (vd: \fn, \r, ...)
  * 2.3. Decoration Local 
  * 	2.3.1. Transformable (vd: \*c, \*a, \bord, \shad, \fa*, \fr*, ...)
- * 	2.3.2. Non-transformable (\s, \u, \k, ...)
+ * 	2.3.2. Non-transformable (\s, \u, \k*, ...)
  * 2.2. Line-level: Collision (\an -> \pos, \move (lấy đầu) -> \org)
  * 2.1. Line-level: \[i]clip
  */
@@ -41,36 +41,26 @@ import * as utils from './utils.js';
  * (đầu ra hàm processLineText/đầu vào "base" của classify)
  * @typedef {object} parsedDataFormat.baseRaw
  * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
- * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm tầng cuối).
+ * Tags này giữ nguyên để kiểm tra/debug sau này.
+ * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} trở thành {} cho hiển thị,
+ * cái này để renderer làm sau).
  */
 /** [Manual edit] Định nghĩa/chú thích cấu trúc lineCss[i]
  * @typedef {object} parsedDataFormat.lineCss đầu ra của classify
  * @property {Array<parsedDataFormat.baseItem>} base bê nguyên { tags, text } từ đầu vào baseRaw;
  * chỉ thêm { delta?, anim? } khi có tag ghi đè thay đổi nội dung. 
- * @property {parsedDataFormat.lineSubCss} lineSub Ghi các dữ liệu của container.
- * @property {Array<parsedDataFormat.clipItem>} clip Dữ liệu của clip
+ * @property {parsedDataFormat.lineSubCss} lineSub Ghi các dữ liệu của lineSub. (sẽ ghi clip vào đây).
+ * @property {parsedDataFormat.segmentSubCss} segmentSub Ghi các dữ liệu của segmentSub. (chỉ để renderer đọc).
+ * @property {Array<parsedDataFormat.clipItem>} clip Dữ liệu của tag clip (xử lí xong sẽ đưa vào lineSub).
  */
-
 /** [Manual edit] Định nghĩa/chú thích baseItem trong lineCss[i].base = Array baseItem 
  * @typedef {object} parsedDataFormat.baseItem Đơn vị trong Array base: 1 cụm tag + 1 đoạn text.
  * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, 
  * raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
  * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm sau).
  * (classify KHÔNG xóa tags khi xử lí, renderer/debug vẫn đọc lại được.)
- * @property {parsedDataFormat.baseItemDelta} [delta] các tag thay đổi nội dung (layout, decoration)
- * nếu ko có tag liên quan thì ko có delta/anim.
- * @property {parsedDataFormat.baseItemAnim} [anim] classify sinh metadata nội suy \t:
- *   MẢNG trực tiếp, mỗi \t → { t1, t2, easing, target } (không bọc { t: [...] }). Karaoke xử lí trong delta.data.
- */
-/** [Manual edit] Định nghĩa/chú thích baseItem.delta 
- * 
- * Chỉ chứa delta text và data. Các tag liên quan đến container sẽ chèn thẳng vào lineCss[i].container.
- * - delta.text → chỉ sinh node text bên trong container hiện có (đổi ruột chữ).
- * - delta.data → không sinh node, chỉ là số liệu cho đo chữ / collision.
- * @typedef {object} parsedDataFormat.baseItemDelta
- * @property {Object} styleRef 
- * @property {Object} [text] Tag đổi ruột chữ (\fs, \c, \b, \fr...) → renderer chỉ thêm node text.
- * @property {Object} [data] Chỉ số liệu đo/collision (không có CSS tương ứng) → không sinh node.
+ * @property {parsedDataFormat.tagOverrideControls} [delta] thuộc tính CSS mới do tag ghi đè.
+ * @property {parsedDataFormat.baseItemAnim} [anim] thuộc tính CSS cho animation.
  */
 /** [Manual edit] Định nghĩa/chú thích baseItem.anim 
  * @typedef {object} parsedDataFormat.baseItemAnim
@@ -78,17 +68,15 @@ import * as utils from './utils.js';
  * @property {(number|null)} t2 Thời điểm kết thúc, ms tính từ đầu dòng;
  * @property {(number|null)} easing Số accel thô 
  * (default 1 = linear; >1 nhanh dần, <1 chậm dần).
- * @property {parsedDataFormat.baseItemDelta} target Tag 2.4.1 và 2.3.1. 
+ * @property {parsedDataFormat.tagOverrideControls} target
  * (các tag khác xử lí trước khi đưa vào)
- * \k* nằm trong 2.4.2. (to-do: vì sao?)
  */
 /** [Manual edit] Định nghĩa/chú thích lineSubCss trong lineCss[i] 
  * @typedef {typeof utils.globalCss & ReturnType<typeof utils.alignmentToCss>} parsedDataFormat.lineSubCss
- * Ghép thuộc tính từ utils.globalCss và utils.alignmentToCss (2.2). to-do: clip (2.1)?
+ * Ghép thuộc tính từ utils.globalCss và utils.alignmentToCss
  * 
  * Đo bằng cqw/cqh để giảm khối lượng tính.
  */
-
 /** [Manual edit] Định nghĩa/chú thích parsedDataFormat.tagOverrideControls 
  * Là danh sách các biến CSS trong segmentSubCss và lineSubCss mà tagProcess có thể ghi đè.
  * @typedef {object} parsedDataFormat.tagOverrideControls
@@ -125,7 +113,6 @@ import * as utils from './utils.js';
  * @property {number} [--skew-x] \fax điều khiển skewX (gọi utils.scaleAngleToCss)
  * @property {number} [--skew-y] \fay điều khiển skewY (gọi utils.scaleAngleToCss)
  */
-
 /** Regex nhận diện tag karaoke: \k / \kf / \ko + duration (số, centisecond trong file).
  * KHÔNG match \K (không xử lí) và \kt (wontfix v1+). Nhóm 1 = type, nhóm 2 = duration raw (cs).
  */
@@ -167,25 +154,9 @@ function splitOverrideTagsTransform(text) {
 	return tags;
 }
 
-/** [arena.ai] Áp một tag **Segment-level Transformable** vào state tạm của
- * static item hoặc của một scope `\t(...)`.
- *
- * Đây là hợp của nhóm cũ 2.4.1 (font size/spacing/scale) và 2.3.1
- * (màu/alpha/border/shadow/blur/rotate/shear). Hàm chỉ ghi state; caller phải
- * gọi `emitDecoration()` đúng một lần sau khi đã quét hết tags của item/scope.
- * Nhờ vậy các cặp phụ thuộc nhau như màu + alpha hoặc x/y shadow được resolve
- * từ cùng một snapshot, thay vì cook CSS cho từng tag.
- *
- * Không xử lí các tag đã khóa theo phân loại mới: `\be`, `\xbord`, `\ybord`.
- * `\u`, `\s` và karaoke là Segment-level Non-transformable.
- *
+/** [Manual edit] Áp chỉ tag Segment-level Transformable vào delta hoặc target của \t
  * @param {string} tag Tag raw đơn, bắt đầu bằng '\\'.
- * @param {{
- *   textCss: Object,
- *   scaleX: (number|undefined),
- *   scaleY: (number|undefined),
- *   decoration: ReturnType<typeof newDecorationState>,
- * }} context State tạm của static item hoặc scope `\t(...)`.
+ * @param {parsedDataFormat.tagOverrideControls} context delta hoặc target của \t
  * @returns {boolean} `true` khi tag thuộc nhóm này, kể cả lúc giá trị raw lỗi.
  */
 function applySegmentLevelTransformable(tag, context) {
