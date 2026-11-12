@@ -163,6 +163,7 @@ const TRANSFORMABLE_NUMERIC_TAGS = [
 	['bord', ['--outline']], ['xshad', ['--shadow-x']], ['yshad', ['--shadow-y']],
 	['shad', ['--shadow-x', '--shadow-y']],
 ];
+// to-do: sửa đoạn colorMatch, alphaMatch
 /** [arena.ai] Áp một tag transformable vào các biến override thô.
  * @param {string} tag Tag raw đơn.
  * @param {parsedDataFormat.tagOverrideControls} context Delta hoặc target của \t.
