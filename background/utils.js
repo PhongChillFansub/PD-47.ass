@@ -84,33 +84,59 @@ export function encodeURISegment(segment) {
  * 
  * Chú ý: nếu đầu vào là alpha, xử lí như màu đỏ (r: alpha, g: 0, b: 0, a: 0). Do đó phải lấy dữ liệu của r thay vì a)
  * 
- * Các trường hợp rác trả về [null, null, null, null]
+ * Các trường hợp rác trả về {r: 0, g: 0, b: 0, a: 0}
  * @param {string|number} raw Chuỗi màu đầu vào.
- * @returns {Object<{r: number, g: number, b: number, a: number}>} Object đầu ra {r, g, b, a}. Nếu đầu vào ko chứa dữ liệu, đầu ra là null (vd: #RRGGBB -> [r, g, b, null])
+ * @returns {Object<{r: number, g: number, b: number, a: number}>} Object đầu ra {r, g, b, a}.
  */
 export function parseAegisubHexToObject(raw) {
-	if (typeof raw !== 'string' && typeof raw !== 'number') return {r: null, g: null, b: null, a: null};
+	// 1. Xử lý rác (null, undefined, hoặc không phải string/number)
+	if (raw === null || raw === undefined) return {r: 0, g: 0, b: 0, a: 0};
+	
+	// 2. Xử lý nếu raw là string số thuần (ví dụ: "255", "7FFFFFFFF")
+	const numStr = typeof raw === 'number' ? String(raw) : (typeof raw === 'string' ? raw.trim() : null);
+	if (numStr !== null && /^\d+$/.test(numStr)) {
+		const n = BigInt(numStr);
+		let hex = n.toString(16).toUpperCase();
+		
+		// Nếu quá FFFFFFFF (8 ký tự hex), bỏ qua đoạn từ '7' trở đi (lấy 8 ký tự cuối)
+		if (hex.length > 8) {
+			hex = hex.slice(-8); 
+		}
+		
+		const hex8 = hex.padStart(8, '0');
+		const a = (255 - Number.parseInt(hex8.slice(0, 2), 16)) / 255;
+		const b = Number.parseInt(hex8.slice(2, 4), 16);
+		const g = Number.parseInt(hex8.slice(4, 6), 16);
+		const r = Number.parseInt(hex8.slice(6, 8), 16);
+		
+		return {r, g, b, a};
+	}
+
 	const s = String(raw).trim();
+	if (s === '') return {r: 0, g: 0, b: 0, a: 0};
+
 	/** Xử lí trong trường hợp html */
 	const html = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.exec(s);
 	if (html) {
 		const h = html[1];
-		return {
-			r: Number.parseInt(h.slice(0, 2), 16),
-			g: Number.parseInt(h.slice(2, 4), 16),
-			b: Number.parseInt(h.slice(4, 6), 16),
-			a: h.length === 8 ? Number.parseInt(h.slice(6, 8), 16) / 255 : 0,
-		};
+		const r = Number.parseInt(h.slice(0, 2), 16);
+		const g = Number.parseInt(h.slice(2, 4), 16);
+		const b = Number.parseInt(h.slice(4, 6), 16);
+		// Nếu 6 số thì alpha = 1 (100%), nếu 8 số thì tính theo AA
+		const a = h.length === 8 ? Number.parseInt(h.slice(6, 8), 16) / 255 : 1;
+		return {r, g, b, a};
 	}
+
 	const hex = s.replace(/[^0-9a-f]/gi, '');
-	if (hex === '') return {r: null, g: null, b: null, a: null};
+	if (hex === '') return {r: 0, g: 0, b: 0, a: 0};
+
 	// Đưa về dạng AABBGGRR. (2 chữ số -> RR (alpha đọc như AA); 6 c.số -> BBGGRR, 8 -> AABBGGRR)
 	const hex8 = hex.padStart(8, '0');
 	const a = (255 - Number.parseInt(hex8.slice(0, 2), 16)) / 255;
 	const b = Number.parseInt(hex8.slice(2, 4), 16);
 	const g = Number.parseInt(hex8.slice(4, 6), 16);
 	const r = Number.parseInt(hex8.slice(6, 8), 16);
-	if ([r,g,b,a].some(v => v !== null && Number.isNaN(v))) return {r: null, g: null, b: null, a: null};
+	
 	return {r, g, b, a};
 }
 /** [arena.ai] Phân tích một CSS `rgba(r, g, b, a)` đã được parser lưu trong style để
