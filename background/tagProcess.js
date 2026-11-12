@@ -1,4 +1,4 @@
-// v0.1.0 11nov26
+// v0.1.0 12nov26
 // alpha mode
 // Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] ĐẦY ĐỦ
 // { base, collision, clip }.
@@ -79,39 +79,38 @@ import * as utils from './utils.js';
  */
 /** [Manual edit] Định nghĩa/chú thích parsedDataFormat.tagOverrideControls 
  * Là danh sách các biến CSS trong segmentSubCss và lineSubCss mà tagProcess có thể ghi đè.
- * @typedef {object} parsedDataFormat.tagOverrideControls
- * @property {number} [left] \pos, \move điều khiển vị trí (ghi trực tiếp, đv cqw)
- * @property {number} [top] \pos, \move điều khiển vị trí (ghi trực tiếp, đv cqh)
- * @property {number} [--align-x] \an ghi đè (gọi utils.resolveAlignment)
- * @property {number} [--align-y] \an ghi đè (gọi utils.resolveAlignment)
- * @property {number} [--origin-delta-x] renderer tính origin của từng segment
- * @property {number} [--origin-delta-y] renderer tính origin của từng segment
- * (\org chỉ ghi origin của line, renderer phải tính delta origin của từng segment, 
- * từ origin của line này và left/top; và ko sửa vào --origin)
- * @property {string} [--style-name] \r điều khiển style
- * @property {string} [--font-name] \fn điều khiển fontName
- * @property {number} [--font-size] \fs điều khiển fontSize
- * @property {string} [--color1] \1c, \1a điều khiển primaryColour
- * @property {string} [--color2] \2c, \2a điều khiển secondaryColour
- * @property {string} [--color3] \3c, \3a điều khiển outlineColour (gọi utils.outlineStyleToCss)
- * @property {string} [--color4] \4c, \4a điều khiển backColour (gọi utils.outlineStyleToCss, utils.shadBlurToCss)
- * @property {number} [--bold] \b điều khiển bold (chạy 'font-weight': utils.boldToWeight(style.bold),)
- * @property {number} [--italic] \i điều khiển italic (chạy 'font-style': style.italic ? 'italic' : 'normal')
- * @property {boolean} [--underline] \u điều khiển underline (gọi utils.decorationToCss)
- * @property {boolean} [--strike-out] \s điều khiển strikeOut (gọi utils.decorationToCss)
- * @property {number} [--spacing] \fsp điều khiển letter-spacing
- * @property {number} [--outline] \bord điều khiển độ dày viền (gọi utils.outlineWidthToCss)
- * @property {number} [--shadow-x] \shad điều khiển shadow-x (gọi utils.shadBlurToCss)
- * @property {number} [--shadow-y] \shad điều khiển shadow-y (gọi utils.shadBlurToCss)
- * @property {number} [--blur] \blur điều khiển blur (gọi utils.shadBlurToCss)
- * @property {string} [--inline-fx] \- điều khiển inline-fx
- * @property {number} [--scale-x] \fscx điều khiển scaleX (gọi utils.scaleAngleToCss)
- * @property {number} [--scale-y] \fscy điều khiển scaleY (gọi utils.scaleAngleToCss)
- * @property {number} [--angle-x] \frx điều khiển angleX (gọi utils.scaleAngleToCss)
- * @property {number} [--angle-y] \fry điều khiển angleY (gọi utils.scaleAngleToCss)
- * @property {number} [--angle-z] \frz điều khiển angleZ (gọi utils.scaleAngleToCss)
- * @property {number} [--skew-x] \fax điều khiển skewX (gọi utils.scaleAngleToCss)
- * @property {number} [--skew-y] \fay điều khiển skewY (gọi utils.scaleAngleToCss)
+ * @typedef {{
+ * left?: number, // \pos, \move điều khiển vị trí (đv cqw)
+ * top?: number, // \pos, \move điều khiển vị trí (đv cqh)
+ * '--align-x'?: number, // \an (utils.resolveAlignment)
+ * '--align-y'?: number, // \an (utils.resolveAlignment)
+ * '--origin-delta-x'?: number, // Renderer tính origin của từng segment từ origin line và left/top.
+ * '--origin-delta-y'?: number, // Renderer không sửa --origin của line.
+ * '--style-name'?: string, // \r điều khiển style
+ * '--font-name'?: string, // \fn điều khiển fontName
+ * '--font-size'?: number, // \fs điều khiển fontSize
+ * '--color1'?: string, // \1c, \1a điều khiển primaryColour
+ * '--color2'?: string, // \2c, \2a điều khiển secondaryColour
+ * '--color3'?: string, // \3c, \3a điều khiển outlineColour (utils.outlineStyleToCss)
+ * '--color4'?: string, // \4c, \4a điều khiển backColour (utils.outlineStyleToCss, utils.shadBlurToCss)
+ * '--bold'?: number, // \b điều khiển bold (utils.boldToWeight)
+ * '--italic'?: number, // \i điều khiển italic
+ * '--underline'?: boolean, // \u điều khiển underline (utils.decorationToCss)
+ * '--strike-out'?: boolean, // \s điều khiển strikeOut (utils.decorationToCss)
+ * '--spacing'?: number, // \fsp điều khiển letter-spacing
+ * '--outline'?: number, // \bord điều khiển độ dày viền (utils.outlineWidthToCss)
+ * '--shadow-x'?: number, // \shad điều khiển shadow-x (utils.shadBlurToCss)
+ * '--shadow-y'?: number, // \shad điều khiển shadow-y (utils.shadBlurToCss)
+ * '--blur'?: number, // \blur điều khiển blur (utils.shadBlurToCss)
+ * '--inline-fx'?: string, // \- điều khiển inline-fx
+ * '--scale-x'?: number, // \fscx điều khiển scaleX (utils.scaleAngleToCss)
+ * '--scale-y'?: number, // \fscy điều khiển scaleY (utils.scaleAngleToCss)
+ * '--angle-x'?: number, // \frx điều khiển angleX (utils.scaleAngleToCss)
+ * '--angle-y'?: number, // \fry điều khiển angleY (utils.scaleAngleToCss)
+ * '--angle-z'?: number, // \frz điều khiển angleZ (utils.scaleAngleToCss)
+ * '--skew-x'?: number, // \fax điều khiển skewX (utils.scaleAngleToCss)
+ * '--skew-y'?: number // \fay điều khiển skewY (utils.scaleAngleToCss)
+ * }} parsedDataFormat.tagOverrideControls
  */
 /** Regex nhận diện tag karaoke: \k / \kf / \ko + duration (số, centisecond trong file).
  * KHÔNG match \K (không xử lí) và \kt (wontfix v1+). Nhóm 1 = type, nhóm 2 = duration raw (cs).
@@ -121,6 +120,8 @@ const KARAOKE_RE = /^\\(k[fo]?)(\d+(?:\.\d+)?)/;
 const NUMERIC_TOKEN_RE = /^[+-]?(\d+\.?\d*|\.\d+)$/;
 /** Tên style fallback khi styleRef thiếu (dùng cho \r rỗng) — khớp FALLBACK_DEFAULT_STYLE.name */
 const FALLBACK_STYLE_NAME = 'Default';
+/** [arena.ai] Field màu style theo kênh ASS. */
+const STYLE_COLOR_FIELD = Object.freeze({ 1: 'primaryColour', 2: 'secondaryColour', 3: 'outlineColour', 4: 'backColour' });
 /** [arena.ai] Token có phải số thuần (dùng làm tham số t1/t2/accel của \t) không? */
 function isNumericToken(token) {
 	return NUMERIC_TOKEN_RE.test(token);
@@ -153,11 +154,7 @@ function splitOverrideTagsTransform(text) {
 	if (start !== -1) pushTag(text.slice(start));
 	return tags;
 }
-
-/** Field màu style theo kênh ASS. */
-const STYLE_COLOR_FIELD = Object.freeze({ 1: 'primaryColour', 2: 'secondaryColour', 3: 'outlineColour', 4: 'backColour' });
-
-/** Tag số có tiền tố dài hơn phải đứng trước tag tiền tố ngắn hơn (fsc* / fsp trước fs, fr* trước fr). */
+/** [arena.ai] Tag số có tiền tố dài hơn phải đứng trước tag tiền tố ngắn hơn (fsc* / fsp trước fs, fr* trước fr). */
 const TRANSFORMABLE_NUMERIC_TAGS = [
 	['fscx', ['--scale-x']], ['fscy', ['--scale-y']],
 	['fsc', ['--scale-x', '--scale-y']], ['fsp', ['--spacing']], ['fs', ['--font-size']],
@@ -166,49 +163,56 @@ const TRANSFORMABLE_NUMERIC_TAGS = [
 	['bord', ['--outline']], ['xshad', ['--shadow-x']], ['yshad', ['--shadow-y']],
 	['shad', ['--shadow-x', '--shadow-y']],
 ];
-
-/** Áp một tag transformable vào các biến override thô, không nấu CSS tại đây.
+/** [arena.ai] Áp một tag transformable vào các biến override thô.
  * @param {string} tag Tag raw đơn.
  * @param {parsedDataFormat.tagOverrideControls} context Delta hoặc target của \t.
- * @param {Object} styleRef Style dòng, dùng làm fallback cho màu/alpha.
- * @param {{alpha: Object, fallback?: parsedDataFormat.tagOverrideControls}} colorState Trạng thái alpha tạm ngoài context.
+ * @param {{
+ * 	lineSub: parsedDataFormat.lineSubCss, 
+ * 	segmentSub: parsedDataFormat.segmentSubCss
+ * }} styleRef Style dòng, dùng để lấy giá trị fallback khi cần.
  * @returns {boolean} Tag thuộc nhóm này (kể cả khi giá trị không hợp lệ).
  */
-function applySegmentLevelTransformableTags(tag, context, styleRef, colorState) {
+function applySegmentLevelTransformableTags(tag, context, styleRef) {
+	// Xét các array con [name, Array<key>] trong TRANSFORMABLE_NUMERIC_TAGS; theo thứ tự.
 	for (const [name, keys] of TRANSFORMABLE_NUMERIC_TAGS) {
+		// Nếu tag ko đúng name, bỏ qua;
 		if (!tag.startsWith(`\\${name}`)) continue;
+		// Tách name khỏi tag, lấy phần còn lại làm raw; nếu raw là số thuần, áp vào context.
 		const raw = tag.slice(name.length + 1);
+		// Check số của raw; nếu đúng, áp vào context.
 		if (NUMERIC_TOKEN_RE.test(raw)) {
+			// Nếu tag là \fsc, \shad hoặc tương tự thì áp vào nhiều key.
 			for (const key of keys) context[key] = Number(raw);
 		}
 		return true;
 	}
-
+	// Đoạn áp dụng với các tag màu \1c, \2c, \3c, \4c và alpha \1a, \2a, \3a, \4a
 	const colorMatch = /^\\([1-4]?)c&(.+)$/.exec(tag);
+	// Check regex \*c (to-do: nhận cả số thay vì dạng &H*& của utils.parseAegisubHex).
 	if (colorMatch) {
 		const raw = colorMatch[2];
 		if (!/^H[0-9a-f]{1,8}&?$/i.test(raw)) return true;
 		const channel = Number(colorMatch[1] || 1);
 		const key = `--color${channel}`;
-		const color = utils.parseAegisubHex(raw);
-		const previous = utils.parseCssRgba(context[key] ?? colorState.fallback?.[key] ?? styleRef?.[STYLE_COLOR_FIELD[channel]]);
+		const color = utils.parseAegisubHexToObject(raw);
+		const previous = utils.parseCssRgbaToObject(context[key] ?? colorState.fallback?.[key] ?? styleRef?.[STYLE_COLOR_FIELD[channel]]);
 		// Màu 8 chữ số chứa alpha; màu ngắn hơn chỉ đổi RGB.
 		if (raw.replace(/^H/i, '').replace(/&$/, '').length <= 6) color.a = colorState.alpha[channel] ?? previous?.a ?? 1;
 		colorState.alpha[channel] = color.a;
-		context[key] = utils.hexToRgba(color);
+		context[key] = utils.hexObjectToRgba(color);
 		return true;
 	}
 	const alphaMatch = /^\\(alpha|[1-4]a)&(.*)$/.exec(tag);
 	if (alphaMatch) {
 		const raw = alphaMatch[2];
 		if (!/^H[0-9a-f]{1,2}&?$/i.test(raw)) return true;
-		const alpha = (255 - utils.hexToAlpha(raw)) / 255;
+		const alpha = (255 - utils.hexObjectToAlpha(raw)) / 255;
 		const channels = alphaMatch[1] === 'alpha' ? [1, 2, 3, 4] : [Number(alphaMatch[1][0])];
 		for (const channel of channels) {
 			const key = `--color${channel}`;
 			colorState.alpha[channel] = alpha;
-			const color = utils.parseCssRgba(context[key] ?? colorState.fallback?.[key] ?? styleRef?.[STYLE_COLOR_FIELD[channel]]);
-			if (color) context[key] = utils.hexToRgba({ ...color, a: alpha });
+			const color = utils.parseCssRgbaToObject(context[key] ?? colorState.fallback?.[key] ?? styleRef?.[STYLE_COLOR_FIELD[channel]]);
+			if (color) context[key] = utils.hexObjectToRgba({ ...color, a: alpha });
 		}
 		return true;
 	}

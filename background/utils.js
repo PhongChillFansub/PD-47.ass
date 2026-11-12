@@ -1,4 +1,4 @@
-// v0.1.0 07nov26
+// v0.1.0 12nov26
 "use strict";
 const extensionName = "PD-47.ass";
 const HTML_ENTITIES = {
@@ -76,17 +76,20 @@ export function decodeURISegment(segment) {
 export function encodeURISegment(segment) {
   return encodeURIComponent(decodeURISegment(segment));
 }
-/** Chuyển chuỗi màu và alpha Aegisub sang định dạng rgba() dùng cho CSS.
- * Hỗ trợ các định dạng màu &HAABBGGRR, &HBBGGRR&, #RRGGBB[AA] và alpha &HAA&.
+
+
+// to-do: sửa lại đoạn này, cho phép nhận đầu vào string số. (dùng trong override tag)
+/** [Manual edit] Chuyển chuỗi màu và alpha Aegisub sang định dạng rgba() dùng cho CSS.
+ * Hỗ trợ các định dạng màu &HAABBGGRR, &HBBGGRR&, #RRGGBB[AA], string số và alpha &HAA&, string số.
  * 
  * Chú ý: nếu đầu vào là alpha, xử lí như màu đỏ (r: alpha, g: 0, b: 0, a: 0). Do đó phải lấy dữ liệu của r thay vì a)
  * 
  * Các trường hợp rác trả về [null, null, null, null]
- * @param {string} raw Chuỗi màu đầu vào.
+ * @param {string|number} raw Chuỗi màu đầu vào.
  * @returns {Object<{r: number, g: number, b: number, a: number}>} Object đầu ra {r, g, b, a}. Nếu đầu vào ko chứa dữ liệu, đầu ra là null (vd: #RRGGBB -> [r, g, b, null])
  */
-export function parseAegisubHex(raw) {
-	if (typeof raw !== 'string') return {r: null, g: null, b: null, a: null};
+export function parseAegisubHexToObject(raw) {
+	if (typeof raw !== 'string' && typeof raw !== 'number') return {r: null, g: null, b: null, a: null};
 	const s = String(raw).trim();
 	/** Xử lí trong trường hợp html */
 	const html = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.exec(s);
@@ -110,8 +113,7 @@ export function parseAegisubHex(raw) {
 	if ([r,g,b,a].some(v => v !== null && Number.isNaN(v))) return {r: null, g: null, b: null, a: null};
 	return {r, g, b, a};
 }
-/**
- * Phân tích một CSS `rgba(r, g, b, a)` đã được parser lưu trong style để
+/** [arena.ai] Phân tích một CSS `rgba(r, g, b, a)` đã được parser lưu trong style để
  * tagProcess có thể giữ RGB của style khi override chỉ thay alpha. Hàm cũng
  * nhận object kênh màu nội bộ để các caller không cần serialize rồi parse lại.
  *
@@ -123,7 +125,7 @@ export function parseAegisubHex(raw) {
  * @param {string|{r: number, g: number, b: number, a?: number}|null|undefined} raw CSS rgba hoặc các kênh màu.
  * @returns {{r: number, g: number, b: number, a: number}|null} Các kênh màu số, hoặc `null` khi input không hợp lệ/không hỗ trợ.
  */
-export function parseCssRgba(raw) {
+export function parseCssRgbaToObject(raw) {
 	if (raw && typeof raw === 'object'
 		&& Number.isFinite(raw.r) && Number.isFinite(raw.g) && Number.isFinite(raw.b)) {
 		return { r: raw.r, g: raw.g, b: raw.b, a: Number.isFinite(raw.a) ? raw.a : 1 };
@@ -138,28 +140,27 @@ export function parseCssRgba(raw) {
 	if (![r, g, b, a].every(Number.isFinite)) return null;
 	return { r, g, b, a };
 }
-/**
- * Chuyển đổi màu hex Aegisub sang định dạng rgba() cho CSS
- * @param {string|Object<{r: number, g: number, b: number, a: number}>} raw 
+/** [arena.ai] Chuyển đổi màu hex Aegisub sang định dạng rgba() cho CSS
+ * @param {Object<{r: number, g: number, b: number, a: number}>} raw 
  * @returns {string|null} Chuỗi rgba(r, g, b, a) hoặc null nếu đầu vào không hợp lệ
  */
-export function hexToRgba(raw) {
-	if (raw == null || (typeof raw !== 'string' && typeof raw !== 'object')) return null;
-	const {r, g, b, a} = (typeof raw === 'string') ? parseAegisubHex(raw) : raw;
-	if (r == null || g == null || b == null || a == null) return null;
-	return `rgba(${r}, ${g}, ${b}, ${a.toFixed(2)})`;
+export function hexObjectToRgba(raw) {
+    if (raw == null || typeof raw !== 'object') return null;
+    const { r, g, b, a } = raw;
+    if (![r, g, b, a].every(Number.isFinite)) return null;
+    return `rgba(${r}, ${g}, ${b}, ${a.toFixed(2)})`;
 }
-/**
- * Chuyển đổi alpha hex Aegisub sang giá trị alpha cho CSS
- * @param {string|Object<{r: number, g: number, b: number, a: number}>} raw Ở đây chỉ nhận r.
+/** [arena.ai] Chuyển đổi alpha hex Aegisub sang giá trị alpha cho CSS
+ * @param {Object<{r: number, g: number, b: number, a: number}>} raw Ở đây chỉ nhận r.
  * @returns {number|null} Giá trị alpha (r, thô) hoặc null nếu đầu vào không hợp lệ
  */
-export function hexToAlpha(raw) {
-	if (raw == null || (typeof raw !== 'string' && typeof raw !== 'object')) return null;
-	const {r, g, b, a} = (typeof raw === 'string') ? parseAegisubHex(raw) : raw;
-	if (r == null) return null;
-	return r;
+export function hexObjectToAlpha(raw) {
+    if (raw == null || typeof raw !== 'object') return null;
+    const { r } = raw;
+    return Number.isFinite(r) ? r : null;
 }
+
+
 /** [Manual edit] Xử lí chung kiểu viền (bao quanh chữ hoặc hộp) và áp màu (\3c, \3a)
  * @param {number} borderStyle Kiểu viền: 1 (viền chữ), 3 (hộp màu outline), 4 (hộp màu nền).
  * @param {string|null} outlineColor Màu viền (\3c)
