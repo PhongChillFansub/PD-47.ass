@@ -1,4 +1,4 @@
-// v0.1.0 07nov26
+// v0.1.0 14nov26
 // beta mode
 // Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
@@ -808,7 +808,7 @@ export function parser(doStripTags = false, rawText) {
 					// Đặt biến tạm thời styleValue lấy bằng styleValues[styleIndex] (hoặc trống nếu i vượt quá. Có thể vượt quá à?) 
                     if (styleField.toLowerCase().includes('colour')) {
 						// Nhận diện các styleValue có định dạng màu (tìm theo styleField tương ứng của nó.)
-                        styleValue = utils.hexToRgba(styleValue);
+                        styleValue = utils.hexObjectToRgba(utils.parseAegisubToObject(styleValue));
 						// Đổi định dạng màu.
                     }
                     style[toCamelCase(styleField,styleField.includes("Font") ? [0, 4] : [0])] = styleValue;

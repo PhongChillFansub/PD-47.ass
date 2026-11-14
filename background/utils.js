@@ -1,4 +1,4 @@
-// v0.1.0 13nov26
+// v0.1.0 14nov26
 "use strict";
 const extensionName = "PD-47.ass";
 const HTML_ENTITIES = {
@@ -77,26 +77,19 @@ export function encodeURISegment(segment) {
   return encodeURIComponent(decodeURISegment(segment));
 }
 /** [Manual edit] Chuyển chuỗi màu và alpha Aegisub sang định dạng rgba() dùng cho CSS.
- * Hỗ trợ các định dạng string màu/alpha: &HAABBGGRR, &HBBGGRR&, #RRGGBB[AA], string số hệ 10.
+ * Hỗ trợ các định dạng string màu/alpha: &HAABBGGRR, &HBBGGRR&/BBGGRR, #RRGGBB[AA]
  * 
- * Các trường hợp rác trả về {r: 0, g: 0, b: 0, a: 0}
- * 
- * Ghi chú: hiện tại chưa thể kiểm chứng thuật toán tag \*c với đầu vào string số.
- * @param {string} raw Chuỗi màu đầu vào.
+ * Các trường hợp rác trả về {r: 0, g: 0, b: 0, a: 1} (màu đen, alpha 1).
+ * @param {string} raw Chuỗi màu đầu vào; nếu trống trả về {r: 0, g: 0, b: 0, a: 1}.
  * @returns {Object<{r: number, g: number, b: number, a: number}>} Object đầu ra {r, g, b, a}.
  */
 export function parseAegisubToObject(raw) {
 	// 1. Chỉ nhận string
-	if (typeof raw !== 'string' || raw.trim() === '') return {r: 0, g: 0, b: 0, a: 0};
+	if (typeof raw !== 'string' || raw.trim() === '') return {r: 0, g: 0, b: 0, a: 1};
 	/** String sau lọc tạp */
 	const numStr = raw.trim();
 	let hex8 = 0;
-	// 2. Đưa string số hệ 10 (nếu đúng) về dạng AABBGGRR (8 ký tự hex), 
-	// rồi lưu vào hex8 để parse tiếp.
-	if (/^\d+$/.test(numStr)) {
-		hex8 = BigInt(numStr).toString(16).toUpperCase().slice(-8).padStart(8, '0');
-	}
-	/** 3. Xử lí trong trường hợp html */
+	/** 2. Xử lí trong trường hợp html */
 	const html = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i.exec(numStr);
 	if (html) {
 		const h = html[1];
@@ -107,18 +100,19 @@ export function parseAegisubToObject(raw) {
 		const a = h.length >= 8 ? Number.parseInt(h.slice(6, 8), 16) / 255 : 1;
 		return {r, g, b, a};
 	}
-	/** 4. Xử lí trong trường hợp là định dạng của Aegisub */
-	const aegisub = /^&H([0-9a-f]+)(&?)$/i.exec(numStr);
-	// Nếu ko phải thì là định dạng ko hợp lệ, trả về {r: 0, g: 0, b: 0, a: 0}
-	if (!aegisub) return {r: 0, g: 0, b: 0, a: 0};
-	if (aegisub[2] === '&') {
-		// Định dạng 6 chữ hay 8 chữ thì đều chỉ lấy 6/8 chữ số cuối
-		// Ở 6 chữ coi như alpha = 1 nên điền FF
-		// Chú ý: nếu là 2 chữ, thì ở đây sẽ thành FFFFFFAA (vẫn lấy alpha từ r)
-		hex8 = aegisub[1].slice(-6).padStart(8, 'F');
-	} else {
-		hex8 = aegisub[1].slice(-8).padStart(8, '0');
+	/** 3. Xử lí trong trường hợp &HAABBGGRR; khác thì coi như &HBBGGRR&/BBGGRR fallback rgba(0,0,0,1) */
+	const aegisub = /(^&H)?([0-9a-f]+)$/i.exec(numStr);
+	// Nếu ko phải thì là định dạng ko hợp lệ, trả về {r: 0, g: 0, b: 0, a: 1}
+	if (!aegisub) {
+		return {r: 0, g: 0, b: 0, a: 1};
 	}
+	hex8 = numStr.startsWith('&H') ?
+		// Định dạng 8 chữ, lấy 8 chữ cuối
+		aegisub[2].slice(-8).padStart(8, '0') :
+		// Định dạng 6 chữ, lấy 6 chữ cuối, điền FF vào alpha (coi alpha = 1)
+		// Chú ý: nếu là 2 chữ, thì ở đây sẽ thành FFFFFFAA (vẫn lấy alpha từ RR = AA)
+		aegisub[2].slice(-6).padStart(8, 'F');
+	// Hint: tag \*a, \*c sẽ phải xóa &H đầu và & cuối; &HBBGGRR& = BBGGRR.
 	const a = (255 - Number.parseInt(hex8.slice(0, 2), 16)) / 255;
 	const b = Number.parseInt(hex8.slice(2, 4), 16);
 	const g = Number.parseInt(hex8.slice(4, 6), 16);

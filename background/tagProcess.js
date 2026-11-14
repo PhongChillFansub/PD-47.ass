@@ -191,9 +191,12 @@ function applySegmentLevelTransformableTags(tag, context, styleRef) {
 	const colorMatch = /^\\([1-4]?)c&(.+)$/.exec(tag);
 	// Check regex \*c (to-do: nhận cả số thay vì dạng &H*& của utils.parseAegisubHex).
 	if (colorMatch) {
+		// Kênh màu (nếu tag \c thì channel = 1; còn lại thì theo số 1-4). 
+		// Nếu tag không hợp lệ, bỏ qua.
+		const channel = Number(colorMatch[1] || 1);
 		const raw = colorMatch[2];
 		if (!/^H[0-9a-f]{1,8}&?$/i.test(raw)) return true;
-		const channel = Number(colorMatch[1] || 1);
+		
 		const key = `--color${channel}`;
 		const color = utils.parseAegisubHexToObject(raw);
 		const previous = utils.parseCssRgbaToObject(context[key] ?? colorState.fallback?.[key] ?? styleRef?.[STYLE_COLOR_FIELD[channel]]);
