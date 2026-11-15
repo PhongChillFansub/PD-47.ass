@@ -146,14 +146,14 @@ export function parseCssRgbaToObject(raw) {
 	if (![r, g, b, a].every(Number.isFinite)) return null;
 	return { r, g, b, a };
 }
-/** [arena.ai] Chuyển đổi màu hex Aegisub sang định dạng rgba() cho CSS
+/** [arena.ai] Chuyển đổi màu từ {r,g,b,a} sang định dạng rgba() cho CSS
  * @param {Object<{r: number, g: number, b: number, a: number}>} raw 
- * @returns {string|null} Chuỗi rgba(r, g, b, a) hoặc null nếu đầu vào không hợp lệ
+ * @returns {string} Chuỗi rgba(r, g, b, a) hoặc màu đen nếu đầu vào không hợp lệ
  */
 export function hexObjectToRgba(raw) {
-    if (raw == null || typeof raw !== 'object') return null;
+    if (raw == null || typeof raw !== 'object') return `rgba(0,0,0,1)`;
     const { r, g, b, a } = raw;
-    if (![r, g, b, a].every(Number.isFinite)) return null;
+    if (![r, g, b, a].every(Number.isFinite)) return `rgba(0,0,0,1)`;
     return `rgba(${r}, ${g}, ${b}, ${a.toFixed(2)})`;
 }
 /** [arena.ai] Chuyển đổi alpha hex Aegisub sang giá trị alpha cho CSS

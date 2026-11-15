@@ -188,28 +188,49 @@ function applySegmentLevelTransformableTags(tag, context, styleRef) {
 		return true;
 	}
 	// Đoạn áp dụng với các tag màu \1c, \2c, \3c, \4c và alpha \1a, \2a, \3a, \4a
-	const colorMatch = /^\\([1-4]?)c&(.+)$/.exec(tag);
-	// Check regex \*c (to-do: nhận cả số thay vì dạng &H*& của utils.parseAegisubHex).
+	// Cho phép "\?c" hoạt động
+	const colorMatch = /^\\([1-4]?)c(.*)$/.exec(tag);
+	// Check regex \?c
 	if (colorMatch) {
 		// Kênh màu (nếu tag \c thì channel = 1; còn lại thì theo số 1-4). 
 		// Nếu tag không hợp lệ, bỏ qua.
-		const channel = Number(colorMatch[1] || 1);
-		const raw = colorMatch[2];
-		if (!/^H[0-9a-f]{1,8}&?$/i.test(raw)) return true;
-		
-		const key = `--color${channel}`;
-		const color = utils.parseAegisubHexToObject(raw);
-		const previous = utils.parseCssRgbaToObject(context[key] ?? colorState.fallback?.[key] ?? styleRef?.[STYLE_COLOR_FIELD[channel]]);
-		// Màu 8 chữ số chứa alpha; màu ngắn hơn chỉ đổi RGB.
-		if (raw.replace(/^H/i, '').replace(/&$/, '').length <= 6) color.a = colorState.alpha[channel] ?? previous?.a ?? 1;
-		colorState.alpha[channel] = color.a;
-		context[key] = utils.hexObjectToRgba(color);
+		const key = `--color${Number(colorMatch[1] || 1)}`;
+		// Check tag "\?c" => áp màu của styleRef (hoặc bỏ qua nếu ko có tag nào của kênh)
+		const raw1 = colorMatch[2].replace(/[&H]/gi, '');
+		// raw1 == "": chuỗi giá trị trống ("\?c") hoặc chuỗi giá trị toàn & với H
+		if (raw1 === "") {
+			// Nếu context đang có lệnh đè kênh màu đó
+			if (context[key]) {
+				// Thì lấy màu từ styleRef áp vào.
+				context[key] = styleRef.segmentSub[key];
+			}
+			// Nếu không thì bỏ qua tag này, return luôn.
+			return true;
+		}
+		// tag "\*c+" => Áp màu của tag
+		// Kiểm tra trong tag: chỉ lấy chuỗi chữ số hệ 16 xuất hiện đầu tiên, nếu ko có thì trả null.
+		const raw2 = /[0-9a-f]+/i.exec(colorMatch[2]);
+		// Nếu chuỗi giá trị colorMatch[2] chỉ có kí tự khác chữ số hệ 16 và khác &, H (do lọc từ đoạn raw1)
+		// tức là raw2 = null => trả màu đen
+		// Nếu trước raw[0] có kí tự ngoài & và H thì raw => màu đen
+		if (!raw2 || /[^&H]/i.test(colorMatch[2].slice(0, raw2.index))) {
+			context[key] = `rgba(0,0,0,1)`;
+			return true;
+		}
+		// Trường hợp bình thường
+		context[key] = utils.hexObjectToRgba(utils.parseAegisubToObject(raw2[0]));
 		return true;
 	}
+
+
+	// to-do: sửa đoạn alphaMatch: gộp vào đoạn colorMatch ở trên, tách kênh alpha và color
 	const alphaMatch = /^\\(alpha|[1-4]a)&(.*)$/.exec(tag);
 	if (alphaMatch) {
-		const raw = alphaMatch[2];
-		if (!/^H[0-9a-f]{1,2}&?$/i.test(raw)) return true;
+		let raw = alphaMatch[2];
+		const hexMatch = /[1-9a-f][0-9a-f]*/i.exec(raw);
+		if (!hexMatch) return true;
+		raw = `H${hexMatch[0]}`;
+		if (!/^H[0-9a-f]{1,2}$/i.test(raw)) return true;
 		const alpha = (255 - utils.hexObjectToAlpha(raw)) / 255;
 		const channels = alphaMatch[1] === 'alpha' ? [1, 2, 3, 4] : [Number(alphaMatch[1][0])];
 		for (const channel of channels) {
