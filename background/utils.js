@@ -1,4 +1,5 @@
-// v0.1.0 14nov26
+// v0.1.0 17nov26
+// beta mode
 "use strict";
 const extensionName = "PD-47.ass";
 const HTML_ENTITIES = {
@@ -158,12 +159,12 @@ export function hexObjectToRgba(raw) {
 }
 /** [arena.ai] Chuyển đổi alpha hex Aegisub sang giá trị alpha cho CSS
  * @param {Object<{r: number, g: number, b: number, a: number}>} raw Ở đây chỉ nhận r.
- * @returns {number|null} Giá trị alpha (r, thô) hoặc null nếu đầu vào không hợp lệ
+ * @returns {number|null} Giá trị alpha (r, thô) hoặc 1 nếu đầu vào không hợp lệ
  */
 export function hexObjectToAlpha(raw) {
-    if (raw == null || typeof raw !== 'object') return null;
+    if (raw == 1 || typeof raw !== 'object') return 1;
     const { r } = raw;
-    return Number.isFinite(r) ? r : null;
+    return Number.isFinite(r) ? r : 1;
 }
 /** [Manual edit] Xử lí chung kiểu viền (bao quanh chữ hoặc hộp) và áp màu (\3c, \3a)
  * @param {number} borderStyle Kiểu viền: 1 (viền chữ), 3 (hộp màu outline), 4 (hộp màu nền).

@@ -1,4 +1,4 @@
-// v0.1.0 14nov26
+// v0.1.0 17nov26
 // beta mode
 // Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
@@ -97,12 +97,16 @@ import { classify } from './tagProcess.js';
  * @property {number} --css-resize hệ số renderer quy đổi font VSFilter → CSS, ban đầu là 1.
  * @property {string} font-size cỡ chữ CSS theo cqh.
  * @property {string} line-height chiều cao dòng CSS theo cqh.
- * @property {string} --color1 màu chính thô từ style.primaryColour / \1c / \c.
+ * @property {string} --color1 màu chữ từ style.primaryColour / \1c.
+ * @property {number} --alpha1 alpha chữ từ \1a.
  * @property {string} color 'var(--color1)'.
- * @property {string} --color2 màu phụ thô từ style.secondaryColour / \2c.
- * @property {string} --color3 màu outline thô từ style.outlineColour / \3c.
+ * @property {string} --color2 màu chữ kara từ style.secondaryColour / \2c.
+ * @property {number} --alpha2 alpha chữ kara từ \2a.
+ * @property {string} --color3 màu viền từ style.outlineColour / \3c.
+ * @property {number} --alpha3 alpha viền từ \3a.
  * @property {number} --border-style BorderStyle hiệu dụng.
- * @property {string} --color4 màu shadow / box thô từ style.backColour / \4c.
+ * @property {string} --color4 màu bóng chữ từ style.backColour / \4c.
+ * @property {number} --alpha4 alpha bóng chữ từ \4a.
  * @property {string} background-color do outlineStyleToCss() route paint theo BorderStyle.
  * @property {string} -webkit-text-stroke-color do outlineStyleToCss() route paint theo BorderStyle.
  * @property {string} font-weight '400' | '700' | '<weight>' từ style.bold / \b.
@@ -553,14 +557,18 @@ function styleToCss (style, info = {}) {
 		'line-height': `calc(var(--font-size) / ${info.PlayResY} * 100cqh)`,
 		/** Biến ghi màu chính (\1c) */
 		'--color1': style.primaryColour,
+		'--alpha1': 1,
 		'color': `var(--color1)`,
 		/** Biến ghi màu thứ cấp (\2c) */
 		'--color2': style.secondaryColour,
+		'--alpha2': 1,
 		/** Biến ghi màu viền (\3c) */
 		'--color3': style.outlineColour,
+		'--alpha3': 1,
 		'--border-style': style.borderStyle,
 		/** Biến ghi màu bóng (\4c) */
 		'--color4': style.backColour,
+		'--alpha4': 1,
 		// Ở lần đầu, các hàm utils ở đây lấy dữ liệu từ style. 
 		// Khi override, lấy dữ liệu từ các biến tên kiểu CSS (vd ở đây: --border-style, --color3, --color4) thay cho các biến của style.
 		// Hàm ghi màu viền (\3c), khi override tag (\3c,\3a thì gọi hàm này.)

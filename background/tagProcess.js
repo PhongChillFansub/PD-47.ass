@@ -1,7 +1,7 @@
-// v0.1.0 12nov26
+// v0.1.0 17nov26
 // alpha mode
-// Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] ĐẦY ĐỦ
-// { base, collision, clip }.
+// Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] đầy đủ
+// xem cấu trúc lineCss[i]
 import * as utils from './utils.js';
 /** [Manual edit] Một số lưu ý liên quan đến parser-tagProcess 
  * - Chỉ import từ utils, ko import từ parser. (chỉ parser có import tagProcess)
@@ -12,12 +12,12 @@ import * as utils from './utils.js';
  * - Các tag cùng được xử lí trong 1 hàm utils -> chỉ chạy 1 lần hàm đó, 
  *   ko chạy nhiều lần các hàm utils trong 1 vòng lặp tag.
  * - Các tag ko hỗ trợ:
- * \a (dùng \an),
+ * \a (dùng \an), ko nhầm với \1a
+ * \c (dùng \1c),
  * \xbord, \ybord, (giới hạn của CSS, ko dùng svg)
  * \be (giới hạn của CSS, ko dùng svg)
  * \q (khóa \q2)
  * \fe (khóa charset UTF-8)
- * 
  */
 /** [Manual edit] Phân loại tag trong tagProcess (mới)
  * Chú ý: do khóa \q2 nên layout local (2.4 cũ) giờ tương đương decoration (2.3 cũ) 
@@ -89,10 +89,14 @@ import * as utils from './utils.js';
  * '--style-name'?: string, // \r điều khiển style
  * '--font-name'?: string, // \fn điều khiển fontName
  * '--font-size'?: number, // \fs điều khiển fontSize
- * '--color1'?: string, // \1c, \1a điều khiển primaryColour
- * '--color2'?: string, // \2c, \2a điều khiển secondaryColour
- * '--color3'?: string, // \3c, \3a điều khiển outlineColour (utils.outlineStyleToCss)
- * '--color4'?: string, // \4c, \4a điều khiển backColour (utils.outlineStyleToCss, utils.shadBlurToCss)
+ * '--color1'?: string, // \1c
+ * '--alpha1'?: number, // \1a
+ * '--color2'?: string, // \2c
+ * '--alpha2'?: number, // \2a
+ * '--color3'?: string, // \3c (utils.outlineStyleToCss)
+ * '--alpha3'?: number, // \3a (utils.outlineStyleToCss)
+ * '--color4'?: string, // \4c (utils.outlineStyleToCss, utils.shadBlurToCss)
+ * '--alpha4'?: number, // \4a (utils.outlineStyleToCss, utils.shadBlurToCss)
  * '--bold'?: number, // \b điều khiển bold (utils.boldToWeight)
  * '--italic'?: number, // \i điều khiển italic
  * '--underline'?: boolean, // \u điều khiển underline (utils.decorationToCss)
@@ -188,13 +192,43 @@ function applySegmentLevelTransformableTags(tag, context, styleRef) {
 		return true;
 	}
 	// Đoạn áp dụng với các tag màu \1c, \2c, \3c, \4c và alpha \1a, \2a, \3a, \4a
-	// Cho phép "\?c" hoạt động
-	const colorMatch = /^\\([1-4]?)c(.*)$/.exec(tag);
-	// Check regex \?c
-	if (colorMatch) {
-		// Kênh màu (nếu tag \c thì channel = 1; còn lại thì theo số 1-4). 
-		// Nếu tag không hợp lệ, bỏ qua.
-		const key = `--color${Number(colorMatch[1] || 1)}`;
+	// Chú ý: ko nhận \c, \a; 
+	// tag \alpha chỉnh cả 4 --alpha của segment cùng lúc
+	// khác so với \fad và \fade chỉnh opacity cả line; và khác với opacity (cộng dồn với rgba) của segment
+	const colorAlphaMatch = /^\\([1-4])([ac])(.*)$/.exec(tag);
+	if (colorAlphaMatch) {
+		const channel = Number(colorAlphaMatch[1]); // kênh 1..4
+		const kind = colorAlphaMatch[2]; // Loại 'c' | 'a'
+		/** Giá trị tag => Array
+		 * 
+		 * Đoạn 1: đoạn dài nhất chứa & và H, từ đầu đến trước chuỗi chữ số hệ 16 đầu tiên, hoặc trống
+		 * 
+		 * Đoạn 2: chuỗi chữ số hệ 16 đầu tiên (dài nhất), hoặc trống
+		 * 
+		 * (có thể có 0x, 0X ở giữa đoạn 1 và 2)
+		 * 
+		 * Đoạn 3: còn lại, hoặc trống
+		 */
+		const [, hex, after] = /^[&H]*(?:0[xX](?=[0-9a-fA-F]))?\s*([0-9a-fA-F]*)([\s\S]*)$/
+			.exec((colorAlphaMatch[3] ?? '').trim());
+		const colorKey = `--color${channel}`; // vẫn dạng rgba nhưng sẽ chỉ đọc rgb
+		const alphaKey = `--alpha${channel}`; // alpha 0..1 (0 = trong suốt, 1 = đặc)
+
+
+
+		// to-do: sửa tiếp đoạn này
+		if (hex !== '') {
+			// dùng parseInt(hex, 16) & 0xffffff
+		} else if (after === '') {
+			// reset về style
+		} else {
+			// đen
+		} 
+
+
+
+
+
 		// Check tag "\?c" => áp màu của styleRef (hoặc bỏ qua nếu ko có tag nào của kênh)
 		const raw1 = colorMatch[2].replace(/[&H]/gi, '');
 		// raw1 == "": chuỗi giá trị trống ("\?c") hoặc chuỗi giá trị toàn & với H
@@ -223,6 +257,67 @@ function applySegmentLevelTransformableTags(tag, context, styleRef) {
 	}
 
 
+// 	// Fallback từ style: ưu tiên segmentSub mới (--color/--alpha tách kênh),
+// 	// nếu chưa có thì parse từ style.primaryColour... (rgba string cũ)
+// 	const styleColorRaw =
+// 		styleRef?.segmentSub?.[colorKey] ??
+// 		styleRef?.[STYLE_COLOR_FIELD[channel]];
+// 	const styleAlphaRaw = styleRef?.segmentSub?.[alphaKey];
+
+// 	const fallbackColorObj = utils.parseCssRgbaToObject(styleColorRaw);
+// 	const fallbackColor = fallbackColorObj
+// 		? `rgb(${fallbackColorObj.r}, ${fallbackColorObj.g}, ${fallbackColorObj.b})`
+// 		: styleColorRaw; // giữ nguyên nếu đã là rgb()/triplet từ parser mới
+
+// 	const fallbackAlpha =
+// 		Number.isFinite(Number(styleAlphaRaw)) && styleAlphaRaw !== undefined
+// 			? Number(styleAlphaRaw)
+// 			: (fallbackColorObj?.a ?? 1);
+
+// 	// Lọc &H / & / khoảng trắng ở đầu-cuối, giữ lại phần hex
+// 	const clean = raw.replace(/[&H]/gi, '').trim();
+
+// 	// --- Nhánh COLOR: \1c, \2c, \3c, \4c ---
+// 	if (kind === 'c') {
+// 		// \1c rỗng (reset): chỉ reset RGB, giữ nguyên alpha đang override
+// 		if (clean === '') {
+// 			if (context[colorKey] !== undefined && fallbackColor !== undefined) {
+// 				context[colorKey] = fallbackColor;
+// 			}
+// 			return true;
+// 		}
+
+// 		// Giá trị rác (chứa ký tự ngoài hex) -> bỏ qua, không ghi đè
+// 		if (!/^[0-9a-f]{1,8}$/i.test(clean)) return true;
+
+// 		// Lấy 6 chữ số cuối làm BBGGRR (pad trái bằng 0 nếu thiếu).
+// 		// Nếu input 8 chữ số AABBGGRR thì bỏ qua AA để kênh alpha độc lập.
+// 		const bbggRR = clean.slice(-6).padStart(6, '0');
+// 		const b = Number.parseInt(bbggRR.slice(0, 2), 16);
+// 		const g = Number.parseInt(bbggRR.slice(2, 4), 16);
+// 		const r = Number.parseInt(bbggRR.slice(4, 6), 16);
+
+// 		context[colorKey] = `rgb(${r}, ${g}, ${b})`;
+// 		return true;
+// 	}
+
+// 	// --- Nhánh ALPHA: \1a, \2a, \3a, \4a ---
+// 	// \1a rỗng (reset): chỉ reset alpha, giữ nguyên RGB đang override
+// 	if (clean === '') {
+// 		if (context[alphaKey] !== undefined) {
+// 			context[alphaKey] = fallbackAlpha;
+// 		}
+// 		return true;
+// 	}
+
+// 	// Alpha ASS chỉ 1-2 chữ số hex (AA), rác -> bỏ qua
+// 	if (!/^[0-9a-f]{1,2}$/i.test(clean)) return true;
+
+// 	// ASS alpha đảo ngược CSS: 00 = đục, FF = trong suốt
+// 	const alpha = (255 - Number.parseInt(clean, 16)) / 255;
+// 	context[alphaKey] = Math.min(1, Math.max(0, alpha));
+// 	return true;
+// }
 	// to-do: sửa đoạn alphaMatch: gộp vào đoạn colorMatch ở trên, tách kênh alpha và color
 	const alphaMatch = /^\\(alpha|[1-4]a)&(.*)$/.exec(tag);
 	if (alphaMatch) {
