@@ -1,4 +1,4 @@
-// v0.1.0 17nov26
+// v0.1.0 18nov26
 // beta mode
 "use strict";
 const extensionName = "PD-47.ass";
@@ -77,6 +77,18 @@ export function decodeURISegment(segment) {
 export function encodeURISegment(segment) {
   return encodeURIComponent(decodeURISegment(segment));
 }
+/** [Copilot] Parse một giá trị số từ file ASS và trả về mặc định nếu ngoài phạm vi hợp lệ.
+ * @param {boolean} isInteger true nếu cần parse kiểu integer, false nếu cần parse kiểu float.
+ * @param {string|number} v Giá trị đầu vào.
+ * @param {number} def Giá trị mặc định khi parse thất bại.
+ * @param {number} [min] Giá trị tối thiểu cho phép.
+ * @param {number} [max] Giá trị tối đa cho phép.
+ * @returns {number} Giá trị đã parse, hoặc def nếu không hợp lệ/ngoài phạm vi.
+ */
+export function parseClampedNum (isInteger, v, def, min, max) {
+	const raw = isInteger ? Number.parseInt(v, 10) : Number.parseFloat(v); 
+	return Number.isNaN(raw) || (min != null && raw < min) || (max != null && raw > max) ? def : raw;
+}
 /** [Manual edit] Chuyển chuỗi màu và alpha Aegisub sang định dạng rgba() dùng cho CSS.
  * Hỗ trợ các định dạng string màu/alpha: &HAABBGGRR, &HBBGGRR&/BBGGRR, #RRGGBB[AA]
  * 
@@ -107,12 +119,10 @@ export function parseAegisubToObject(raw) {
 	if (!aegisub) {
 		return {r: 0, g: 0, b: 0, a: 1};
 	}
-	hex8 = numStr.startsWith('&H') ?
-		// Định dạng 8 chữ, lấy 8 chữ cuối
-		aegisub[2].slice(-8).padStart(8, '0') :
-		// Định dạng 6 chữ, lấy 6 chữ cuối, điền FF vào alpha (coi alpha = 1)
-		// Chú ý: nếu là 2 chữ, thì ở đây sẽ thành FFFFFFAA (vẫn lấy alpha từ RR = AA)
-		aegisub[2].slice(-6).padStart(8, 'F');
+	// Định dạng 8 chữ, lấy 8 chữ cuối
+	// Định dạng 6 chữ, lấy 6 chữ cuối, điền FF vào alpha (coi alpha = 1)
+	// Chú ý: nếu là 2 chữ, thì ở đây sẽ thành 000000AA (vẫn lấy alpha từ RR = AA)
+	hex8 = aegisub[2].slice(numStr.startsWith('&H') ? -8 : -6).padStart(8, '0');
 	// Hint: tag \*a, \*c sẽ phải xóa &H đầu và & cuối; &HBBGGRR& = BBGGRR.
 	const a = (255 - Number.parseInt(hex8.slice(0, 2), 16)) / 255;
 	const b = Number.parseInt(hex8.slice(2, 4), 16);
@@ -162,9 +172,8 @@ export function hexObjectToRgba(raw) {
  * @returns {number|null} Giá trị alpha (r, thô) hoặc 1 nếu đầu vào không hợp lệ
  */
 export function hexObjectToAlpha(raw) {
-    if (raw == 1 || typeof raw !== 'object') return 1;
-    const { r } = raw;
-    return Number.isFinite(r) ? r : 1;
+    if (raw == null || typeof raw !== 'object') return 1;
+    return Number.isFinite(raw.r) ? raw.r : 1;
 }
 /** [Manual edit] Xử lí chung kiểu viền (bao quanh chữ hoặc hộp) và áp màu (\3c, \3a)
  * @param {number} borderStyle Kiểu viền: 1 (viền chữ), 3 (hộp màu outline), 4 (hộp màu nền).

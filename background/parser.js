@@ -1,4 +1,4 @@
-// v0.1.0 17nov26
+// v0.1.0 18nov26
 // beta mode
 // Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
@@ -468,18 +468,6 @@ const convertTimeStringToMs = t => {
     const [h = 0, m = 0, s = 0, cs = 0] = Array(4 - p.length).fill(0).concat(p);
     return h * 36e5 + m * 6e4 + s * 1e3 + String(cs).padEnd(2, '0').slice(0, 2) * 10 || 0;
 };
-/** [Copilot] Parse một giá trị số từ file ASS và trả về mặc định nếu ngoài phạm vi hợp lệ.
- * @param {boolean} isInteger true nếu cần parse kiểu integer, false nếu cần parse kiểu float.
- * @param {string|number} v Giá trị đầu vào.
- * @param {number} def Giá trị mặc định khi parse thất bại.
- * @param {number} [min] Giá trị tối thiểu cho phép.
- * @param {number} [max] Giá trị tối đa cho phép.
- * @returns {number} Giá trị đã parse, hoặc def nếu không hợp lệ/ngoài phạm vi.
- */
-function parseClampedNum (isInteger, v, def, min, max) {
-	const raw = isInteger ? Number.parseInt(v, 10) : Number.parseFloat(v); 
-	return Number.isNaN(raw) || (min != null && raw < min) || (max != null && raw > max) ? def : raw;
-}
 /** [Manual edit] Kiểm tra và chuẩn hóa một style từ ASS trước khi dùng trong renderer.
  * Nếu style thiếu thông tin bắt buộc hoặc giá trị không hợp lệ, hàm sẽ trả về false để loại bỏ style đó.
  * - Cho phép style.name rỗng (Aegisub vẫn coi là hợp lệ #a1).
@@ -778,15 +766,15 @@ export function parser(doStripTags = false, rawText) {
 				// chuẩn hóa NGAY KHI LƯU 4 key quan trọng (thay vì để sau loop)
 				// để styleCss.push ở phần [V4+ Styles] chạy đúng ngay từ đầu, không cần re-map cuối file.
 				parsedData.info[k] =
-					k === 'WrapStyle' ? parseClampedNum(true, v, 0, 0, 3) :
-					k === 'PlayResX' ? parseClampedNum(true, v, 640, 640) :
-					k === 'PlayResY' ? parseClampedNum(true, v, 480, 480) :
-					k === 'LayoutResX' ? parseClampedNum(true, v, parsedData.info.PlayResX, 1) :
-					k === 'LayoutResY' ? parseClampedNum(true, v, parsedData.info.PlayResY, 1) :
+					k === 'WrapStyle' ? utils.parseClampedNum(true, v, 0, 0, 3) :
+					k === 'PlayResX' ? utils.parseClampedNum(true, v, 640, 640) :
+					k === 'PlayResY' ? utils.parseClampedNum(true, v, 480, 480) :
+					k === 'LayoutResX' ? utils.parseClampedNum(true, v, parsedData.info.PlayResX, 1) :
+					k === 'LayoutResY' ? utils.parseClampedNum(true, v, parsedData.info.PlayResY, 1) :
 					k === 'ScaledBorderAndShadow' ? v === 'yes' :
 					v; // key khác: giữ nguyên bản như cũ
-				if (k === 'LayoutResX' && Number.isFinite(parseClampedNum(true, v, NaN, 1))) hasExplicitLayoutResX = true;
-				if (k === 'LayoutResY' && Number.isFinite(parseClampedNum(true, v, NaN, 1))) hasExplicitLayoutResY = true;
+				if (k === 'LayoutResX' && Number.isFinite(utils.parseClampedNum(true, v, NaN, 1))) hasExplicitLayoutResX = true;
+				if (k === 'LayoutResY' && Number.isFinite(utils.parseClampedNum(true, v, NaN, 1))) hasExplicitLayoutResY = true;
 				if (k === 'ScriptType' && v !== 'v4.00+') { // Ko đảm bảo nếu ScriptType trong file ko phải v4.00+
 					utils.warn(`${parserLogPrefix} Tin... File chuẩn chưa em? (Extension ko hỗ trợ tốt với ScriptType=${v})`);
 				}
