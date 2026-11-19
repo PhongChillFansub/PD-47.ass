@@ -1,4 +1,4 @@
-// v0.1.0 19nov26
+// v0.1.0 20nov26
 // alpha mode
 // Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] đầy đủ
 // xem cấu trúc lineCss[i]
@@ -182,17 +182,7 @@ function splitColorArg(raw) {
 		.exec((raw ?? '').trim());
 	return [hex, after];
 }
-/** [arena.ai] Đọc 1 byte alpha (0..255) từ dãy hex của tag \*a / \alpha.
- *
- * `slice(-2)` khớp `(BYTE)wcstol(...)` của VSFilter (mod 256) và tránh lỗi làm đầy chuỗi
- * của `parseAegisubToObject` (pad trái bằng '0' sẽ biến `F` thành `0F`=15 thay vì `FF`).
- * @param {string} hex Dãy hex đã tách, khác rỗng.
- * @returns {number} 0..255
- */
-function parseHexByte(hex) {
-	return Number.parseInt(hex.slice(-2), 16);
-}
-/** [arena.ai] Áp một tag transformable vào các biến override thô.
+/** [Manual edit] Áp một tag transformable vào các biến tagOverrideControls.
  * @param {string} tag Tag raw đơn.
  * @param {parsedDataFormat.tagOverrideControls} context Delta hoặc target của \t.
  * @param {{
@@ -248,7 +238,7 @@ function applySegmentLevelTransformableTags(tag, context, styleRef) {
 		const [hex, after] = splitColorArg(alphaMasterMatch[1]);
 		/** Giá trị alpha cho cả 4 kênh; null = reset về style (mỗi kênh 1 giá trị riêng). */
 		let value = null;
-		if (hex !== '') value = utils.hexObjectToAlpha(parseHexByte(hex));
+		if (hex !== '') value = utils.hexObjectToAlpha(utils.parseAegisubToObject(hex).r);
 		else if (after !== '') value = 1; // \alpha&H&ggg -> C parse ra 0 -> AA = 00 -> đục
 		for (let n = 1; n <= 4; n++) {
 			const key = `--alpha${n}`;
@@ -257,8 +247,7 @@ function applySegmentLevelTransformableTags(tag, context, styleRef) {
 				continue;
 			}
 			// Reset: \alpha (ko arg) đưa cả 4 kênh về alpha của style.
-			const resetValue = styleRef.segmentSub?.[key];
-			if (resetValue !== undefined) context[key] = resetValue;
+			context[key] = styleRef.segmentSub[key];
 		}
 		return true;
 	}
