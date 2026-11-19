@@ -215,7 +215,7 @@ function applySegmentLevelTransformableTags(tag, context, styleRef) {
 		if (hex !== '') {
 			const value = utils.parseAegisubToObject(hex);
 			context[key] = kind == 'c' ?
-				utils.hexObjectToRgb(value) : 
+				utils.hexObjectToRgbFormat(value) : 
 				utils.hexObjectToAlpha(value.r);
 		} else if (after === '') {
 			// reset về style
