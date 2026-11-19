@@ -221,7 +221,6 @@ export function decorationToCss(underline, strikeOut) {
  * @param {number} shadowX Giá trị shadow X số thuần
  * @param {number} shadowY Giá trị shadow Y số thuần
  * @param {number} blur Giá trị blur số thuần
- * @param {string} color Màu 4
  * @returns {string} filter CSS: 'drop-shadow(...) blur(...)' hoặc 'none' nếu shadowX/Y = 0 và blur = 0
  */
 export function shadBlurToCss(shadowX, shadowY, blur, playResX, playResY, layoutResX, layoutResY, ScaledBorderAndShadow) {
@@ -241,6 +240,8 @@ export function shadBlurToCss(shadowX, shadowY, blur, playResX, playResY, layout
 		: `${value}px`;
 	return [
 		hasShadow
+			// Màu shadow là kênh 4 (--color4 / --alpha4). Dùng var() thay vì truyền màu trực tiếp
+			// để \4c / \4a override được màu/alpha của shadow mà không phải dựng lại chuỗi filter.
 			? `drop-shadow(${toCqw(xValue, shadowResX)} ${toCqh(yValue, shadowResY)} rgb(var(--color4, 0 0 0) / var(--alpha4, 1)))`
 			: '',
 		hasBlur

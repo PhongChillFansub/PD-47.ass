@@ -124,8 +124,6 @@ const KARAOKE_RE = /^\\(k[fo]?)(\d+(?:\.\d+)?)/;
 const NUMERIC_TOKEN_RE = /^[+-]?(\d+\.?\d*|\.\d+)$/;
 /** Tên style fallback khi styleRef thiếu (dùng cho \r rỗng) — khớp FALLBACK_DEFAULT_STYLE.name */
 const FALLBACK_STYLE_NAME = 'Default';
-/** [arena.ai] Field màu style theo kênh ASS. */
-const STYLE_COLOR_FIELD = Object.freeze({ 1: 'primaryColour', 2: 'secondaryColour', 3: 'outlineColour', 4: 'backColour' });
 /** [arena.ai] Token có phải số thuần (dùng làm tham số t1/t2/accel của \t) không? */
 function isNumericToken(token) {
 	return NUMERIC_TOKEN_RE.test(token);
@@ -167,7 +165,33 @@ const TRANSFORMABLE_NUMERIC_TAGS = [
 	['bord', ['--outline']], ['xshad', ['--shadow-x']], ['yshad', ['--shadow-y']],
 	['shad', ['--shadow-x', '--shadow-y']],
 ];
-// to-do: sửa đoạn colorMatch, alphaMatch
+/** [arena.ai] Tách phần tham số của tag màu/alpha thành [hex, after].
+ *
+ * Giống cách libass (`while (*str == '&' || *str == 'H') ++str; strtoll(..., 16)`) và
+ * VSFilter (`CStringW::Trim(L"&H")` + `wcstol(..., 16)`) đọc tham số: bỏ prefix `&`/`H`,
+ * chấp nhận `0x`, bỏ khoảng trắng đầu, rồi lấy **dãy chữ số hex đầu tiên**; phần còn lại
+ * là rác phía sau (bỏ qua khi parse màu).
+ *
+ * - `hex === ''` và `after === ''` → tag không có tham số (reset về style).
+ * - `hex === ''` và `after !== ''` → có tham số nhưng không có chữ số hex (C parse ra 0).
+ * @param {string|undefined} raw Tham số thô của tag (phần sau `\1c`, `\alpha`...).
+ * @returns {[string, string]} `[hex, after]`
+ */
+function splitColorArg(raw) {
+	const [, hex, after] = /^[&H]*(?:0[xX](?=[0-9a-fA-F]))?\s*([0-9a-fA-F]*)([\s\S]*)$/
+		.exec((raw ?? '').trim());
+	return [hex, after];
+}
+/** [arena.ai] Đọc 1 byte alpha (0..255) từ dãy hex của tag \*a / \alpha.
+ *
+ * `slice(-2)` khớp `(BYTE)wcstol(...)` của VSFilter (mod 256) và tránh lỗi làm đầy chuỗi
+ * của `parseAegisubToObject` (pad trái bằng '0' sẽ biến `F` thành `0F`=15 thay vì `FF`).
+ * @param {string} hex Dãy hex đã tách, khác rỗng.
+ * @returns {number} 0..255
+ */
+function parseHexByte(hex) {
+	return Number.parseInt(hex.slice(-2), 16);
+}
 /** [arena.ai] Áp một tag transformable vào các biến override thô.
  * @param {string} tag Tag raw đơn.
  * @param {parsedDataFormat.tagOverrideControls} context Delta hoặc target của \t.
@@ -200,50 +224,43 @@ function applySegmentLevelTransformableTags(tag, context, styleRef) {
 		const channel = utils.parseClampedNum(true, Number(colorAlphaMatch[1]), 1, 1, 4); // kênh 1..4
 		const kind = colorAlphaMatch[2]; // Loại 'c' | 'a'
 		const key = `--${kind=='c' ? 'color' : 'alpha'}${channel}`;
-		/** Giá trị tag => Array
-		 * 
-		 * Đoạn 1: đoạn dài nhất chứa & và H, từ đầu đến trước chuỗi chữ số hệ 16 đầu tiên, hoặc trống
-		 * 
-		 * Đoạn 2: chuỗi chữ số hệ 16 đầu tiên (dài nhất), hoặc trống
-		 * 
-		 * (có thể có 0x, 0X ở giữa đoạn 1 và 2)
-		 * 
-		 * Đoạn 3: còn lại, hoặc trống
-		 */
-		const [, hex, after] = /^[&H]*(?:0[xX](?=[0-9a-fA-F]))?\s*([0-9a-fA-F]*)([\s\S]*)$/
-			.exec((colorAlphaMatch[3] ?? '').trim());
+		const [hex, after] = splitColorArg(colorAlphaMatch[3]);
 		if (hex !== '') {
 			const value = utils.parseAegisubToObject(hex);
 			context[key] = kind == 'c' ?
 				utils.hexObjectToRgbFormat(value) : 
 				utils.hexObjectToAlpha(value.r);
 		} else if (after === '') {
-			// reset về style
-			context[key] = styleRef.segmentSub[key];
+			// reset kênh đang xét về style (ko đụng kênh còn lại).
+			const resetValue = styleRef.segmentSub?.[key];
+			if (resetValue !== undefined) context[key] = resetValue;
 		} else {
-			// chỉ trả về đen khi hex trống, mà lại có đoạn đằng sau (vd: \1c&H&ggg; \1cttt)
-			context[key] = kind == 'c' ? `rgb(0,0,0)` : 1;
+			// Chỉ trả (màu đen | alpha đục) khi hex trống mà có đoạn đằng sau (vd: \1c&H&ggg; \1cttt):
+			// C parse "ggg" thất bại -> 0, mà AA = 00 và BBGGRR = 000000.
+			context[key] = kind == 'c' ? '0 0 0' : 1;
 		}
 		return true;
 	}
-	// 3. Đoạn áp dụng với tag \alpha
-	// to-do: sửa đoạn này
+	// 3. Đoạn áp dụng với tag \alpha: cùng logic đoạn 2 nhưng lặp cả 4 kênh alpha.
+	// Không đụng --colorN (giống libass: chỉ change_alpha(&state->c[i], ...)).
 	const alphaMasterMatch = /^\\alpha(.*)$/.exec(tag);
 	if (alphaMasterMatch) {
-		let value = '';
-		const [, hex] = /^[&H]*(?:0[xX](?=[0-9a-fA-F]))?\s*([0-9a-fA-F]*)([\s\S]*)$/
-			.exec((alphaMasterMatch[1] ?? '').trim());
-		if (hex !== '') {
-			value = utils.hexObjectToAlpha(utils.parseAegisubToObject(hex).r);
-		} else {
-			// trả về 1 (hoàn toàn ko trong suốt) khi hex trống (vd: \alpha&H&ggg; \alpha)
-			// thực tế logic tương tự đoạn 2; nhưng style luôn có alpha = 1 nên gộp 2 hướng sau vào
-			value = 1;
+		const [hex, after] = splitColorArg(alphaMasterMatch[1]);
+		/** Giá trị alpha cho cả 4 kênh; null = reset về style (mỗi kênh 1 giá trị riêng). */
+		let value = null;
+		if (hex !== '') value = utils.hexObjectToAlpha(parseHexByte(hex));
+		else if (after !== '') value = 1; // \alpha&H&ggg -> C parse ra 0 -> AA = 00 -> đục
+		for (let n = 1; n <= 4; n++) {
+			const key = `--alpha${n}`;
+			if (value !== null) {
+				context[key] = value;
+				continue;
+			}
+			// Reset: \alpha (ko arg) đưa cả 4 kênh về alpha của style.
+			const resetValue = styleRef.segmentSub?.[key];
+			if (resetValue !== undefined) context[key] = resetValue;
 		}
-		for (let i = 1; i <= 4; i++) {
-			const key = `--alpha${i}`;
-			context[key] = value;
-		}
+		return true;
 	}
 	return false;
 }
@@ -317,9 +334,8 @@ function parseTransformTag(tag, styleRef, nonTransformableContext) {
 	if (!parts) return null;
 	/** @type {parsedDataFormat.tagOverrideControls} */
 	const context = {};
-	const colorState = { alpha: {}, fallback: nonTransformableContext };
 	for (const sub of splitOverrideTagsTransform(parts.modsText)) {
-		applySegmentLevelTransformableTags(sub, context, styleRef, colorState);
+		applySegmentLevelTransformableTags(sub, context, styleRef);
 		applyLayoutLocalNonTransformable(sub, nonTransformableContext, styleRef);
 	}
 	if (Object.keys(context).length === 0) return null;
@@ -334,7 +350,6 @@ function classifyBase(base, styleRef) {
 		if (!Array.isArray(item.tags) || item.tags.length === 0) continue;
 		/** @type {parsedDataFormat.tagOverrideControls} */
 		const context = {};
-		const colorState = { alpha: {} };
 		const data = {};
 		const anim = [];
 		for (const tag of item.tags) {
@@ -354,7 +369,7 @@ function classifyBase(base, styleRef) {
 				karaokeRunMs += durationMs;
 				continue;
 			}
-			applySegmentLevelTransformableTags(tag, context, styleRef, colorState);
+			applySegmentLevelTransformableTags(tag, context, styleRef);
 			applyLayoutLocalNonTransformable(tag, context, styleRef);
 		}
 		if (Object.keys(context).length) item.delta = context;

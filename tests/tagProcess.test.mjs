@@ -9,6 +9,18 @@ const mkBase = (...pairs) => pairs.map(([tags, text]) => ({ tags, text }));
 const DEFAULT_STYLE_REF = Object.freeze({
 	name: 'Default', fontName: 'Arial', fontSize: 20, alignment: 2,
 });
+/** alpha của tag &H80& sau khi đảo kênh sang thang CSS 0..1 */
+const ALPHA_80 = (255 - 0x80) / 255;
+/** styleRef kèm 4 kênh màu/alpha đúng shape do aegisubToCss() sinh ra. */
+const STYLE_REF_WITH_COLORS = Object.freeze({
+	...DEFAULT_STYLE_REF,
+	segmentSub: {
+		'--color1': '255 255 255', '--alpha1': 1,
+		'--color2': '255 0 0', '--alpha2': 0.5,
+		'--color3': '0 0 0', '--alpha3': 1,
+		'--color4': '0 0 0', '--alpha4': 1,
+	},
+});
 
 const MINI_ASS = [
 	'[Script Info]',
@@ -181,14 +193,9 @@ test('parser supplies classifier input as a base array and retains line result s
 });
 
 test('classify cooks color and karaoke decoration metadata using the style color channels', () => {
-	const entry = classify(mkBase([['\\c&HFF&', '\\k20'], 'x']), {
-		...DEFAULT_STYLE_REF,
-		primaryColour: 'rgba(255, 255, 255, 1.00)',
-		secondaryColour: 'rgba(255, 0, 0, 1.00)',
-		outlineColour: 'rgba(0, 0, 0, 1.00)',
-		backColour: 'rgba(0, 0, 0, 1.00)',
-	});
-	assert.deepEqual(entry.base[0].delta, { '--color1': 'rgba(255, 0, 0, 1.00)' });
+	const entry = classify(mkBase([['\\1c&HFF&', '\\k20'], 'x']), STYLE_REF_WITH_COLORS);
+	// \1c chỉ ghi --color1 (3 kênh "r g b"); alpha là kênh riêng nên không xuất hiện trong delta.
+	assert.deepEqual(entry.base[0].delta, { '--color1': '255 0 0' });
 	assert.deepEqual(entry.base[0].data, { k: { type: 'k', durationMs: 200, startMs: 0 } });
 });
 
@@ -206,24 +213,54 @@ test('all transformable numeric tags use raw override variables in static and tr
 	assert.deepEqual(entry.base[1].anim[0].target, expected);
 });
 
-test('color and alpha overrides combine in tag order and use static color as transform fallback', () => {
-	const style = { ...DEFAULT_STYLE_REF, primaryColour: 'rgba(1, 2, 3, 0.75)',
-		secondaryColour: 'rgba(4, 5, 6, 1.00)', outlineColour: 'rgba(7, 8, 9, 1.00)',
-		backColour: 'rgba(10, 11, 12, 1.00)' };
+test('color and alpha overrides are independent channels and combine in tag order', () => {
 	const tags = ['\\alpha&H80&', '\\1c&HFF&', '\\2a&H00&', '\\3c&HFF0000&',
 		'\\4c&H00FF00&', '\\t(\\1a&H00&)'];
-	const entry = classify(mkBase([tags, 'x']), style);
+	const entry = classify(mkBase([tags, 'x']), STYLE_REF_WITH_COLORS);
+	// \alpha&H80& -> css 0.498 (đảo kênh); \2a&H00& -> ghi đè --alpha2 = 1.
 	assert.deepEqual(entry.base[0].delta, {
-		'--color1': 'rgba(255, 0, 0, 0.50)', '--color2': 'rgba(4, 5, 6, 1.00)',
-		'--color3': 'rgba(0, 0, 255, 0.50)', '--color4': 'rgba(0, 255, 0, 0.50)',
+		'--color1': '255 0 0', '--color3': '0 0 255', '--color4': '0 255 0',
+		'--alpha1': ALPHA_80, '--alpha2': 1, '--alpha3': ALPHA_80, '--alpha4': ALPHA_80,
 	});
-	assert.deepEqual(entry.base[0].anim[0].target, { '--color1': 'rgba(255, 0, 0, 1.00)' });
+	// \t trong \t chỉ ghi alpha kênh 1, không đụng màu.
+	assert.deepEqual(entry.base[0].anim[0].target, { '--alpha1': 1 });
 });
 
-test('alpha before color is retained without style and invalid tags do not overwrite values', () => {
-	const entry = classify(mkBase([['\\1a&H80&', '\\c&HFF&', '\\fs30', '\\fs2junk',
-		'\\bord3', '\\bordbad', '\\c&HZZ&'], 'x']), DEFAULT_STYLE_REF);
-	assert.deepEqual(entry.base[0].delta, { '--color1': 'rgba(255, 0, 0, 0.50)', '--font-size': 30, '--outline': 3 });
+test('alpha and color are separate channels and invalid tags do not overwrite values', () => {
+	const entry = classify(mkBase([['\\1a&H80&', '\\1c&HFF&', '\\fs30', '\\fs2junk',
+		'\\bord3', '\\bordbad', '\\1c&HZZ&'], 'x']), STYLE_REF_WITH_COLORS);
+	// \\1a ghi --alpha1, \\1c ghi --color1; \\1c&HZZ& (không hex) -> đen.
+	assert.deepEqual(entry.base[0].delta, {
+		'--alpha1': ALPHA_80, '--color1': '0 0 0', '--font-size': 30, '--outline': 3,
+	});
+});
+
+test('reset of \\1c keeps --alpha1 override untouched', () => {
+	// \1a&H80& rồi \1c (ko arg) -> alpha vẫn 0.498, màu quay về style.
+	const entry = classify(mkBase([['\\1a&H80&', '\\1c'], 'x']), STYLE_REF_WITH_COLORS);
+	assert.deepEqual(entry.base[0].delta, { '--alpha1': ALPHA_80, '--color1': '255 255 255' });
+});
+
+test('\\alpha sets all four alpha channels and leaves colors alone', () => {
+	const entry = classify(mkBase([['\\alpha&H80&'], 'x']), STYLE_REF_WITH_COLORS);
+	assert.deepEqual(entry.base[0].delta, {
+		'--alpha1': ALPHA_80, '--alpha2': ALPHA_80, '--alpha3': ALPHA_80, '--alpha4': ALPHA_80,
+	});
+});
+
+test('\\alpha reset falls back to the style alpha per channel', () => {
+	// Không có arg -> reset về alpha của style (khác nhau theo từng kênh).
+	const entry = classify(mkBase([['\\alpha', '\\alpha'], 'x']), STYLE_REF_WITH_COLORS);
+	assert.deepEqual(entry.base[0].delta, {
+		'--alpha1': 1, '--alpha2': 0.5, '--alpha3': 1, '--alpha4': 1,
+	});
+});
+
+test('garbage color/alpha args behave like C parsers (black / opaque)', () => {
+	const entry = classify(mkBase([['\\1c&H&ggg', '\\1a&H&ggg', '\\alpha&H&ggg'], 'x']), STYLE_REF_WITH_COLORS);
+	assert.deepEqual(entry.base[0].delta, {
+		'--color1': '0 0 0', '--alpha1': 1, '--alpha2': 1, '--alpha3': 1, '--alpha4': 1,
+	});
 });
 
 test('karaoke clock spans items and non-transformable tags apply in source order', () => {
