@@ -1,4 +1,4 @@
-// v0.1.0 18nov26
+// v0.1.0 19nov26
 // alpha mode
 // Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] đầy đủ
 // xem cấu trúc lineCss[i]
@@ -93,10 +93,10 @@ import * as utils from './utils.js';
  * '--alpha1'?: number, // \1a
  * '--color2'?: string, // \2c
  * '--alpha2'?: number, // \2a
- * '--color3'?: string, // \3c (utils.outlineStyleToCss)
- * '--alpha3'?: number, // \3a (utils.outlineStyleToCss)
- * '--color4'?: string, // \4c (utils.outlineStyleToCss, utils.shadBlurToCss)
- * '--alpha4'?: number, // \4a (utils.outlineStyleToCss, utils.shadBlurToCss)
+ * '--color3'?: string, // \3c
+ * '--alpha3'?: number, // \3a
+ * '--color4'?: string, // \4c (utils.shadBlurToCss)
+ * '--alpha4'?: number, // \4a (utils.shadBlurToCss)
  * '--bold'?: number, // \b điều khiển bold (utils.boldToWeight)
  * '--italic'?: number, // \i điều khiển italic
  * '--underline'?: boolean, // \u điều khiển underline (utils.decorationToCss)
@@ -213,15 +213,16 @@ function applySegmentLevelTransformableTags(tag, context, styleRef) {
 		const [, hex, after] = /^[&H]*(?:0[xX](?=[0-9a-fA-F]))?\s*([0-9a-fA-F]*)([\s\S]*)$/
 			.exec((colorAlphaMatch[3] ?? '').trim());
 		if (hex !== '') {
+			const value = utils.parseAegisubToObject(hex);
 			context[key] = kind == 'c' ?
-				utils.hexObjectToRgba(utils.parseAegisubToObject(hex)) : 
-				utils.hexObjectToAlpha(utils.parseAegisubToObject(hex));
+				utils.hexObjectToRgb(value) : 
+				utils.hexObjectToAlpha(value.r);
 		} else if (after === '') {
 			// reset về style
 			context[key] = styleRef.segmentSub[key];
 		} else {
 			// chỉ trả về đen khi hex trống, mà lại có đoạn đằng sau (vd: \1c&H&ggg; \1cttt)
-			context[key] = kind == 'c' ? `rgba(0,0,0,1)` : 1;
+			context[key] = kind == 'c' ? `rgb(0,0,0)` : 1;
 		}
 		return true;
 	}
@@ -230,18 +231,18 @@ function applySegmentLevelTransformableTags(tag, context, styleRef) {
 	const alphaMasterMatch = /^\\alpha(.*)$/.exec(tag);
 	if (alphaMasterMatch) {
 		let value = '';
-		const [, hex, after] = /^[&H]*(?:0[xX](?=[0-9a-fA-F]))?\s*([0-9a-fA-F]*)([\s\S]*)$/
-			.exec((colorAlphaMatch[3] ?? '').trim());
+		const [, hex] = /^[&H]*(?:0[xX](?=[0-9a-fA-F]))?\s*([0-9a-fA-F]*)([\s\S]*)$/
+			.exec((alphaMasterMatch[1] ?? '').trim());
 		if (hex !== '') {
-			value = kind == 'c' ?
-				utils.hexObjectToRgba(utils.parseAegisubToObject(hex)) : 
-				utils.hexObjectToAlpha(utils.parseAegisubToObject(hex));
-		} else if (after === '') {
-			// reset về style
-			value = styleRef.segmentSub[key];
+			value = utils.hexObjectToAlpha(utils.parseAegisubToObject(hex).r);
 		} else {
-			// chỉ trả về đen khi hex trống, mà lại có đoạn đằng sau (vd: \1c&H&ggg; \1cttt)
+			// trả về 1 (hoàn toàn ko trong suốt) khi hex trống (vd: \alpha&H&ggg; \alpha)
+			// thực tế logic tương tự đoạn 2; nhưng style luôn có alpha = 1 nên gộp 2 hướng sau vào
 			value = 1;
+		}
+		for (let i = 1; i <= 4; i++) {
+			const key = `--alpha${i}`;
+			context[key] = value;
 		}
 	}
 	return false;

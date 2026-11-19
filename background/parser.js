@@ -1,4 +1,4 @@
-// v0.1.0 18nov26
+// v0.1.0 19nov26
 // beta mode
 // Chức năng: xử lí kế tiếp, giai đoạn từ có file sub thô (rawText) đến cấu trúc JS (parsedData) và CSS trung gian (globalCss, styleCss, lineCss).
 import * as utils from './utils.js';
@@ -8,10 +8,10 @@ import { classify } from './tagProcess.js';
  * @property {string} name Tên style (style.name, line.styleref.name, syl.style.name)
  * @property {string} fontName Tên font (\fn)
  * @property {number} fontSize Font size (\fs, px, với PlayRes 640x480)
- * @property {string} primaryColour Màu 1, main (\1c), đã qua utils.hexToRgba, alpha = 1.0 nếu không có \1a
- * @property {string} secondaryColour Màu 2, pre-kara (\2c), đã qua utils.hexToRgba, alpha = 1.0 nếu không có \2a
- * @property {string} outlineColour Màu 3, outline (\3c), đã qua utils.hexToRgba, alpha = 1.0 nếu không có \3a
- * @property {string} backColour Màu 4, shadow (\4c), đã qua utils.hexToRgba, alpha = 1.0 nếu không có \4a
+ * @property {string} primaryColour Màu 1, main (\1c), giữ nguyên định dạng Aegisub
+ * @property {string} secondaryColour Màu 2, pre-kara (\2c), giữ nguyên định dạng Aegisub
+ * @property {string} outlineColour Màu 3, outline (\3c), giữ nguyên định dạng Aegisub
+ * @property {string} backColour Màu 4, shadow (\4c), giữ nguyên định dạng Aegisub
  * @property {boolean} bold In đậm (\b, boolean)
  * @property {boolean} italic In nghiêng (\i, boolean)
  * @property {boolean} underline Gạch dưới (\u, boolean)
@@ -544,23 +544,19 @@ function styleToCss (style, info = {}) {
 		'font-size': `calc(var(--font-size) / ${info.PlayResY} * 100cqh * var(--css-resize))`,
 		'line-height': `calc(var(--font-size) / ${info.PlayResY} * 100cqh)`,
 		/** Biến ghi màu chính (\1c) */
-		'--color1': style.primaryColour,
-		'--alpha1': 1,
-		'color': `var(--color1)`,
+		...utils.aegisubToCss(1,style.primaryColour),
+		'color': `rgb(var(--color1, 0 0 0) / var(--alpha1, 1))`,
 		/** Biến ghi màu thứ cấp (\2c) */
-		'--color2': style.secondaryColour,
-		'--alpha2': 1,
+		...utils.aegisubToCss(2,style.secondaryColour),
 		/** Biến ghi màu viền (\3c) */
-		'--color3': style.outlineColour,
-		'--alpha3': 1,
+		...utils.aegisubToCss(3,style.outlineColour),
 		'--border-style': style.borderStyle,
 		/** Biến ghi màu bóng (\4c) */
-		'--color4': style.backColour,
-		'--alpha4': 1,
+		...utils.aegisubToCss(4,style.backColour),
 		// Ở lần đầu, các hàm utils ở đây lấy dữ liệu từ style. 
 		// Khi override, lấy dữ liệu từ các biến tên kiểu CSS (vd ở đây: --border-style, --color3, --color4) thay cho các biến của style.
 		// Hàm ghi màu viền (\3c), khi override tag (\3c,\3a thì gọi hàm này.)
-		...utils.outlineStyleToCss(style.borderStyle, style.outlineColour, style.backColour),
+		...utils.outlineStyleToCss(style.borderStyle),
 		/** Hàm ghi độ dày chữ (\b) */
 		'font-weight': utils.boldToWeight(style.bold),
 		/** Biến ghi độ nghiêng chữ (\i) */
@@ -591,7 +587,6 @@ function styleToCss (style, info = {}) {
 			style.shadow,
 			style.shadow,
 			0,
-			style.backColour,
 			info.PlayResX,
 			info.PlayResY,
 			info.LayoutResX,
@@ -802,11 +797,6 @@ export function parser(doStripTags = false, rawText) {
 					// Xét với mỗi index (styleIndex)- value (styleField) trong array styleFormat
                     let styleValue = styleValues[styleIndex] || '';
 					// Đặt biến tạm thời styleValue lấy bằng styleValues[styleIndex] (hoặc trống nếu i vượt quá. Có thể vượt quá à?) 
-                    if (styleField.toLowerCase().includes('colour')) {
-						// Nhận diện các styleValue có định dạng màu (tìm theo styleField tương ứng của nó.)
-                        styleValue = utils.hexObjectToRgba(utils.parseAegisubToObject(styleValue));
-						// Đổi định dạng màu.
-                    }
                     style[toCamelCase(styleField,styleField.includes("Font") ? [0, 4] : [0])] = styleValue;
 					// Lưu dữ liệu vào style[toLowerCaseFirst(styleField)]. Ở đây key (styleField) được xử lí (theo camelCase)
 					// Căn bản là đổi kí tự đầu (trong Format, nó luôn là upper) thành lower/upper

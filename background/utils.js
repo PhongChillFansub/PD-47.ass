@@ -1,4 +1,4 @@
-// v0.1.0 18nov26
+// v0.1.0 19nov26
 // beta mode
 "use strict";
 const extensionName = "PD-47.ass";
@@ -90,11 +90,12 @@ export function parseClampedNum (isInteger, v, def, min, max) {
 	return Number.isNaN(raw) || (min != null && raw < min) || (max != null && raw > max) ? def : raw;
 }
 /** [Manual edit] Chuyển chuỗi màu và alpha Aegisub sang định dạng rgba() dùng cho CSS.
+ * 
  * Hỗ trợ các định dạng string màu/alpha: &HAABBGGRR, &HBBGGRR&/BBGGRR, #RRGGBB[AA]
  * 
  * Các trường hợp rác trả về {r: 0, g: 0, b: 0, a: 1} (màu đen, alpha 1).
  * @param {string} raw Chuỗi màu đầu vào; nếu trống trả về {r: 0, g: 0, b: 0, a: 1}.
- * @returns {Object<{r: number, g: number, b: number, a: number}>} Object đầu ra {r, g, b, a}.
+ * @returns {{r: number, g: number, b: number, a: number}} Object đầu ra {r, g, b, a}.
  */
 export function parseAegisubToObject(raw) {
 	// 1. Chỉ nhận string
@@ -122,81 +123,66 @@ export function parseAegisubToObject(raw) {
 	// Định dạng 8 chữ, lấy 8 chữ cuối
 	// Định dạng 6 chữ, lấy 6 chữ cuối, điền FF vào alpha (coi alpha = 1)
 	// Chú ý: nếu là 2 chữ, thì ở đây sẽ thành 000000AA (vẫn lấy alpha từ RR = AA)
+	// nhưng ở đây RR = AA ko được clamp về 0..1 và đảo (như kênh a thường)
+	// hint: chỉ clamp và đảo ở hexObjectToAlpha
 	hex8 = aegisub[2].slice(numStr.startsWith('&H') ? -8 : -6).padStart(8, '0');
-	// Hint: tag \*a, \*c sẽ phải xóa &H đầu và & cuối; &HBBGGRR& = BBGGRR.
-	const a = (255 - Number.parseInt(hex8.slice(0, 2), 16)) / 255;
+	// Hint: xử lí tag \*a, \*c sẽ phải xóa &H đầu và & cuối: &HBBGGRR& => BBGGRR.
+	const a = Number.parseInt(hex8.slice(0, 2), 16);
 	const b = Number.parseInt(hex8.slice(2, 4), 16);
 	const g = Number.parseInt(hex8.slice(4, 6), 16);
 	const r = Number.parseInt(hex8.slice(6, 8), 16);
 	return {r, g, b, a};
 }
-/** [arena.ai] Phân tích một CSS `rgba(r, g, b, a)` đã được parser lưu trong style để
- * tagProcess có thể giữ RGB của style khi override chỉ thay alpha. Hàm cũng
- * nhận object kênh màu nội bộ để các caller không cần serialize rồi parse lại.
- *
- * Chỉ hỗ trợ cú pháp `rgba()` bốn thành phần, phân cách bằng dấu phẩy — đúng
- * định dạng mà `hexToRgba()` phát ra. CSS màu khác (`rgb()`, tên màu, `var()`
- * và `transparent`) trả về `null` vì chúng không cho đủ bốn kênh số để nấu
- * alpha override an toàn.
- *
- * @param {string|{r: number, g: number, b: number, a?: number}|null|undefined} raw CSS rgba hoặc các kênh màu.
- * @returns {{r: number, g: number, b: number, a: number}|null} Các kênh màu số, hoặc `null` khi input không hợp lệ/không hỗ trợ.
+/** [Manual edit] Chuyển đổi màu từ {r,g,b} sang định dạng "r g b" cho CSS
+ * @param {{r: number, g: number, b: number}} raw
+ * @returns {string} Chuỗi "r g b" hoặc "0 0 0" nếu đầu vào không hợp lệ
  */
-export function parseCssRgbaToObject(raw) {
-	if (raw && typeof raw === 'object'
-		&& Number.isFinite(raw.r) && Number.isFinite(raw.g) && Number.isFinite(raw.b)) {
-		return { r: raw.r, g: raw.g, b: raw.b, a: Number.isFinite(raw.a) ? raw.a : 1 };
-	}
-	if (typeof raw !== 'string') return null;
-	const match = /^rgba\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*\)$/i.exec(raw.trim());
-	if (!match) return null;
-	const r = Number(match[1]);
-	const g = Number(match[2]);
-	const b = Number(match[3]);
-	const a = Number(match[4]);
-	if (![r, g, b, a].every(Number.isFinite)) return null;
-	return { r, g, b, a };
+export function hexObjectToRgbFormat(raw) {
+    if (raw == null || typeof raw !== 'object') return `0 0 0`;
+    const { r, g, b } = raw;
+    if (![r, g, b].every(Number.isFinite)) return `0 0 0`;
+    return `${r} ${g} ${b}`;
 }
-/** [arena.ai] Chuyển đổi màu từ {r,g,b,a} sang định dạng rgba() cho CSS
- * @param {Object<{r: number, g: number, b: number, a: number}>} raw 
- * @returns {string} Chuỗi rgba(r, g, b, a) hoặc màu đen nếu đầu vào không hợp lệ
- */
-export function hexObjectToRgba(raw) {
-    if (raw == null || typeof raw !== 'object') return `rgba(0,0,0,1)`;
-    const { r, g, b, a } = raw;
-    if (![r, g, b, a].every(Number.isFinite)) return `rgba(0,0,0,1)`;
-    return `rgba(${r}, ${g}, ${b}, ${a.toFixed(2)})`;
-}
-/** [arena.ai] Chuyển đổi alpha hex Aegisub sang giá trị alpha cho CSS
- * @param {Object<{r: number, g: number, b: number, a: number}>} raw Ở đây chỉ nhận r.
- * @returns {number|null} Giá trị alpha (r, thô) hoặc 1 nếu đầu vào không hợp lệ
+/** [arena.ai] Chuyển alpha thô từ Aegisub (0..255 trong suốt) sang CSS (0 trong suốt..1) 
+ * @param {number} raw 0..255 (chặn 2 đầu trong hàm này)
+ * @returns {number} 0..1 (hoặc 1 nếu đầu vào lỗi)
  */
 export function hexObjectToAlpha(raw) {
-    if (raw == null || typeof raw !== 'object') return 1;
-    return Number.isFinite(raw.r) ? raw.r : 1;
+	if (!Number.isFinite(raw)) return 1;
+	return (255 - Math.min(Math.max(raw, 0), 255)) / 255;
 }
-/** [Manual edit] Xử lí chung kiểu viền (bao quanh chữ hoặc hộp) và áp màu (\3c, \3a)
+/** [Manual edit] Cụm xử lí màu từ Aegisub thành object {color, alpha} cho styleToCss trong parser
+ * 
+ * Chú ý: nếu channel lỗi thì sẽ trả về 0, và chèn --color0, --alpha0 vào object.
+ * @param {string} channel Kênh màu/alpha
+ * @param {string} raw Đầu vào chuẩn Aegisub. Xem utils.parseAegisubToObject
+ * @returns {{--colorN: string, --alphaN: number}} Đầu ra object {color, alpha} theo channel.
+ * Xem utils.hexObjectToRgbFormat và utils.hexObjectToAlpha
+ */
+export function aegisubToCss(channel, raw) {
+	const value = parseAegisubToObject(raw);
+	const n = Number(channel) || 0;
+	return {
+		[`--color${n}`]: hexObjectToRgbFormat(value),
+		[`--alpha${n}`]: hexObjectToAlpha(value.a),
+	};
+}
+/** [arena.ai] Xử lí chung kiểu viền (bao quanh chữ hoặc hộp) và áp màu (\3c, \3a)
  * @param {number} borderStyle Kiểu viền: 1 (viền chữ), 3 (hộp màu outline), 4 (hộp màu nền).
- * @param {string|null} outlineColor Màu viền (\3c)
- * @param {string|null} backColour Màu nền (\4c)
  * @returns {{
  *   '--border-style': number,
  *   'background-color': string,
  *   '-webkit-text-stroke-color': string
  * }}
  */
-export function outlineStyleToCss(borderStyle, outlineColor, backColour) {
+export function outlineStyleToCss(borderStyle) {
 	const isBoxStyle = borderStyle === 3 || borderStyle === 4;
+	const color3 = `rgb(var(--color3, 0 0 0) / var(--alpha3, 1))`;
+	const color4 = `rgb(var(--color4, 0 0 0) / var(--alpha4, 1))`;
 	return {
 		'--border-style': borderStyle,
-		'background-color': (
-			borderStyle === 3 ? outlineColor
-				: borderStyle === 4 ? backColour
-					: 'transparent'
-		) ?? 'transparent',
-		'-webkit-text-stroke-color': isBoxStyle
-			? 'transparent'
-			: outlineColor ?? 'transparent',
+		'background-color': borderStyle === 3 ? color3 : borderStyle === 4 ? color4 : 'transparent',
+		'-webkit-text-stroke-color': isBoxStyle ? 'transparent' : color3,
 	};
 }
 /** [arena.ai] Chuyển giá trị đậm (style.bold hoặc \b) sang font-weight CSS.
@@ -238,7 +224,7 @@ export function decorationToCss(underline, strikeOut) {
  * @param {string} color Màu 4
  * @returns {string} filter CSS: 'drop-shadow(...) blur(...)' hoặc 'none' nếu shadowX/Y = 0 và blur = 0
  */
-export function shadBlurToCss(shadowX, shadowY, blur, color, playResX, playResY, layoutResX, layoutResY, ScaledBorderAndShadow) {
+export function shadBlurToCss(shadowX, shadowY, blur, playResX, playResY, layoutResX, layoutResY, ScaledBorderAndShadow) {
 	const xValue = Number.isFinite(Number(shadowX)) ? Number(shadowX) : 0;
 	const yValue = Number.isFinite(Number(shadowY)) ? Number(shadowY) : 0;
 	const blurValue = Number.isFinite(Number(blur)) ? Number(blur) : 0;
@@ -255,7 +241,7 @@ export function shadBlurToCss(shadowX, shadowY, blur, color, playResX, playResY,
 		: `${value}px`;
 	return [
 		hasShadow
-			? `drop-shadow(${toCqw(xValue, shadowResX)} ${toCqh(yValue, shadowResY)} ${color})`
+			? `drop-shadow(${toCqw(xValue, shadowResX)} ${toCqh(yValue, shadowResY)} rgb(var(--color4, 0 0 0) / var(--alpha4, 1)))`
 			: '',
 		hasBlur
 			? `blur(${toCqh(blurValue, layoutResY)})`
