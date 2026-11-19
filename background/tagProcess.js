@@ -226,10 +226,10 @@ function applySegmentLevelTransformableTags(tag, context, styleRef) {
 		const key = `--${kind=='c' ? 'color' : 'alpha'}${channel}`;
 		const [hex, after] = splitColorArg(colorAlphaMatch[3]);
 		if (hex !== '') {
-			// \\*a và \\*c là 2 kênh độc lập: \\*c chỉ ghi --colorN, \\*a chỉ ghi --alphaN.
-			context[key] = kind == 'c'
-				? utils.hexObjectToRgbFormat(utils.parseAegisubToObject(hex))
-				: utils.hexObjectToAlpha(parseHexByte(hex));
+			const value = utils.parseAegisubToObject(hex);
+			context[key] = kind == 'c' ?
+				utils.hexObjectToRgbFormat(value) : 
+				utils.hexObjectToAlpha(value.r);
 		} else if (after === '') {
 			// reset kênh đang xét về style (ko đụng kênh còn lại).
 			const resetValue = styleRef.segmentSub?.[key];
