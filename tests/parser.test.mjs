@@ -7,7 +7,6 @@ import {
 	decorationToCss,
 	outlineStyleToCss,
 	outlineWidthToCss,
-	parseCssRgba,
 	scaleAngleToCss,
 	shadBlurToCss,
 } from '../background/utils.js';
@@ -102,7 +101,7 @@ test('parser is the public entry point and normalizes info, styles, and event ti
 	assert.equal(parsed.info.ScaledBorderAndShadow, true);
 	assert.equal(parsed.styles.length, 1);
 	assert.equal(parsed.styles[0].fontName, 'Arial');
-	assert.equal(parsed.styles[0].primaryColour, 'rgba(255, 255, 255, 1.00)');
+	assert.equal(parsed.styles[0].primaryColour, '&H00FFFFFF');
 	assert.equal(parsed.events[0].startTime, 1000);
 	assert.equal(parsed.events[0].endTime, 2000);
 });
@@ -175,7 +174,7 @@ test('LayoutRes uses the final PlayRes unless both explicit axes are present bef
 	);
 	assert.equal(
 		parsed.styleCss[0].segmentSub.filter,
-		'drop-shadow(calc(0.0015625 * 100cqw) calc(0.002777777777777778 * 100cqh) rgba(0, 0, 0, 1.00))',
+		'drop-shadow(calc(0.0015625 * 100cqw) calc(0.002777777777777778 * 100cqh) rgb(var(--color4, 0 0 0) / var(--alpha4, 1)))',
 	);
 
 	const onlyExplicitX = parser(false, noLayout.replace(
@@ -244,11 +243,12 @@ test('styleCss contains lineSub and segmentSub, not the removed container/text/d
 	assert.equal(segmentSub['--font-name'], 'Arial');
 	assert.equal(segmentSub['font-family'], 'var(--font-name), sans-serif');
 	assert.equal(segmentSub['font-size'], 'calc(var(--font-size) / 480 * 100cqh * var(--css-resize))');
-	assert.equal(segmentSub['--color1'], 'rgba(255, 255, 255, 1.00)');
-	assert.equal(segmentSub.color, 'var(--color1)');
+	assert.equal(segmentSub['--color1'], '255 255 255');
+	assert.equal(segmentSub['--alpha1'], 1);
+	assert.equal(segmentSub.color, 'rgb(var(--color1, 0 0 0) / var(--alpha1, 1))');
 	assert.equal(
 		segmentSub.filter,
-		'drop-shadow(calc(0.003125 * 100cqw) calc(0.004166666666666667 * 100cqh) rgba(0, 0, 0, 1.00))',
+		'drop-shadow(calc(0.003125 * 100cqw) calc(0.004166666666666667 * 100cqh) rgb(var(--color4, 0 0 0) / var(--alpha4, 1)))',
 	);
 });
 
@@ -257,12 +257,12 @@ test('styleCss routes BorderStyle 1 and 3 paint colors through segmentSub', () =
 	const normal = parser(false, stylesOnly).styleCss[0].segmentSub;
 	assert.equal(normal['--border-style'], 1);
 	assert.equal(normal['background-color'], 'transparent');
-	assert.equal(normal['-webkit-text-stroke-color'], 'rgba(0, 0, 0, 1.00)');
+	assert.equal(normal['-webkit-text-stroke-color'], 'rgb(var(--color3, 0 0 0) / var(--alpha3, 1))');
 
 	const boxAss = stylesOnly.replace(',1,2,2,2,10,10,10,1', ',3,2,2,2,10,10,10,1');
 	const box = parser(false, boxAss).styleCss[0].segmentSub;
 	assert.equal(box['--border-style'], 3);
-	assert.equal(box['background-color'], 'rgba(0, 0, 0, 1.00)');
+	assert.equal(box['background-color'], 'rgb(var(--color3, 0 0 0) / var(--alpha3, 1))');
 	assert.equal(box['-webkit-text-stroke-color'], 'transparent');
 });
 
@@ -270,7 +270,7 @@ test('styleCss uses scaleAngleToCss output directly on segmentSub', () => {
 	const ass = MINI_ASS.replace(STYLE_LINE,
 		'Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,120,80,0,15,1,2,2,2,10,10,10,1');
 	const segmentSub = parser(false, ass).styleCss[0].segmentSub;
-	assert.equal(segmentSub.transform, 'rotateZ(-15deg) scaleX(1.2) scaleY(0.8)');
+	assert.equal(segmentSub.transform, 'rotateZ(-15deg) scaleX(1.2) scaleY(0.8) matrix(1, 0, 480, 1, 0, 0)');
 	assert.equal(segmentSub['--scale-x'], 120);
 	assert.equal(segmentSub['--scale-y'], 80);
 	assert.equal(segmentSub['--angle-z'], 15);
@@ -287,34 +287,34 @@ test('decorationToCss uses the supplied truthiness and produces standard decorat
 });
 
 test('shadBlurToCss maps shadow by its selected resolution and blur by LayoutRes', () => {
-	assert.equal(shadBlurToCss(2, -1, 3, 'black'), 'drop-shadow(2px -1px black) blur(3px)');
+	assert.equal(shadBlurToCss(2, -1, 3), 'drop-shadow(2px -1px rgb(var(--color4, 0 0 0) / var(--alpha4, 1))) blur(3px)');
+	const SHADOW = 'rgb(var(--color4, 0 0 0) / var(--alpha4, 1))';
 	assert.equal(
-		shadBlurToCss(2, -1, 3, 'black', 1280, 720, 1024, 576, true),
-		'drop-shadow(calc(0.0015625 * 100cqw) calc(-0.001388888888888889 * 100cqh) black) blur(calc(0.005208333333333333 * 100cqh))',
+		shadBlurToCss(2, -1, 3, 1280, 720, 1024, 576, true),
+		`drop-shadow(calc(0.0015625 * 100cqw) calc(-0.001388888888888889 * 100cqh) ${SHADOW}) blur(calc(0.005208333333333333 * 100cqh))`,
 	);
 	assert.equal(
-		shadBlurToCss(2, -1, 3, 'black', 1280, 720, 1024, 576, false),
-		'drop-shadow(calc(0.001953125 * 100cqw) calc(-0.001736111111111111 * 100cqh) black) blur(calc(0.005208333333333333 * 100cqh))',
+		shadBlurToCss(2, -1, 3, 1280, 720, 1024, 576, false),
+		`drop-shadow(calc(0.001953125 * 100cqw) calc(-0.001736111111111111 * 100cqh) ${SHADOW}) blur(calc(0.005208333333333333 * 100cqh))`,
 	);
-	assert.equal(shadBlurToCss(0, 0, 0, 'black'), 'none');
-	assert.equal(shadBlurToCss('var(--shadow-x)', 'var(--shadow-y)', 'var(--blur)', 'black'), 'none');
+	assert.equal(shadBlurToCss(0, 0, 0), 'none');
+	assert.equal(shadBlurToCss('var(--shadow-x)', 'var(--shadow-y)', 'var(--blur)'), 'none');
 });
 
 test('outline helpers preserve common stroke geometry and BorderStyle paint routing', () => {
-	assert.deepEqual(outlineStyleToCss(1, 'red', 'blue'), {
-		'--color3': 'red', '--border-style': 1, 'background-color': 'transparent', '-webkit-text-stroke-color': 'red',
+	const color3 = 'rgb(var(--color3, 0 0 0) / var(--alpha3, 1))';
+	assert.deepEqual(outlineStyleToCss(1), {
+		'--border-style': 1, 'background-color': 'transparent', '-webkit-text-stroke-color': color3,
 	});
-	assert.deepEqual(outlineStyleToCss(3, 'red', 'blue'), {
-		'--color3': 'red', '--border-style': 3, 'background-color': 'red', '-webkit-text-stroke-color': 'transparent',
+	assert.deepEqual(outlineStyleToCss(3), {
+		'--border-style': 3, 'background-color': color3, '-webkit-text-stroke-color': 'transparent',
 	});
 	assert.deepEqual(outlineWidthToCss(2, 480, 480, true), {
-		'--outline': 2,
 		'-webkit-text-stroke-width': 'calc(0.004166666666666667 * 2 * 100cqh)',
 		padding: 'calc(0.004166666666666667 * 100cqh)',
 		margin: 'calc(0.004166666666666667 * 100cqh)',
 	});
 	assert.deepEqual(outlineWidthToCss(2, 480, 720, false), {
-		'--outline': 2,
 		'-webkit-text-stroke-width': 'calc(0.002777777777777778 * 2 * 100cqh)',
 		padding: 'calc(0.002777777777777778 * 100cqh)',
 		margin: 'calc(0.002777777777777778 * 100cqh)',
@@ -322,26 +322,20 @@ test('outline helpers preserve common stroke geometry and BorderStyle paint rout
 });
 
 test('scaleAngleToCss emits perspective and the current rotate/scale order', () => {
-	assert.deepEqual(scaleAngleToCss(100, 100, 0, 0, 0, 480), {});
+	assert.deepEqual(scaleAngleToCss(100, 100, 0, 0, 0, 480), {
+		transform: 'matrix(1, 0, 480, 1, 0, 0)',
+	});
 	assert.deepEqual(scaleAngleToCss(120, 80, 15, -30, 45, 480), {
-		transform: 'perspective(65.10416666666666cqh) rotateY(30deg) rotateX(-15deg) rotateZ(-45deg) scaleX(1.2) scaleY(0.8)',
+		transform: 'rotateY(30deg) rotateX(-15deg) rotateZ(-45deg) scaleX(1.2) scaleY(0.8) matrix(1, 0, 480, 1, 0, 0)',
 	});
 });
 
-test('parseCssRgba reads the parser-produced CSS color shape and rejects unsupported CSS colors', () => {
-	assert.deepEqual(parseCssRgba('rgba(255, 0, 128, 0.50)'), { r: 255, g: 0, b: 128, a: 0.5 });
-	assert.deepEqual(parseCssRgba({ r: 1, g: 2, b: 3 }), { r: 1, g: 2, b: 3, a: 1 });
-	assert.equal(parseCssRgba('rgb(255, 0, 0)'), null);
-	assert.equal(parseCssRgba('var(--color1)'), null);
-	assert.equal(parseCssRgba(null), null);
-});
-
 test('parser classifies color and karaoke decoration tags with parsed style colors', () => {
-	const parsed = parser(false, assWithText('{\\c&HFF&\\k20}x'));
+	const parsed = parser(false, assWithText('{\\1c&HFF&\\k20}x'));
 	assert.deepEqual(parsed.lineCss[0].base, [{
-		tags: ['\\c&HFF&', '\\k20'],
+		tags: ['\\1c&HFF&', '\\k20'],
 		text: 'x',
-		delta: { '--color1': 'rgba(255, 0, 0, 1.00)' },
+		delta: { '--color1': '255 0 0' },
 		data: { k: { type: 'k', durationMs: 200, startMs: 0 } },
 	}]);
 });
