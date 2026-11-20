@@ -1,78 +1,133 @@
-/** v0.1.0 23sep26
- * alpha mode
- * Cấu trúc: 
- * classify 
- * -> nhận dữ liệu baseItem
- * -> for item of base 
- * -> Tạo các slot ghi dữ liệu
- * -> for tag of tags 
- * -> Quét theo danh mục phân loại tag 
- * -> Ghi dữ liệu xử lí vào slot
- * -> Hậu kiểm dữ liệu
- * -> return baseItem
- */
+// v0.1.0 20nov26
+// alpha mode
+// Classify — biến base (đầu ra của processLineText, từng mục { tags, text }) thành lineCss[i] đầy đủ
+// xem cấu trúc lineCss[i]
 import * as utils from './utils.js';
-/** Định nghĩa/chú thích lineCss[i] đầu ra của classify 
- * @typedef {object} parsedDataFormat.lineCssEntry
- * @property {Array<parsedDataFormat.baseItem>} base mỗi mục giữ nguyên { tags, text } ban đầu;
- * thêm { delta?, anim? } khi có tag ghi đè thay đổi nội dung. 
- * @property {parsedDataFormat.containerLineData} container Ghi các dữ liệu của container.
- * @property {Array<parsedDataFormat.clipItem>} clip Dữ liệu của clip
+/** [Manual edit] Một số lưu ý liên quan đến parser-tagProcess 
+ * - Chỉ import từ utils, ko import từ parser. (chỉ parser có import tagProcess)
+ * - Chỉ export hàm classify.
+ * - tag, text trong base giữ nguyên sau xử lí trong tagProcess
+ * - \t theo hướng metadata, ko xử lí tạo snapshot
+ * - \fsc*100 trả về xóa scale trong transform (theo utils.scaleAngleToCss)
+ * - Các tag cùng được xử lí trong 1 hàm utils -> chỉ chạy 1 lần hàm đó, 
+ *   ko chạy nhiều lần các hàm utils trong 1 vòng lặp tag.
+ * - Các tag ko hỗ trợ:
+ * \a (dùng \an), ko nhầm với \1a
+ * \c (dùng \1c),
+ * \xbord, \ybord, (giới hạn của CSS, ko dùng svg)
+ * \be (giới hạn của CSS, ko dùng svg)
+ * \q (khóa \q2)
+ * \fe (khóa charset UTF-8)
  */
-/** Định nghĩa/chú thích baseItem trong lineCss[i].base = Array<baseItem> 
+/** [Manual edit] Phân loại tag trong tagProcess (mới)
+ * Chú ý: do khóa \q2 nên layout local (2.4 cũ) giờ tương đương decoration (2.3 cũ) 
+ * => phân loại lại
+ * 1. Segment-level Transformable (2.4.1 cũ + 2.3.1 cũ)
+ * 2. Segment-level Non-transformable (2.4.2 cũ + 2.3.2 cũ)
+ * 3. Line-level Collision (2.2 cũ)
+ * 4. Line-level Clip (2.1 cũ)
+ */
+/** [Manual edit] Phân loại tag trong tagProcess (cũ) 
+ * 2.4. Layout Local/Segment-level
+ * 	2.4.1. Transformable (vd: \fs, \fsc*, ...)
+ * 	2.4.2. Non-transformable (vd: \fn, \r, ...)
+ * 2.3. Decoration Local 
+ * 	2.3.1. Transformable (vd: \*c, \*a, \bord, \shad, \fa*, \fr*, ...)
+ * 	2.3.2. Non-transformable (\s, \u, \k*, ...)
+ * 2.2. Line-level: Collision (\an -> \pos, \move (lấy đầu) -> \org)
+ * 2.1. Line-level: \[i]clip
+ */
+/** [Manual edit] Định nghĩa/chú thích cấu trúc baseRaw 
+ * (đầu ra hàm processLineText/đầu vào "base" của classify)
+ * @typedef {object} parsedDataFormat.baseRaw
+ * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
+ * Tags này giữ nguyên để kiểm tra/debug sau này.
+ * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} trở thành {} cho hiển thị,
+ * cái này để renderer làm sau).
+ */
+/** [Manual edit] Định nghĩa/chú thích cấu trúc lineCss[i]
+ * @typedef {object} parsedDataFormat.lineCss đầu ra của classify
+ * @property {Array<parsedDataFormat.baseItem>} base bê nguyên { tags, text } từ đầu vào baseRaw;
+ * chỉ thêm { delta?, anim? } khi có tag ghi đè thay đổi nội dung. 
+ * @property {parsedDataFormat.lineSubCss} lineSub Ghi các dữ liệu của lineSub. (sẽ ghi clip vào đây).
+ * @property {parsedDataFormat.segmentSubCss} segmentSub Ghi các dữ liệu của segmentSub. (chỉ để renderer đọc).
+ * @property {Array<parsedDataFormat.clipItem>} clip Dữ liệu của tag clip (xử lí xong sẽ đưa vào lineSub).
+ */
+/** [Manual edit] Định nghĩa/chú thích baseItem trong lineCss[i].base = Array baseItem 
  * @typedef {object} parsedDataFormat.baseItem Đơn vị trong Array base: 1 cụm tag + 1 đoạn text.
  * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, 
  * raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
  * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} — renderer làm sau).
  * (classify KHÔNG xóa tags khi xử lí, renderer/debug vẫn đọc lại được.)
- * @property {parsedDataFormat.baseItemDelta} [delta] các tag thay đổi nội dung (layout, decoration)
- * nếu ko có tag liên quan thì ko có delta/anim.
- * @property {parsedDataFormat.baseItemAnim} [anim] classify sinh metadata nội suy \t:
- *   MẢNG trực tiếp, mỗi \t → { t1, t2, easing, target } (không bọc { t: [...] }). Karaoke xử lí trong delta.data.
+ * @property {parsedDataFormat.tagOverrideControls} [delta] thuộc tính CSS mới do tag ghi đè.
+ * @property {parsedDataFormat.baseItemAnim} [anim] thuộc tính CSS cho animation.
  */
-/** Định nghĩa/chú thích lineCss[i] sau classify (struct đích — mục 3 prompt 03sep26)
- * @typedef {object} parsedDataFormat.lineCssEntry
- * @property {Array<parsedDataFormat.baseItem>} base Mục base đã classify: mỗi mục giữ nguyên
- *   { tags, text } + thêm { delta?, anim? } (delta/anim chỉ xuất hiện khi có nội dung).
- *   delta.data chứa marker (\h/\N/\n) + karaoke k (2.3, 11sep26: { type, durationMs, startMs })
- *   — số liệu thuần. \r/\q KHÔNG vào data: ghi vào delta.text dưới dạng CSS var — '--base-style-name'
- *   (\r, rỗng = style dòng) / '--wrap-style' (\q, last-wins). Karaoke \k* do 2.3 xử lí.
- * @property {{t: boolean}} collision Nhóm 2.2 — mức DÒNG (bản này CHỈ signal \t, chốt 03sep26:
- *   an/pos/move/org để session 2.2 làm đầy). collision.t = true khi dòng có \t → renderer tự
- *   disable collision (KHÔNG lưu payload \t ở đây — payload chỉ ở base[i].anim).
- * @property {{rawList: string[], effectiveType: ('clip'|'iclip'|null), effectiveRaw: (string|null)}} clip
- *   Nhóm 2.1 — mức DÒNG, last-wins (bản này STUB default — session 2.1 làm đầy).
+/** [Manual edit] Định nghĩa/chú thích baseItem.anim 
+ * @typedef {object} parsedDataFormat.baseItemAnim
+ * @property {(number|null)} t1 Thời điểm bắt đầu, ms tính từ đầu dòng (Aegisub dùng ms).
+ * @property {(number|null)} t2 Thời điểm kết thúc, ms tính từ đầu dòng;
+ * @property {(number|null)} easing Số accel thô 
+ * (default 1 = linear; >1 nhanh dần, <1 chậm dần).
+ * @property {parsedDataFormat.tagOverrideControls} target
+ * (các tag khác xử lí trước khi đưa vào)
  */
-/** Định nghĩa/chú thích baseItem.delta 
- * Chỉ chứa delta text và data. Các tag liên quan đến container sẽ chèn thẳng vào lineCss[i].container.
- * - delta.text → chỉ sinh node text bên trong container hiện có (đổi ruột chữ).
- * - delta.data → không sinh node, chỉ là số liệu cho đo chữ / collision.
- * @typedef {object} parsedDataFormat.baseItemDelta
- * @property {Object} styleRef 
- * @property {Object} [text] Tag đổi ruột chữ (\fs, \c, \b, \fr...) → renderer chỉ thêm node text.
- * @property {Object} [data] Chỉ số liệu đo/collision (không có CSS tương ứng) → không sinh node.
+/** [Manual edit] Định nghĩa/chú thích lineSubCss trong lineCss[i] 
+ * @typedef {typeof utils.globalCss & ReturnType<typeof utils.alignmentToCss>} parsedDataFormat.lineSubCss
+ * Ghép thuộc tính từ utils.globalCss và utils.alignmentToCss
+ * 
+ * Đo bằng cqw/cqh để giảm khối lượng tính.
  */
-/** Định nghĩa/chú thích baseItem.anim 
- * @typedef {Array<{t1: number, t2: (number|null), easing: number, target: parsedDataFormat.baseItemDelta}>} parsedDataFormat.baseItemAnim
- * Mỗi phần tử tương ứng 1 \t(...) trong item, theo thứ tự:
- * - t1/t2: ms, tương đối đầu dòng (Aegisub: \t dùng ms). t2 = null khi file không ghi t2
- *   (transform chạy tới HẾT dòng — renderer lấy duration dòng từ events để resolve).
- * - easing: số accel THÔ (default 1 = linear; >1 nhanh dần, <1 chậm dần) — renderer tự map
- *   sang hàm easing (linear/parabola/cubic...); parser/tagProcess giữ số thô để không mất độ chính xác.
- * - target: tag 2.4.1 và 2.3, KHÔNG chứa tag 2.4.2, 2.2, 2.1. \k* nằm trong 2.4.2.
- */
-/** Định nghĩa/chú thích lineCss[i].container (chưa viết)
- */
-/** Định nghĩa/chú thích lineCss[i].clip (chưa viết)
+/** [Manual edit] Định nghĩa/chú thích parsedDataFormat.tagOverrideControls 
+ * Là danh sách các biến CSS trong segmentSubCss và lineSubCss mà tagProcess có thể ghi đè.
+ * @typedef {{
+ * left?: number, // \pos, \move điều khiển vị trí (đv cqw)
+ * top?: number, // \pos, \move điều khiển vị trí (đv cqh)
+ * '--align-x'?: number, // \an (utils.resolveAlignment)
+ * '--align-y'?: number, // \an (utils.resolveAlignment)
+ * '--origin-delta-x'?: number, // Renderer tính origin của từng segment từ origin line và left/top.
+ * '--origin-delta-y'?: number, // Renderer không sửa --origin của line.
+ * '--style-name'?: string, // \r điều khiển style
+ * '--font-name'?: string, // \fn điều khiển fontName
+ * '--font-size'?: number, // \fs điều khiển fontSize
+ * '--color1'?: string, // \1c
+ * '--alpha1'?: number, // \1a
+ * '--color2'?: string, // \2c
+ * '--alpha2'?: number, // \2a
+ * '--color3'?: string, // \3c
+ * '--alpha3'?: number, // \3a
+ * '--color4'?: string, // \4c (utils.shadBlurToCss)
+ * '--alpha4'?: number, // \4a (utils.shadBlurToCss)
+ * '--bold'?: number, // \b điều khiển bold (utils.boldToWeight)
+ * '--italic'?: number, // \i điều khiển italic
+ * '--underline'?: boolean, // \u điều khiển underline (utils.decorationToCss)
+ * '--strike-out'?: boolean, // \s điều khiển strikeOut (utils.decorationToCss)
+ * '--spacing'?: number, // \fsp điều khiển letter-spacing
+ * '--outline'?: number, // \bord điều khiển độ dày viền (utils.outlineWidthToCss)
+ * '--shadow-x'?: number, // \shad điều khiển shadow-x (utils.shadBlurToCss)
+ * '--shadow-y'?: number, // \shad điều khiển shadow-y (utils.shadBlurToCss)
+ * '--blur'?: number, // \blur điều khiển blur (utils.shadBlurToCss)
+ * '--inline-fx'?: string, // \- điều khiển inline-fx
+ * '--scale-x'?: number, // \fscx điều khiển scaleX (utils.scaleAngleToCss)
+ * '--scale-y'?: number, // \fscy điều khiển scaleY (utils.scaleAngleToCss)
+ * '--angle-x'?: number, // \frx điều khiển angleX (utils.scaleAngleToCss)
+ * '--angle-y'?: number, // \fry điều khiển angleY (utils.scaleAngleToCss)
+ * '--angle-z'?: number, // \frz điều khiển angleZ (utils.scaleAngleToCss)
+ * '--skew-x'?: number, // \fax điều khiển skewX (utils.scaleAngleToCss)
+ * '--skew-y'?: number // \fay điều khiển skewY (utils.scaleAngleToCss)
+ * }} parsedDataFormat.tagOverrideControls
  */
 /** Regex nhận diện tag karaoke: \k / \kf / \ko + duration (số, centisecond trong file).
  * KHÔNG match \K (không xử lí) và \kt (wontfix v1+). Nhóm 1 = type, nhóm 2 = duration raw (cs).
- * Dùng trong classifyDecoration (2.3 — ĐÃ LÀM 11sep26); 2.4 KHÔNG đụng karaoke. */
+ */
 const KARAOKE_RE = /^\\(k[fo]?)(\d+(?:\.\d+)?)/;
-/** Regex số thuần (cho phần tham số đứng đầu của \t: t1/t2/accel) */
+/** Regex số thuần (cho phần tham số đứng trước trong \t: t1/t2/accel) */
 const NUMERIC_TOKEN_RE = /^[+-]?(\d+\.?\d*|\.\d+)$/;
+/** Tên style fallback khi styleRef thiếu (dùng cho \r rỗng) — khớp FALLBACK_DEFAULT_STYLE.name */
+const FALLBACK_STYLE_NAME = 'Default';
 /** [arena.ai] Token có phải số thuần (dùng làm tham số t1/t2/accel của \t) không? */
-function isNumericToken(token) { return NUMERIC_TOKEN_RE.test(token); }
+function isNumericToken(token) {
+	return NUMERIC_TOKEN_RE.test(token);
+}
 /** [arena.ai] Tách nội dung 1 chuỗi tag (không có ngoặc {}) thành các tag đơn theo '\' ở mức
  * ngoặc NGOÀI CÙNG — theo dõi depth '()' nên \clip(...)/\t(...) không bị tách oan.
  * Bản local (KHÔNG import splitOverrideTags từ parser.js để tránh vòng tròn import).
@@ -101,95 +156,129 @@ function splitOverrideTagsTransform(text) {
 	if (start !== -1) pushTag(text.slice(start));
 	return tags;
 }
-/** [Manual edit] Hàm áp dụng tag nhóm 2.4.1 — TRANSFORMABLE: có thể mang dữ liệu trong tag \t;
- * cục bộ (mức mục base); có thể làm ảnh hưởng layout:
+/** [arena.ai] Tag số có tiền tố dài hơn phải đứng trước tag tiền tố ngắn hơn (fsc* / fsp trước fs, fr* trước fr). */
+const TRANSFORMABLE_NUMERIC_TAGS = [
+	['fscx', ['--scale-x']], ['fscy', ['--scale-y']],
+	['fsc', ['--scale-x', '--scale-y']], ['fsp', ['--spacing']], ['fs', ['--font-size']],
+	['blur', ['--blur']], ['fax', ['--skew-x']], ['fay', ['--skew-y']],
+	['frx', ['--angle-x']], ['fry', ['--angle-y']], ['frz', ['--angle-z']], ['fr', ['--angle-z']],
+	['bord', ['--outline']], ['xshad', ['--shadow-x']], ['yshad', ['--shadow-y']],
+	['shad', ['--shadow-x', '--shadow-y']],
+];
+/** [arena.ai] Tách phần tham số của tag màu/alpha thành [hex, after].
  *
- * \fsc[x/y] (*:\fsc chỉ có trong VSFilterMod), \fsp, \fs.
- * @param {string} tag Tag đơn raw, bắt đầu bằng '\\'.
- * @param {parsedDataFormat.baseItemDelta} context Object ghi dữ liệu tạm thời 
- * @returns {boolean} true = tag đã xử lí ở hàm này; false = không thuộc nhóm này.
+ * Giống cách libass (`while (*str == '&' || *str == 'H') ++str; strtoll(..., 16)`) và
+ * VSFilter (`CStringW::Trim(L"&H")` + `wcstol(..., 16)`) đọc tham số: bỏ prefix `&`/`H`,
+ * chấp nhận `0x`, bỏ khoảng trắng đầu, rồi lấy **dãy chữ số hex đầu tiên**; phần còn lại
+ * là rác phía sau (bỏ qua khi parse màu).
+ *
+ * - `hex === ''` và `after === ''` → tag không có tham số (reset về style).
+ * - `hex === ''` và `after !== ''` → có tham số nhưng không có chữ số hex (C parse ra 0).
+ * @param {string|undefined} raw Tham số thô của tag (phần sau `\1c`, `\alpha`...).
+ * @returns {[string, string]} `[hex, after]`
  */
-function applyLayoutLocalTransformable(tag, context) {
-	if (tag.startsWith('\\fscy')) {
-		const v = Number.parseFloat(tag.slice(5));
-		if (!Number.isNaN(v)) context.data.scaleY = v;
-		return true;
-	}
-	if (tag.startsWith('\\fscx')) {
-		const v = Number.parseFloat(tag.slice(5));
-		if (!Number.isNaN(v)) context.data.scaleX = v;
-		return true;
-	}
-	if (tag.startsWith('\\fsc')) {
-		const v = Number.parseFloat(tag.slice(4));
-		if (!Number.isNaN(v)) {
-			context.data.scaleX = v;
-			context.data.scaleY = v;
+function splitColorArg(raw) {
+	const [, hex, after] = /^[&H]*(?:0[xX](?=[0-9a-fA-F]))?\s*([0-9a-fA-F]*)([\s\S]*)$/
+		.exec((raw ?? '').trim());
+	return [hex, after];
+}
+/** [Manual edit] Áp một tag transformable vào các biến tagOverrideControls.
+ * @param {string} tag Tag raw đơn.
+ * @param {parsedDataFormat.tagOverrideControls} context Delta hoặc target của \t.
+ * @param {{
+ * 	lineSub: parsedDataFormat.lineSubCss, 
+ * 	segmentSub: parsedDataFormat.segmentSubCss
+ * }} styleRef Style dòng, dùng để lấy giá trị fallback khi cần.
+ * @returns {boolean} Tag thuộc nhóm này (kể cả khi giá trị không hợp lệ).
+ */
+function applySegmentLevelTransformableTags(tag, context, styleRef) {
+	// 1. Xét các array con [name, Array<key>] trong TRANSFORMABLE_NUMERIC_TAGS; theo thứ tự.
+	// to-do: sửa đoạn 1 này
+	for (const [name, keys] of TRANSFORMABLE_NUMERIC_TAGS) {
+		// Nếu tag ko đúng name, bỏ qua;
+		if (!tag.startsWith(`\\${name}`)) continue;
+		// Tách name khỏi tag, lấy phần còn lại làm raw; nếu raw là số thuần, áp vào context.
+		const raw = tag.slice(name.length + 1);
+		// Check số của raw; nếu đúng, áp vào context.
+		if (NUMERIC_TOKEN_RE.test(raw)) {
+			// Nếu tag là \fsc, \shad hoặc tương tự thì áp vào nhiều key.
+			for (const key of keys) context[key] = Number(raw);
 		}
 		return true;
 	}
-	if (tag.startsWith('\\fsp')) {
-		const v = Number.parseFloat(tag.slice(4));
-		if (!Number.isNaN(v)) context.text['letter-spacing'] = `${v}px`;
+	// 2. Đoạn áp dụng với các tag màu \1c, \2c, \3c, \4c và alpha \1a, \2a, \3a, \4a 
+	// Chú ý: ko nhận \c, \a; 
+	// tag \alpha chỉnh cả 4 --alpha của segment cùng lúc => đoạn sau
+	// khác so với \fad và \fade chỉnh opacity cả line; và khác với opacity (cộng dồn với rgba) của segment
+	const colorAlphaMatch = /^\\([1-4])([ac])(.*)$/.exec(tag);
+	if (colorAlphaMatch) {
+		const channel = utils.parseClampedNum(true, Number(colorAlphaMatch[1]), 1, 1, 4); // kênh 1..4
+		const kind = colorAlphaMatch[2]; // Loại 'c' | 'a'
+		const key = `--${kind=='c' ? 'color' : 'alpha'}${channel}`;
+		const [hex, after] = splitColorArg(colorAlphaMatch[3]);
+		if (hex !== '') {
+			const value = utils.parseAegisubToObject(hex);
+			context[key] = kind == 'c' ?
+				utils.hexObjectToRgbFormat(value) : 
+				utils.hexObjectToAlpha(value.r);
+		} else if (after === '') {
+			// reset kênh đang xét về style (ko đụng kênh còn lại).
+			const resetValue = styleRef.segmentSub?.[key];
+			if (resetValue !== undefined) context[key] = resetValue;
+		} else {
+			// Chỉ trả (màu đen | alpha đục) khi hex trống mà có đoạn đằng sau (vd: \1c&H&ggg; \1cttt):
+			// C parse "ggg" thất bại -> 0, mà AA = 00 và BBGGRR = 000000.
+			context[key] = kind == 'c' ? '0 0 0' : 1;
+		}
 		return true;
 	}
-	if (tag.startsWith('\\fs')) {
-		const v = Number.parseFloat(tag.slice(3));
-		if (!Number.isNaN(v)) context.text['font-size'] = `${v}px`;
+	// 3. Đoạn áp dụng với tag \alpha: cùng logic đoạn 2 nhưng lặp cả 4 kênh alpha.
+	// Không đụng --colorN (giống libass: chỉ change_alpha(&state->c[i], ...)).
+	const alphaMasterMatch = /^\\alpha(.*)$/.exec(tag);
+	if (alphaMasterMatch) {
+		const [hex, after] = splitColorArg(alphaMasterMatch[1]);
+		/** Giá trị alpha cho cả 4 kênh; null = reset về style (mỗi kênh 1 giá trị riêng). */
+		let value = null;
+		if (hex !== '') value = utils.hexObjectToAlpha(utils.parseAegisubToObject(hex).r);
+		else if (after !== '') value = 1; // \alpha&H&ggg -> C parse ra 0 -> AA = 00 -> đục
+		for (let n = 1; n <= 4; n++) {
+			const key = `--alpha${n}`;
+			if (value !== null) {
+				context[key] = value;
+				continue;
+			}
+			// Reset: \alpha (ko arg) đưa cả 4 kênh về alpha của style.
+			context[key] = styleRef.segmentSub[key];
+		}
 		return true;
 	}
 	return false;
 }
-/** [Manual edit] Hàm áp dụng tag nhóm 2.4.2 — NON-transformable: KHÔNG được nội suy (tween)
- * trong \t (chỉ tag 2.4.1 vào target của parseTransformTag); cục bộ; có thể làm ảnh hưởng layout:
- *
- * \- (inline-fx), \b, \i, \fn, \r, \q
- *
- * Karaoke: \k/\kf/\ko KHÔNG xử lí ở 2.4 — đưa sang 2.3 (session sau). Không xử lí \K, \kt.
- *
- * CHÚ Ý (11sep26): hàm này được gọi CHO CẢ tag TRONG \t(...) — parseTransformTag áp 2.4.2
- * apply-now vào context của segment ngoài \t (commit 1ee633d; hướng "BỎ apply-now" 09sep26 đã thay thế).
- * @param {string} tag Tag đơn raw, bắt đầu bằng '\\'.
- * @param {parsedDataFormat.baseItemDelta} context Object ghi dữ liệu tạm thời 
- * @returns {boolean} true = tag đã xử lí ở hàm này; false = không thuộc nhóm này.
- */
-function applyLayoutLocalNonTransformable(tag, context) {
-	if (/^\\-/.test(tag)) {
-		// Xử lý tag inline-fx: lưu dữ liệu text của inline-fx
-		const inlineFx = tag.slice(2).trim();
-		if (inlineFx !== '') context.text['--inline-fx'] = inlineFx;
+
+
+// to-do: sửa từ đoạn này, sau khi sửa hết các tag trong TRANSFORMABLE_NUMERIC_TAGS
+
+/** Áp các tag không nội suy vào delta của segment, kể cả khi nằm trong \t. */
+function applyLayoutLocalNonTransformable(tag, context, styleRef) {
+	if (tag.startsWith('\\-')) {
+		const value = tag.slice(2).trim();
+		if (value) context['--inline-fx'] = value;
 		return true;
 	}
-	if (/^\\b-?\d+(?:\.\d+)?$/.test(tag)) {
-		// Xử lý tag bold: lưu dữ liệu text của bold và cập nhật font-weight
-		const on = Number.parseFloat(tag.slice(2)) !== 0;
-		context.text['font-weight'] = on ? '700' : '400';
-		return true;
-	}
-	if (/^\\i-?\d+(?:\.\d+)?$/.test(tag)) {
-		// Xử lý tag italic: lưu dữ liệu text của italic và cập nhật font-style
-		const on = Number.parseFloat(tag.slice(2)) !== 0;
-		context.text['font-style'] = on ? 'italic' : 'normal';
+	const m = /^\\([bius])(-?\d+(?:\.\d+)?)$/.exec(tag);
+	if (m) {
+		const value = Number(m[2]);
+		const key = { b: '--bold', i: '--italic', u: '--underline', s: '--strike-out' }[m[1]];
+		context[key] = m[1] === 'u' || m[1] === 's' ? value !== 0 : value;
 		return true;
 	}
 	if (tag.startsWith('\\fn')) {
-		// Xử lý tag font name: lưu dữ liệu text của font name và cập nhật font-family
-		let name = tag.slice(3).trim();
-		if (name === '') name = context.styleRef?.fontName ?? '';
-		if (name !== '') context.text['font-family'] = `"${name}", sans-serif`;
+		const name = tag.slice(3).trim() || styleRef?.fontName;
+		if (name) context['--font-name'] = name;
 		return true;
 	}
 	if (tag.startsWith('\\r')) {
-		// Xử lý tag reset style: lưu dữ liệu text của reset style và cập nhật style name
-		const styleName = tag.slice(2);
-		const baseStyleName = styleName !== '' ? styleName : (context.styleRef?.name ?? FALLBACK_STYLE_NAME);
-		context.text['--base-style-name'] = baseStyleName;
-		return true;
-	}
-	if (/^\\q\d+$/.test(tag)) {
-		/// Xử lý tag wrap style: lưu dữ liệu text của wrap style và cập nhật --wrap-style
-		const v = Number.parseInt(tag.slice(2), 10);
-		if (!Number.isNaN(v)) context.text['--wrap-style'] = v;
+		context['--style-name'] = tag.slice(2) || styleRef?.name || FALLBACK_STYLE_NAME;
 		return true;
 	}
 	return false;
@@ -232,38 +321,86 @@ function splitTransformParts(tag) {
 	}
 	return { t1, t2, easing, modsText };
 }
-/** Field màu của styleRef theo kênh ASS (1=primary, 2=secondary, 3=outline, 4=back). */
-const STYLE_COLOR_FIELD = Object.freeze({ 1: 'primaryColour', 2: 'secondaryColour', 3: 'outlineColour', 4: 'backColour' });
-/** [arena.ai] Chuyển đổi hệ số skew ASS (\\fax/\\fay: x' = x + f·y) → góc deg cho CSS skewX/Y: θ = atan(f). */
-function skewFactorToDeg(f) { return Number((Math.atan(f) * 180 / Math.PI).toFixed(4)); }
-
-// to-do: sửa đoạn này
-
-/** [Manual edit] Hàm áp dụng các tag bên trong tag \t — metadata nội suy (CHỈ tag 2.4.1).
- * @param {string} tag Tag raw, bắt đầu bằng '\t' (vd "\t(0,500,\fs30)").
- * @param {Object} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
- * @param {{textCss: Object, scaleX: (number|undefined), scaleY: (number|undefined), styleRef: (Object|null|undefined)}} nonTransformableContext
- * Object ghi dữ liệu context của segment ngoài \t. (cho các tag 2.4.2, tag trong \t coi như tag ngoài \t thông thường)
- * @returns {{t1: number, t2: (number|null), easing: number, target: Object}|null}
- *  - null khi tag không phải \t hợp lệ, hoặc modsText không có tag 2.4.1 nào (không tạo entry anim).
- *  - t1: ms, tương đối đầu dòng (Aegisub: \t dùng ms).
- *  - t2: ms, tương đối đầu dòng; null khi file không ghi t2 (transform chạy tới HẾT dòng —
- *    renderer lấy duration dòng từ events để resolve).
- */
+/** Parse \t thành metadata target; tag không transformable áp ngay vào delta ngoài. */
 function parseTransformTag(tag, styleRef, nonTransformableContext) {
 	const parts = splitTransformParts(tag);
 	if (!parts) return null;
-	/** Lưu dữ liệu tạm thời khi apply các tag trong \t. Chỉ khi có thay đổi thì mới ghi từ context sang lineCss[i].delta
-	 * @type {parsedDataFormat.baseItemDelta}
-	 */
-	const context = { text: {}, data: {} };
+	/** @type {parsedDataFormat.tagOverrideControls} */
+	const context = {};
 	for (const sub of splitOverrideTagsTransform(parts.modsText)) {
-		// Chỉ các hàm áp dụng tag có thể transform của các nhóm, thì mới đặt ở đây.
-		applyLayoutLocalTransformable(sub, context); // 2.4.1
-		applyLayoutLocalNonTransformable(sub, nonTransformableContext); // 2.4.2 (apply-now 11sep26)
-		applyDecorationToTarget(sub, context); // 2.3 → target (11sep26; karaoke bỏ im lặng — #17)
+		applySegmentLevelTransformableTags(sub, context, styleRef);
+		applyLayoutLocalNonTransformable(sub, nonTransformableContext, styleRef);
 	}
-	// finalizeSmartScale(context.textCss, context.scaleX, context.scaleY);
-	if (Object.keys(context.textCss).length === 0) return null;
-	return { t1: parts.t1, t2: parts.t2, easing: parts.easing, target: context.textCss };
+	if (Object.keys(context).length === 0) return null;
+	return { t1: parts.t1, t2: parts.t2, easing: parts.easing, target: context };
+}
+
+/** Quét tag từng item; CSS override nằm trực tiếp trong delta, metadata trong data. */
+function classifyBase(base, styleRef) {
+	if (!Array.isArray(base)) return base;
+	let karaokeRunMs = 0;
+	for (const item of base) {
+		if (!Array.isArray(item.tags) || item.tags.length === 0) continue;
+		/** @type {parsedDataFormat.tagOverrideControls} */
+		const context = {};
+		const data = {};
+		const anim = [];
+		for (const tag of item.tags) {
+			if (tag.startsWith('\\t')) {
+				const entry = parseTransformTag(tag, styleRef, context);
+				if (entry) anim.push(entry);
+				continue;
+			}
+			if (tag === '\\h' || tag === '\\N' || tag === '\\n') {
+				data.marker = tag;
+				continue;
+			}
+			const karaoke = KARAOKE_RE.exec(tag);
+			if (karaoke) {
+				const durationMs = Number.parseFloat(karaoke[2]) * 10;
+				data.k = { type: karaoke[1], durationMs, startMs: karaokeRunMs };
+				karaokeRunMs += durationMs;
+				continue;
+			}
+			applySegmentLevelTransformableTags(tag, context, styleRef);
+			applyLayoutLocalNonTransformable(tag, context, styleRef);
+		}
+		if (Object.keys(context).length) item.delta = context;
+		if (Object.keys(data).length) item.data = data;
+		if (anim.length) item.anim = anim;
+	}
+	return base;
+}
+
+/** [arena.ai] Nhóm 2.2 — Collision. Bản này CHỈ signal \\t. */
+function classifyCollision(base, styleRef) {
+	let hasTransform = false;
+	if (Array.isArray(base)) {
+		for (const item of base) {
+			if (!Array.isArray(item.tags)) continue;
+			for (const tag of item.tags) {
+				if (tag.startsWith('\\t')) { hasTransform = true; break; }
+			}
+			if (hasTransform) break;
+		}
+	}
+	return { t: hasTransform };
+}
+
+/** [arena.ai] Nhóm 2.1 — Clip. STUB. */
+function classifyClip(base, styleRef) {
+	return { rawList: [], effectiveType: null, effectiveRaw: null };
+}
+
+/** [arena.ai] Classify — Segment-level Transformable → Segment-level Non-transformable
+ * → Line-level Collision → Line-level Clip.
+ * @param {Array<parsedDataFormat.baseRaw>} base Mảng base ban đầu (đầu ra của processLineText).
+ * @param {parsedDataFormat.style} styleRef Style dòng (styleRef) do parser() truyền vào qua classify().
+ * @returns {{base: Array<parsedDataFormat.baseItem>, collision: {t: boolean}, clip: {rawList: string[], effectiveType: ('clip'|'iclip'|null), effectiveRaw: (string|null)}}}
+ */
+export function classify(base, styleRef) {
+	base = classifyBase(base, styleRef);
+	const collision = classifyCollision(base, styleRef);
+	const clip = classifyClip(base, styleRef);
+	return { base, collision, clip };
 }

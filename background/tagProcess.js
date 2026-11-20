@@ -193,6 +193,7 @@ function splitColorArg(raw) {
  */
 function applySegmentLevelTransformableTags(tag, context, styleRef) {
 	// 1. Xét các array con [name, Array<key>] trong TRANSFORMABLE_NUMERIC_TAGS; theo thứ tự.
+	// to-do: sửa đoạn 1 này
 	for (const [name, keys] of TRANSFORMABLE_NUMERIC_TAGS) {
 		// Nếu tag ko đúng name, bỏ qua;
 		if (!tag.startsWith(`\\${name}`)) continue;
@@ -253,6 +254,9 @@ function applySegmentLevelTransformableTags(tag, context, styleRef) {
 	}
 	return false;
 }
+
+
+// to-do: sửa từ đoạn này, sau khi sửa hết các tag trong TRANSFORMABLE_NUMERIC_TAGS
 
 /** Áp các tag không nội suy vào delta của segment, kể cả khi nằm trong \t. */
 function applyLayoutLocalNonTransformable(tag, context, styleRef) {
