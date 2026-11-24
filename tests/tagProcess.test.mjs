@@ -176,9 +176,9 @@ test('classify preserves its input for an empty or non-array base', () => {
 	});
 });
 
-test('tagProcess exports only classify', async () => {
+test('tagProcess exports classify and splitTag only', async () => {
 	const mod = await import('../background/tagProcess.js');
-	assert.deepEqual(Object.keys(mod).sort(), ['classify']);
+	assert.deepEqual(Object.keys(mod).sort(), ['classify', 'splitTag']);
 });
 
 test('parser supplies classifier input as a base array and retains line result shape', () => {

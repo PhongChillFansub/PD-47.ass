@@ -153,9 +153,47 @@ function splitOverrideTagsTransform(text) {
 // to-do: chèn hàm tách tag từ dạng \<key><value> thành object/array chứa key và value 
 // bằng regex, chung cho tất cả các hàm (đầu vào type parsedDataFormat.baseRawTag)
 
-
-
-
+/** [arena.ai] Bảng tag → vùng xử lí (key) và thứ tự ưu tiên khớp.
+ *
+ * Một regex duy nhất tách `\<key><value>` thành `{ key, value }` cho TẤT CẢ các hàm
+ * (đầu vào là `parsedDataFormat.baseRawTag`). `value` là phần còn lại nguyên văn sau key —
+ * không nhất thiết là số (`\fnArial` → `"Arial"`, `\1c&HFF&` → `"&HFF&"`, `\fs+5` → `"+5"`);
+ * hàm nào cần gì thì tự parse value của mình.
+ *
+ * Thứ tự nhánh trong regex = mức ưu tiên, khớp từ trái sang phải:
+ * - Tiền tố dài phải đứng trước tiền tố ngắn: `fscx`/`fscy`/`fsc`/`fsp` trước `fs`;
+ *   `xshad`/`yshad` trước `shad`; `frx`/`fry`/`frz` trước `fr`; `blur`/`bord`/`be` trước `b`.
+ * - `pbo`/`pos` trước `p`; `alpha` trước `a` (nếu sau này nhận `\a`).
+ * Nhờ thứ tự này mà không cần lookahead kiểu `(?![cxyp])`: `\fscx120` luôn khớp nhánh `fscx`,
+ * không bao giờ rơi vào `fs`.
+ *
+ * `key` trả về là chuỗi rỗng khi tag không thuộc nhóm nào ở đây (`\an`, `\clip`, `\k`,
+ * `\t`, `\move`, `\fad`, tag lạ...) — các nhóm đó do hàm/khối khác đảm nhận.
+ */
+const TAG_KEYS = [
+	// --- Segment-level Transformable: số ---
+	'fscx', 'fscy', 'fsc', 'fsp', 'fs', 'blur', 'bord', 'be', 'fax', 'fay',
+	'frx', 'fry', 'frz', 'fr', 'xshad', 'yshad', 'shad',
+	// --- Segment-level Transformable: màu và alpha ---
+	'1c', '1a', '2c', '2a', '3c', '3a', '4c', '4a', 'alpha',
+	// --- Segment-level Non-transformable: boolean, font, style ---
+	'b', 'i', 'u', 's', 'fn', 'r', 'pbo', 'pos', 'p',
+].join('|');
+/** Regex dùng chung: `\key` + toàn bộ phần còn lại. Không có `g` nên không giữ state. */
+const TAG_TOKEN_RE = new RegExp(`^\\\\(${TAG_KEYS})([\\s\\S]*)$`);
+/** [arena.ai] Tách một tag raw thành { key, value }.
+ *
+ * Dùng chung cho mọi hàm apply của tagProcess: mỗi hàm chỉ cần xét `key` thay vì
+ * tự viết regex / `startsWith` cho từng tag. Nhờ vậy thứ tự khai báo hàm không còn quan
+ * trọng (không còn cảnh `\fs` khớp trước `\fscx`), và tag không liên quan chỉ tốn 1 lần khớp.
+ * @param {parsedDataFormat.baseRawTag} tag Tag raw, bắt đầu bằng '\\'.
+ * @returns {{key: string, value: string}} `key` rỗng khi tag không thuộc nhóm nào.
+ */
+export function splitTag(tag) {
+	const m = TAG_TOKEN_RE.exec(tag);
+	if (!m) return { key: '', value: tag.slice(1) };
+	return { key: m[1], value: m[2] };
+}
 /** [arena.ai] Tách phần tham số của tag màu/alpha thành [hex, after].
  *
  * Giống cách libass (`while (*str == '&' || *str == 'H') ++str; strtoll(..., 16)`) và
