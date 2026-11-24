@@ -436,7 +436,7 @@ function processLineText(doStripTags, text) {
 	for (const tok of tokens) {
 		if (isStandaloneToken(tok)) { stripped += tok.slice(1, -1); continue; } // {\N} → '\N' nguyên văn
 		if (tok.startsWith('{') && tok.endsWith('}')) continue; // tag token → xóa
-		stripped += tok; // text token (kể cả '{' không đóng, \{ \})
+		stripped += tok; // text token (kể cả '{' không đóng, '\{' và '\}')
 	}
 	return stripped === '' ? [] : [{ tags: [], text: stripped }];
 }

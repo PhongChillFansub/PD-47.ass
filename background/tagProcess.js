@@ -27,23 +27,17 @@ import * as utils from './utils.js';
  * 3. Line-level Collision (2.2 cũ)
  * 4. Line-level Clip (2.1 cũ)
  */
-/** [Manual edit] Phân loại tag trong tagProcess (cũ) 
- * 2.4. Layout Local/Segment-level
- * 	2.4.1. Transformable (vd: \fs, \fsc*, ...)
- * 	2.4.2. Non-transformable (vd: \fn, \r, ...)
- * 2.3. Decoration Local 
- * 	2.3.1. Transformable (vd: \*c, \*a, \bord, \shad, \fa*, \fr*, ...)
- * 	2.3.2. Non-transformable (\s, \u, \k*, ...)
- * 2.2. Line-level: Collision (\an -> \pos, \move (lấy đầu) -> \org)
- * 2.1. Line-level: \[i]clip
- */
 /** [Manual edit] Định nghĩa/chú thích cấu trúc baseRaw 
  * (đầu ra hàm processLineText/đầu vào "base" của classify)
  * @typedef {object} parsedDataFormat.baseRaw
- * @property {string[]} tags Các tag đơn tách từ (các) tag token liền trước text, raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
+ * @property {parsedDataFormat.baseRawTag[]} tags Các tag đơn tách từ (các) tag token liền trước text, raw nguyên văn (vd: "\\fs30", "\\c&HFF&").
  * Tags này giữ nguyên để kiểm tra/debug sau này.
  * @property {string} text Nội dung text đi kèm (nguyên văn, CHƯA unescape \{ \} trở thành {} cho hiển thị,
  * cái này để renderer làm sau).
+ */
+/** [Manual edit] Định nghĩa/chú thích cấu trúc các con trong array baseRaw.tags 
+ * @typedef {string} parsedDataFormat.baseRawTag Các string tag dạng \<key><value>. VD: "\fs30" thì key = "fs", value = "30"
+ * value ko nhất thiết phải là số. Key nếu ko phải tag tồn tại thì trở về "".
  */
 /** [Manual edit] Định nghĩa/chú thích cấu trúc lineCss[i]
  * @typedef {object} parsedDataFormat.lineCss đầu ra của classify
@@ -156,15 +150,12 @@ function splitOverrideTagsTransform(text) {
 	if (start !== -1) pushTag(text.slice(start));
 	return tags;
 }
-/** [arena.ai] Tag số có tiền tố dài hơn phải đứng trước tag tiền tố ngắn hơn (fsc* / fsp trước fs, fr* trước fr). */
-const TRANSFORMABLE_NUMERIC_TAGS = [
-	['fscx', ['--scale-x']], ['fscy', ['--scale-y']],
-	['fsc', ['--scale-x', '--scale-y']], ['fsp', ['--spacing']], ['fs', ['--font-size']],
-	['blur', ['--blur']], ['fax', ['--skew-x']], ['fay', ['--skew-y']],
-	['frx', ['--angle-x']], ['fry', ['--angle-y']], ['frz', ['--angle-z']], ['fr', ['--angle-z']],
-	['bord', ['--outline']], ['xshad', ['--shadow-x']], ['yshad', ['--shadow-y']],
-	['shad', ['--shadow-x', '--shadow-y']],
-];
+// to-do: chèn hàm tách tag từ dạng \<key><value> thành object/array chứa key và value 
+// bằng regex, chung cho tất cả các hàm (đầu vào type parsedDataFormat.baseRawTag)
+
+
+
+
 /** [arena.ai] Tách phần tham số của tag màu/alpha thành [hex, after].
  *
  * Giống cách libass (`while (*str == '&' || *str == 'H') ++str; strtoll(..., 16)`) và
@@ -182,6 +173,15 @@ function splitColorArg(raw) {
 		.exec((raw ?? '').trim());
 	return [hex, after];
 }
+/** [arena.ai] Tag số có tiền tố dài hơn phải đứng trước tag tiền tố ngắn hơn (fsc* / fsp trước fs, fr* trước fr). */
+const TRANSFORMABLE_NUMERIC_TAGS = [
+	['fscx', ['--scale-x']], ['fscy', ['--scale-y']],
+	['fsc', ['--scale-x', '--scale-y']], ['fsp', ['--spacing']],
+	['blur', ['--blur']], ['fax', ['--skew-x']], ['fay', ['--skew-y']],
+	['frx', ['--angle-x']], ['fry', ['--angle-y']], ['frz', ['--angle-z']], ['fr', ['--angle-z']],
+	['bord', ['--outline']], ['xshad', ['--shadow-x']], ['yshad', ['--shadow-y']],
+	['shad', ['--shadow-x', '--shadow-y']],
+];
 /** [Manual edit] Áp một tag transformable vào các biến tagOverrideControls.
  * @param {string} tag Tag raw đơn.
  * @param {parsedDataFormat.tagOverrideControls} context Delta hoặc target của \t.
@@ -192,6 +192,9 @@ function splitColorArg(raw) {
  * @returns {boolean} Tag thuộc nhóm này (kể cả khi giá trị không hợp lệ).
  */
 function applySegmentLevelTransformableTags(tag, context, styleRef) {
+
+
+
 	// 1. Xét các array con [name, Array<key>] trong TRANSFORMABLE_NUMERIC_TAGS; theo thứ tự.
 	// to-do: sửa đoạn 1 này
 	for (const [name, keys] of TRANSFORMABLE_NUMERIC_TAGS) {
@@ -250,6 +253,46 @@ function applySegmentLevelTransformableTags(tag, context, styleRef) {
 			// Reset: \alpha (ko arg) đưa cả 4 kênh về alpha của style.
 			context[key] = styleRef.segmentSub[key];
 		}
+		return true;
+	}
+	// 4. Đoạn áp dụng với tag \fs: value trống = reset; value = áp;
+	// "+value" = nhân (10+value)*10%; "-value" = nhân (10-value)*10% (từ -10 thì coi như "\fs", reset)
+	// " +value" hoặc " -value" = áp trực tiếp
+	// Chú ý: +-value là nhân với giá trị gần nhất 
+	// (vd: \fs-5\t(fs+20) là từ 100% của style => 50% style => 150% style (300% của 50% trước đó))
+	
+
+	// Font size gốc của style — mốc cho cả nhánh reset lẫn nhánh tương đối.
+	const styleFontSize = Number(styleRef.segmentSub?.['--font-size']);
+	// 4. Đoạn áp dụng với tag \fs: value trống = reset; value = áp;
+	// +value = nhân (10+value)*10%; -value = nhân (10-value)*10% (từ -10 thì bỏ qua)
+	// Chú ý: +-value là nhân với giá trị gần nhất
+	// (vd: \fs-5\t(fs+20) là từ 100% của style => 50% style => 150% style (300% của 50% trước đó))
+	// Chú ý: regex ở đây ko có lọc c,p,cx,cy 
+	// => \fscx, \fscy, \fsc, \fsp phải đưa lên xử lí trước \fs
+	const fontSizeKey = '--font-size';
+	const FS_RE = /^\\fs\s*([+-]?(?:\d+\.?\d*|\.\d+))?/;
+	const fsMatch = /^\\fs(?![cxyp])(.*)$/.exec(tag);
+	if (fsMatch) {
+		// Đọc số kiểu C (`argtod` → `ass_strtod`): bỏ khoảng trắng đầu rồi lấy tiền tố số,
+		// không đọc được số nào thì là 0. `\fsabc` → 0 (= argtod thất bại), `\fs30abc` → 30, `\fs` → 0.
+		const numericPart = /^[+-]?(?:\d+\.?\d*|\.\d+)/.exec(fsMatch[1].trim());
+		const fontSizeValue = numericPart ? Number(numericPart[0]) : 0;
+		let nextFontSize;
+		// Dấu +/- xét trên chuỗi gốc chưa trim (giống libass: `*args->start == '+'`),
+		// nên `\fs +5` là tuyệt đối (5), còn `\fs+5` mới là tương đối.
+		if (fsMatch[1][0] === '+' || fsMatch[1][0] === '-') {
+			// Tương đối: nhân với giá trị gần nhất (chưa có thì lấy size của style).
+			const current = Number(context[fontSizeKey]);
+			const from = Number.isFinite(current) ? current : styleFontSize;
+			nextFontSize = from * (1 + fontSizeValue / 10);
+		} else {
+			nextFontSize = fontSizeValue;
+		}
+		// Guard chung của libass/VSFilter: kết quả <= 0 (kể cả khi tag trống, `\fs0`, `\fsabc`
+		// hay `\fs-10` trở xuống) thì quay về size của style.
+		if (!(nextFontSize > 0)) nextFontSize = styleFontSize;
+		if (Number.isFinite(nextFontSize)) context[fontSizeKey] = nextFontSize;
 		return true;
 	}
 	return false;
