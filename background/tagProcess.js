@@ -150,9 +150,6 @@ function splitOverrideTagsTransform(text) {
 	if (start !== -1) pushTag(text.slice(start));
 	return tags;
 }
-// to-do: chèn hàm tách tag từ dạng \<key><value> thành object/array chứa key và value 
-// bằng regex, chung cho tất cả các hàm (đầu vào type parsedDataFormat.baseRawTag)
-
 /** [arena.ai] Bảng tag → vùng xử lí (key) và thứ tự ưu tiên khớp.
  *
  * Một regex duy nhất tách `\<key><value>` thành `{ key, value }` cho TẤT CẢ các hàm
@@ -176,11 +173,17 @@ const TAG_KEYS = [
 	'frx', 'fry', 'frz', 'fr', 'xshad', 'yshad', 'shad',
 	// --- Segment-level Transformable: màu và alpha ---
 	'1c', '1a', '2c', '2a', '3c', '3a', '4c', '4a', 'alpha',
+	// --- Segment-level Transformable: khác: k, - (inline-fx) ---
+	'k', '-',
 	// --- Segment-level Non-transformable: boolean, font, style ---
 	'b', 'i', 'u', 's', 'fn', 'r', 'pbo', 'pos', 'p',
 ].join('|');
-/** Regex dùng chung: `\key` + toàn bộ phần còn lại. Không có `g` nên không giữ state. */
+/** [arena.ai] Regex dùng chung: `\key` + toàn bộ phần còn lại. Không có `g` nên không giữ state. */
 const TAG_TOKEN_RE = new RegExp(`^\\\\(${TAG_KEYS})([\\s\\S]*)$`);
+
+// to-do: chèn hàm tách tag từ dạng \<key><value> thành object/array chứa key và value 
+// bằng regex, chung cho tất cả các hàm (đầu vào type parsedDataFormat.baseRawTag)
+// -> check hàm này
 /** [arena.ai] Tách một tag raw thành { key, value }.
  *
  * Dùng chung cho mọi hàm apply của tagProcess: mỗi hàm chỉ cần xét `key` thay vì
